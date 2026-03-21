@@ -1,0 +1,30 @@
+use crate::agent::AgentContext;
+use rig::tool::ToolDyn;
+use serde::Serialize;
+use std::sync::Arc;
+
+mod reload_self_tool;
+mod shell_tool;
+
+#[derive(Debug, thiserror::Error)]
+#[error("{0}")]
+pub struct ToolCallError(String);
+
+#[derive(Debug, Clone, Serialize)]
+pub struct ToolCallRsult {
+    pub success: bool,
+    pub output: String,
+    pub error: Option<String>,
+}
+
+#[derive(Clone)]
+pub struct FunctionTool;
+
+impl FunctionTool {
+    pub fn required_tools(ctx: Arc<AgentContext>) -> crate::Result<Vec<Box<dyn ToolDyn>>> {
+        Ok(vec![
+            Box::new(shell_tool::ShellTool::new(Arc::clone(&ctx))?),
+            Box::new(reload_self_tool::ReloadSelfTool::new(Arc::clone(&ctx))?),
+        ])
+    }
+}

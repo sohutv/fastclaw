@@ -6,12 +6,17 @@ edition = "2024"
 [dependencies]
 log = { version = "0.4" }
 env_logger = { version = "0.11" }
+tracing = { version = "0.1" }
+tracing-log = { version = "0.2" }
+tracing-appender = { version = "0.2" }
+tracing-subscriber = { version = "0.3", features = ["env-filter", "local-time"] }
 anyhow = { version = "1.0" }
+thiserror = { version = "2.0" }
 directories = { version = "6.0" }
 clap = { version = "4.6", features = ["derive"] }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = { version = "1.0" }
-toml = { version = "1.0.7+spec-1.1.0" }
+toml = { version = "1.0.7" }
 tokio = { version = "1.50", features = ["full"] }
 tokio-util = { version = "0.7" }
 tokio-stream = { version = "0.1" }
@@ -22,17 +27,19 @@ uuid = { version = "1.22", features = ["v4"] }
 base64 = { version = "0.22" }
 itertools = { version = "0.14" }
 derive_more = { version = "2.1", features = ["full"] }
+strum = { version = "0.28", features = ["derive"] }
 regex = { version = "1.12" }
 lazy_static = { version = "1.5" }
 rig-core = { version = "0.33" }
-
-
-
+rustyline = { version = "17.0", optional = true }
 
 [features]
-openai_compatible = []
+model_provider_openai_compatible = []
+channel_cli_channel = ["rustyline"]
+
 default = [
-    "openai_compatible"
+    "model_provider_openai_compatible",
+    "channel_cli_channel"
 ]
 
 

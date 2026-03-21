@@ -1,0 +1,222 @@
+use crate::agent::{AgentMessageSender, AgentSignal};
+use crate::channels::console_cmd::Console;
+use crate::channels::{Channel, ChannelContext};
+use crate::config::Config;
+use anyhow::anyhow;
+use rig::completion::Message;
+use rig::message::{AssistantContent, ReasoningContent};
+use rustyline::DefaultEditor;
+use rustyline::error::ReadlineError;
+use std::io::{Write, stdout};
+use std::sync::Arc;
+use std::thread::JoinHandle;
+use tokio::sync::RwLock;
+use tokio::sync::mpsc::Receiver;
+
+pub struct CliChannel {
+    ctx: Arc<RwLock<ChannelContext>>,
+    agent_signal_receiver: Receiver<AgentSignal>,
+    agent_message_sender: AgentMessageSender,
+}
+
+impl CliChannel {
+    pub fn new(
+        config: &'static Config,
+        agent_message_sender: AgentMessageSender,
+    ) -> crate::Result<Channel> {
+        let (sender, receiver) = tokio::sync::mpsc::channel(1);
+        Ok(Channel::Cli {
+            channel: CliChannel {
+                ctx: Arc::new(RwLock::new(ChannelContext {
+                    config: config.clone(),
+                })),
+                agent_signal_receiver: receiver,
+                agent_message_sender,
+            },
+            sender: sender.into(),
+        })
+    }
+}
+
+impl CliChannel {
+    pub async fn start(self) -> crate::Result<JoinHandle<()>> {
+        let Self {
+            ctx,
+            agent_signal_receiver: mut receiver,
+            agent_message_sender,
+        } = self;
+        let ctx = Arc::clone(&ctx);
+        let join_handle = std::thread::spawn(move || {
+            let rt = tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+                .expect("unexpected err");
+            let mut rl = DefaultEditor::new().expect("unexpected err");
+            let _ = rt.block_on(async move {
+                loop {
+                    let readline = rl.readline(">> ");
+                    match readline {
+                        Ok(line) => {
+                            let line = line.trim();
+                            if !line.is_empty() {
+                                if line.starts_with('/') {
+                                    Console::handle_console_cmd(Arc::clone(&ctx), &line).await;
+                                    continue;
+                                }
+                                let ctx = ctx.read().await;
+                                let message = Message::user(line);
+                                let _ = agent_message_sender.send(message).await;
+                                let _ = Self::poll_agent_signal(&ctx, &mut receiver).await;
+                            }
+                        }
+                        Err(ReadlineError::Interrupted) => {
+                            println!("CTRL-C");
+                            break;
+                        }
+                        Err(err) => {
+                            eprintln!("Error: {:?}", err);
+                        }
+                    }
+                }
+            });
+        });
+        Ok(join_handle)
+    }
+
+    async fn poll_agent_signal(
+        ctx: &ChannelContext,
+        receiver: &mut Receiver<AgentSignal>,
+    ) -> crate::Result<()> {
+        let mut state = AgentRespState::Init;
+        let mut interval = tokio::time::interval(std::time::Duration::from_millis(500));
+        loop {
+            tokio::select! {
+                message = receiver.recv() => {
+                    if let Some(signal) = message {
+                        match  Self::handle_agent_signal(ctx, &signal, state).await{
+                            Ok(AgentRespState::Final) | Err( _)=> {
+                                return Ok(());
+                            },
+                            Ok(next)=>{
+                                state = next;
+                            }
+                        }
+                    }
+                },
+                _ = interval.tick() => {
+                    match state{
+                        AgentRespState::Init|AgentRespState::Start => {
+                           let mut stdout = stdout();
+                            print!(".");
+                            stdout.flush().expect("unexpected error");
+                        }
+                        _=>{}
+                    }
+                },
+                _ = tokio::signal::ctrl_c() => {
+                    return Ok(());
+                }
+            }
+        }
+    }
+
+    async fn handle_agent_signal(
+        ctx: &ChannelContext,
+        signal: &AgentSignal,
+        curr_state: AgentRespState,
+    ) -> crate::Result<AgentRespState> {
+        match signal {
+            AgentSignal::Start => {
+                if let AgentRespState::Init = curr_state {
+                    Ok(AgentRespState::Start)
+                } else {
+                    Err(anyhow!("AgentRespState must be Init when starting"))
+                }
+            }
+            AgentSignal::ReasoningStream(reasoning) => {
+                match curr_state {
+                    AgentRespState::Start => {
+                        cli_line_clear();
+                        if ctx.config.show_reasoning {
+                            println!(
+                                r#"
+Reasoning >> ////////
+"#
+                            );
+                        }
+                    }
+                    _ => {}
+                }
+                for content in reasoning.content.iter() {
+                    if let ReasoningContent::Text { text, .. } = content {
+                        if !text.is_empty() {
+                            print!("{}", text);
+                        }
+                    }
+                }
+                Ok(AgentRespState::Reasoning)
+            }
+            AgentSignal::MessageStream(message) => {
+                match curr_state {
+                    AgentRespState::Start => {
+                        cli_line_clear();
+                    }
+                    AgentRespState::Reasoning => {
+                        if ctx.config.show_reasoning {
+                            println!(
+                                r#"
+//////// << Reasoning
+"#
+                            );
+                        }
+                    }
+                    _ => {}
+                }
+                match message {
+                    Message::Assistant { content, .. } => {
+                        for content in content.iter() {
+                            match content {
+                                AssistantContent::Text(text) => {
+                                    let text_str = text.to_string();
+                                    if !text_str.is_empty() {
+                                        print!("{}", text);
+                                    }
+                                }
+                                _ => {}
+                            }
+                        }
+                    }
+                    _ => {}
+                }
+                Ok(AgentRespState::Messaging)
+            }
+            AgentSignal::Final(usage) => {
+                println!(
+                    r#"
+<<Tokens:{}↑{}↓{}>>
+                    "#,
+                    usage.total_tokens, usage.input_tokens, usage.output_tokens
+                );
+                Ok(AgentRespState::Final)
+            }
+            AgentSignal::Error(error) => {
+                cli_line_clear();
+                eprintln!("{}", error);
+                Err(anyhow!("Agent error: {}", error))
+            }
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+enum AgentRespState {
+    Init,
+    Start,
+    Reasoning,
+    Messaging,
+    Final,
+}
+
+fn cli_line_clear() {
+    print!("\r\x1b[K");
+}

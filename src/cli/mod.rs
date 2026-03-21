@@ -1,5 +1,4 @@
 use clap::{Parser, Subcommand};
-use std::path::PathBuf;
 
 mod onboard;
 mod start;
@@ -9,6 +8,7 @@ pub struct Cli {
     pub command: Command,
 }
 
+#[allow(async_fn_in_trait)]
 pub trait CmdRunner {
     async fn run(&self) -> crate::Result<()>;
 }
@@ -32,9 +32,4 @@ impl CmdRunner for Command {
             Self::Start(start) => start.run().await,
         }
     }
-}
-
-fn default_config_path() -> PathBuf {
-    let user_dirs = directories::UserDirs::new().expect("user home not exist!!!");
-    user_dirs.home_dir().join(".fastclaw")
 }

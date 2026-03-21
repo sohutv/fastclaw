@@ -1,19 +1,27 @@
 use derive_more::{Deref, Display, From, FromStr};
-use serde::de::DeserializeOwned;
+use rig::client::CompletionClient;
 use serde::{Deserialize, Serialize};
-use std::fmt::{Debug, Display};
+use std::fmt::Debug;
 
-#[cfg(feature = "openai_compatible")]
+#[cfg(feature = "model_provider_openai_compatible")]
 pub mod openai_compatible;
 
-#[derive(Debug, Clone, Serialize, Deserialize, Eq, PartialEq)]
+pub trait ModelProvider<Client>
+where
+    Client: CompletionClient,
+{
+    fn completion_client(&self) -> crate::Result<Client>;
+
+    fn model_settings(&self, model: &ModelName) -> Option<&ModelSettings>;
+}
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "provider_type")]
-pub enum ModelProvider {
-    #[cfg(feature = "openai_compatible")]
+pub enum ModelProviders {
+    #[cfg(feature = "model_provider_openai_compatible")]
     OpenaiCompatible(openai_compatible::OpenaiCompatible),
 }
 
-impl Default for ModelProvider {
+impl Default for ModelProviders {
     fn default() -> Self {
         Self::OpenaiCompatible(Default::default())
     }
@@ -36,9 +44,37 @@ impl Default for ModelProvider {
     Display,
 )]
 pub struct ModelProviderName(String);
-#[derive(Debug, Clone, Serialize, Deserialize, From, FromStr, Deref, Eq, PartialEq, Default)]
-pub struct Model(String);
-#[derive(Debug, Clone, Serialize, Deserialize, From, Deref, PartialEq)]
+#[derive(
+    Debug,
+    Clone,
+    Serialize,
+    Deserialize,
+    From,
+    FromStr,
+    Deref,
+    Eq,
+    PartialEq,
+    Ord,
+    PartialOrd,
+    Default,
+)]
+pub struct ModelName(String);
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, Default)]
+#[serde(default)]
+pub struct ModelSettings {
+    pub temperature: Temperature,
+    pub vision: bool,
+    pub audio: bool,
+    pub video: bool,
+    pub document: bool,
+    pub websearch: bool,
+    pub reasoning: bool,
+    pub tool: bool,
+    pub reranker: bool,
+    pub embedding: bool,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, From, Deref, PartialEq)]
 pub struct Temperature(f64);
 
 impl Eq for Temperature {}

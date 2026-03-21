@@ -1,4 +1,4 @@
-# AGENTS.md — ZeroClaw Personal Assistant
+# AGENTS.md — Fastclaw Personal Assistant
 
 ## Every Session (required)
 

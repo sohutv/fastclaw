@@ -1,43 +1,83 @@
-use crate::agent::Agent;
 use crate::cli::CmdRunner;
 use crate::config::Config;
 use anyhow::anyhow;
 use clap::Args;
+use derive_more::FromStr;
+use log::info;
 use std::path::PathBuf;
-use std::sync::Arc;
 
 #[derive(Args)]
 pub struct Start {
     #[arg(long)]
-    config_path: Option<PathBuf>,
+    workdir: Option<PathBuf>,
+    #[arg(long)]
+    channel: Channel,
+}
+
+#[derive(Debug, Clone, FromStr)]
+pub enum Channel {
+    #[cfg(feature = "channel_cli_channel")]
+    /// start with cli
+    Cli,
 }
 
 impl CmdRunner for Start {
     async fn run(&self) -> crate::Result<()> {
-        let Self { config_path } = self;
-        let default_path = super::default_config_path();
-        let config_path = config_path.as_deref().unwrap_or_else(|| &default_path);
-        if !config_path.exists() {
-            return Err(anyhow!(
-                "Config file does not exist: {}",
-                config_path.display()
-            ));
+        let Self { workdir, channel } = self;
+        let workdir = workdir
+            .as_deref()
+            .map(|it| it.to_owned())
+            .unwrap_or_else(|| Config::default_workdir());
+        if !workdir.exists() {
+            return Err(anyhow!("workdir does not exist: {}", workdir.display()));
         }
-        let config_toml = tokio::fs::read_to_string(config_path.join("config.toml")).await?;
-        let config = Box::leak(Box::new(toml::from_str::<Config>(&config_toml)?));
-        let ctx = Arc::new(crate::agent::Context::new(config, config_path)?);
-        let mut main_agent = Agent::new(
-            "main",
-            Arc::clone(&ctx),
-            config.default_model_provider()?,
-            config.default_model().clone(),
-        )?;
-        let main_agent_channel_sender = main_agent.channel_sender();
-        let main_agent_handle = tokio::spawn(async move {
-            main_agent.run().await;
-        });
-        main_agent_channel_sender.send("hello".into()).await;
-        main_agent_handle.await?;
+        let config = {
+            let config_toml = tokio::fs::read_to_string(workdir.join("config.toml")).await?;
+            let config = Box::leak(Box::new(toml::from_str::<Config>(&config_toml)?));
+            config
+        };
+        let _ = config.init_logger()?;
+        let (message_sender, mut message_receiver) = tokio::sync::mpsc::channel(1024);
+        let (main_agent_channel_sender, main_agent_handle) = {
+            let main_agent = crate::agent::create_agent(
+                "main",
+                config,
+                &workdir,
+                config.default_model_provider()?,
+                config.default_model().clone(),
+                message_sender.into(),
+            )
+            .await?;
+            let sender = main_agent.msg_sender();
+            let handle = main_agent.run()?;
+            (sender, handle)
+        };
+
+        let (channel_message_sender, channel_handle) = match channel {
+            #[cfg(feature = "channel_cli_channel")]
+            Channel::Cli => {
+                info!("Starting CLI channel");
+                let cli_channel =
+                    crate::channels::Channel::cli_channel(config, main_agent_channel_sender.clone())?;
+                let sender = cli_channel.sender();
+                let handle = cli_channel.start().await?;
+                (sender, handle)
+            }
+        };
+        loop {
+            tokio::select! {
+                message = message_receiver.recv()=>{
+                    if let Some(message)= message{
+                        let _ = channel_message_sender.send(message).await;
+                    }
+                },
+                _= tokio::signal::ctrl_c() => {
+                    break;
+                }
+            }
+        }
+        let _ = main_agent_handle.await;
+        let _ = channel_handle.join();
         Ok(())
     }
 }

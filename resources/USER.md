@@ -1,6 +1,6 @@
 # USER.md — Who You're Helping
 
-*ZeroClaw reads this file every session to understand you.*
+*Fastclaw reads this file every session to understand you.*
 
 ## About You
 - **Name:** zhaowenhao
@@ -17,4 +17,4 @@
 - (Add your work context here — e.g. building a SaaS product)
 
 ---
-*Update this anytime. The more ZeroClaw knows, the better it helps.*
+*Update this anytime. The more Fastclaw knows, the better it helps.*

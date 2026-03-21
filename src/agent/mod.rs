@@ -1,14 +1,40 @@
+use crate::agent::llm_agent::LlmAgent;
+use crate::channels::ChannelMessageSender;
 use derive_more::{Deref, Display, From, FromStr};
-use rig::message::Message;
-use std::sync::Arc;
+use rig::completion::Usage;
+use rig::message::{Message, Reasoning};
+use std::path::{Path, PathBuf};
 use tokio::sync::mpsc::Sender;
+use tokio::task::JoinHandle;
 
-mod openai_agent;
+mod llm_agent;
 
-mod context;
-use crate::agent::openai_agent::OpenaiAgent;
-use crate::model_provider::{Model, ModelProvider};
-pub use context::Context;
+mod prompt;
+
+use crate::config::Config;
+use crate::model_provider::{ModelName, ModelProviders};
+
+#[allow(unused)]
+#[derive(Clone)]
+pub struct AgentContext {
+    pub config: &'static Config,
+    pub workspace: Workspace,
+    pub msg_sender: AgentMessageSender,
+    pub ctl_signal_sender: AgentCtlSignalSender,
+}
+
+#[derive(Debug, Clone)]
+pub struct Workspace {
+    pub path: PathBuf,
+}
+
+impl<P: AsRef<Path>> From<P> for Workspace {
+    fn from(value: P) -> Self {
+        Self {
+            path: value.as_ref().join("workspace"),
+        }
+    }
+}
 
 #[derive(Debug, Clone, From, FromStr, Deref, Eq, PartialEq, Ord, PartialOrd, Display)]
 pub struct AgentName(String);
@@ -19,37 +45,52 @@ impl From<&str> for AgentName {
     }
 }
 
-pub enum Agent {
-    OpenaiAgent {
-        delegate: OpenaiAgent,
-        channel_sender: Sender<Message>,
-    },
+pub trait Agent {
+    fn run(self: Box<Self>) -> crate::Result<JoinHandle<()>>;
+
+    fn msg_sender(&self) -> AgentMessageSender;
 }
 
-impl Agent {
-    pub fn new<N: Into<AgentName>>(
-        name: N,
-        ctx: Arc<Context>,
-        model_provider: ModelProvider,
-        model: Model,
-    ) -> crate::Result<Self> {
-        match model_provider {
-            ModelProvider::OpenaiCompatible(provider) => {
-                let agent = OpenaiAgent::new(name.into(), ctx, provider, model)?;
-                Ok(agent)
-            }
-        }
-    }
-
-    pub fn channel_sender(&self) -> Sender<Message> {
-        match self {
-            Agent::OpenaiAgent { channel_sender, .. } => channel_sender.clone(),
-        }
-    }
-
-    pub async fn run(&mut self) -> crate::Result<()> {
-        match self {
-            Agent::OpenaiAgent { delegate, .. } => delegate.run().await,
+pub async fn create_agent<N: Into<AgentName>, WorkDir: AsRef<Path>>(
+    name: N,
+    config: &'static Config,
+    workdir: WorkDir,
+    model_provider: ModelProviders,
+    model: ModelName,
+    channel_message_sender: ChannelMessageSender,
+) -> crate::Result<Box<dyn Agent>> {
+    match model_provider {
+        ModelProviders::OpenaiCompatible(provider) => {
+            let agent = LlmAgent::new(
+                name,
+                config,
+                workdir,
+                provider,
+                model,
+                channel_message_sender,
+            )
+            .await?;
+            Ok(Box::new(agent))
         }
     }
 }
+
+#[derive(Clone, Deref, From)]
+pub struct AgentMessageSender(Sender<Message>);
+
+#[derive(Clone)]
+pub enum AgentSignal {
+    Start,
+    ReasoningStream(Reasoning),
+    MessageStream(Message),
+    Final(Usage),
+    Error(String),
+}
+
+#[derive(Debug, Clone)]
+pub enum AgentCtlSignal {
+    Reload { id: uuid::Uuid, reason: String },
+}
+
+#[derive(Clone, From, Deref)]
+pub struct AgentCtlSignalSender(Sender<AgentCtlSignal>);

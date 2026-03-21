@@ -2,7 +2,6 @@ use crate::cli::CmdRunner;
 use crate::config::Config;
 use anyhow::anyhow;
 use clap::{Args, Subcommand};
-use derive_more::FromStr;
 use std::path::{Path, PathBuf};
 
 #[derive(Args)]
@@ -13,6 +12,7 @@ pub struct Onboard {
 
 impl CmdRunner for Onboard {
     async fn run(&self) -> crate::Result<()> {
+        env_logger::init();
         self.command.run().await
     }
 }
@@ -40,34 +40,33 @@ pub struct InitConfig {
 impl CmdRunner for InitConfig {
     async fn run(&self) -> crate::Result<()> {
         let Self { path, rewrite } = self;
-        let default_path = super::default_config_path();
-        let config_dir = path.as_deref().unwrap_or_else(|| &default_path);
-        if config_dir.exists() {
-            if config_dir.is_file() {
+        let workdir = path.as_deref().map(|it| it.to_owned()).unwrap_or_else(|| Config::default_workdir());
+        if workdir.exists() {
+            if workdir.is_file() {
                 return Err(anyhow!(
-                    "Unexpected file at path: {}, expect directory but got file",
-                    config_dir.display()
+                    "Unexpected workdir at path: {}, expect directory but got file",
+                    workdir.display()
                 ));
             }
             if *rewrite {
-                tokio::fs::remove_dir_all(config_dir).await?;
+                tokio::fs::remove_dir_all(&workdir).await?;
             } else {
                 return Err(anyhow!(
-                    "Config file already exists at {}",
-                    config_dir.display()
+                    "Workdir already exists at {}",
+                    workdir.display()
                 ));
             }
         }
-        if config_dir.exists() {
+        if workdir.exists() {
             return Err(anyhow!(
-                "Config directory already exists at {}",
-                config_dir.display()
+                "Workdir already exists at {}",
+                workdir.display()
             ));
         }
-        tokio::fs::create_dir_all(config_dir).await?;
-        init_config_file(config_dir).await?;
-        init_config_workspace(config_dir).await?;
-        log::info!("Fastclaw Config initialized at {}", config_dir.display());
+        tokio::fs::create_dir_all(&workdir).await?;
+        init_config_file(&workdir).await?;
+        init_config_workspace(&workdir).await?;
+        log::info!("Fastclaw Config initialized at {}", workdir.display());
         Ok(())
     }
 }
@@ -103,14 +102,46 @@ async fn init_config_workspace(config_dir: &Path) -> crate::Result<()> {
     tokio::fs::create_dir_all(&state).await?;
     tokio::fs::write(state.join("README.md"), "#State").await?;
 
-    tokio::fs::write(workspace.join("AGENTS.md"), include_str!("../../resources/AGENTS.md")).await?;
-    tokio::fs::write(workspace.join("BOOTSTRAP.md"), include_str!("../../resources/BOOTSTRAP.md")).await?;
-    tokio::fs::write(workspace.join("HEARTBEAT.md"), include_str!("../../resources/HEARTBEAT.md")).await?;
-    tokio::fs::write(workspace.join("IDENTITY.md"), include_str!("../../resources/IDENTITY.md")).await?;
-    tokio::fs::write(workspace.join("MEMORY.md"), include_str!("../../resources/MEMORY.md")).await?;
-    tokio::fs::write(workspace.join("SOUL.md"), include_str!("../../resources/SOUL.md")).await?;
-    tokio::fs::write(workspace.join("TOOLS.md"), include_str!("../../resources/TOOLS.md")).await?;
-    tokio::fs::write(workspace.join("USER.md"), include_str!("../../resources/USER.md")).await?;
+    tokio::fs::write(
+        workspace.join("AGENTS.md"),
+        include_str!("../../resources/AGENTS.md"),
+    )
+    .await?;
+    tokio::fs::write(
+        workspace.join("BOOTSTRAP.md"),
+        include_str!("../../resources/BOOTSTRAP.md"),
+    )
+    .await?;
+    tokio::fs::write(
+        workspace.join("HEARTBEAT.md"),
+        include_str!("../../resources/HEARTBEAT.md"),
+    )
+    .await?;
+    tokio::fs::write(
+        workspace.join("IDENTITY.md"),
+        include_str!("../../resources/IDENTITY.md"),
+    )
+    .await?;
+    tokio::fs::write(
+        workspace.join("MEMORY.md"),
+        include_str!("../../resources/MEMORY.md"),
+    )
+    .await?;
+    tokio::fs::write(
+        workspace.join("SOUL.md"),
+        include_str!("../../resources/SOUL.md"),
+    )
+    .await?;
+    tokio::fs::write(
+        workspace.join("TOOLS.md"),
+        include_str!("../../resources/TOOLS.md"),
+    )
+    .await?;
+    tokio::fs::write(
+        workspace.join("USER.md"),
+        include_str!("../../resources/USER.md"),
+    )
+    .await?;
 
     Ok(())
 }
