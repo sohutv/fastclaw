@@ -19,6 +19,9 @@ pub enum Channel {
     #[cfg(feature = "channel_cli_channel")]
     /// start with cli
     Cli,
+    #[cfg(feature = "channel_dingtalk_channel")]
+    /// start with dingtalk
+    Dingtalk,
 }
 
 impl CmdRunner for Start {
@@ -57,10 +60,23 @@ impl CmdRunner for Start {
             #[cfg(feature = "channel_cli_channel")]
             Channel::Cli => {
                 info!("Starting CLI channel");
-                let cli_channel =
-                    crate::channels::Channel::cli_channel(config, main_agent_channel_sender.clone())?;
+                let cli_channel = crate::channels::Channel::cli_channel(
+                    config,
+                    main_agent_channel_sender.clone(),
+                )?;
                 let sender = cli_channel.sender();
                 let handle = cli_channel.start().await?;
+                (sender, handle)
+            }
+            #[cfg(feature = "channel_dingtalk_channel")]
+            Channel::Dingtalk => {
+                info!("Starting Dingtalk channel");
+                let dingtalk_channel = crate::channels::Channel::dingtalk_channel(
+                    config,
+                    main_agent_channel_sender.clone(),
+                )?;
+                let sender = dingtalk_channel.sender();
+                let handle = dingtalk_channel.start().await?;
                 (sender, handle)
             }
         };

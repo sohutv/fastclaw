@@ -1,49 +1,108 @@
 use crate::agent::{AgentMessageSender, AgentSignal};
 use crate::channels::console_cmd::Console;
 use crate::channels::{ChannelContext, ChannelMessageSender};
-use crate::config::Config;
+use crate::config::{Config, DingTalkConfig};
 use anyhow::anyhow;
-use rig::completion::Message;
-use rig::message::{AssistantContent, ReasoningContent};
-use rustyline::DefaultEditor;
-use rustyline::error::ReadlineError;
-use std::io::{Write, stdout};
+use async_trait::async_trait;
+use dingtalk_stream::frames::{CallbackMessageData, CallbackMessagePayload, RichTextItem};
+use dingtalk_stream::{CallbackMessage, DingTalkStream, Error, ErrorCode, MessageTopic, Resp};
+use itertools::Itertools;
+use rig::completion::{AssistantContent, Message};
+use rig::message::ReasoningContent;
 use std::sync::Arc;
 use std::thread::JoinHandle;
 use tokio::sync::RwLock;
 use tokio::sync::mpsc::Receiver;
 
-pub struct CliChannel {
+pub struct DingtalkChannel {
     ctx: Arc<RwLock<ChannelContext>>,
     agent_signal_receiver: Receiver<AgentSignal>,
     agent_message_sender: AgentMessageSender,
+    dingtalk_config: DingTalkConfig,
 }
 
-impl CliChannel {
-    pub(super) fn new(
+impl DingtalkChannel {
+    pub fn new(
         config: &'static Config,
         agent_message_sender: AgentMessageSender,
     ) -> crate::Result<(Self, ChannelMessageSender)> {
         let (sender, receiver) = tokio::sync::mpsc::channel(1);
         Ok((
-            CliChannel {
+            Self {
                 ctx: Arc::new(RwLock::new(ChannelContext {
                     config: config.clone(),
                 })),
                 agent_signal_receiver: receiver,
                 agent_message_sender,
+                dingtalk_config: config
+                    .dingtalk_config
+                    .clone()
+                    .ok_or(anyhow!("dingtalk config not found"))?,
             },
             sender.into(),
         ))
     }
 }
 
-impl CliChannel {
+#[allow(unused)]
+struct DingTalkCallbackHandler {
+    ctx: Arc<RwLock<ChannelContext>>,
+    dingtalk_config: DingTalkConfig,
+    dingtalk_bot_topic: MessageTopic,
+    agent_message_sender: AgentMessageSender,
+}
+
+#[async_trait]
+impl dingtalk_stream::CallbackHandler for DingTalkCallbackHandler {
+    async fn process(&self, CallbackMessage { data, .. }: &CallbackMessage) -> Result<Resp, Error> {
+        let Some(CallbackMessageData {
+            msg_id: Some(_),
+            payload: Some(payload),
+            ..
+        }) = data
+        else {
+            return Err(Error {
+                code: ErrorCode::BadRequest,
+                msg: "unexpected data".to_string(),
+            });
+        };
+        let line = match payload {
+            CallbackMessagePayload::Text { text } => text.content.to_string(),
+            CallbackMessagePayload::Picture { .. } => "".to_string(),
+            CallbackMessagePayload::File { .. } => "".to_string(),
+            CallbackMessagePayload::RichText { content } => content
+                .content
+                .iter()
+                .map(|it| match it {
+                    RichTextItem::Picture { .. } => "".to_string(),
+                    RichTextItem::Text { text } => text.to_string(),
+                })
+                .join(""),
+        };
+        let line = line.trim();
+        if !line.is_empty() {
+            if line.starts_with('/') {
+                Console::handle_console_cmd(Arc::clone(&self.ctx), &line).await;
+            } else {
+                let message = Message::user(line);
+                let _ = self.agent_message_sender.send(message).await;
+            }
+        }
+        Ok(Resp::Text(format!("echo {}", line)))
+    }
+
+    fn topic(&self) -> &MessageTopic {
+        &self.dingtalk_bot_topic
+    }
+}
+
+impl DingtalkChannel {
     pub async fn start(self) -> crate::Result<JoinHandle<()>> {
         let Self {
             ctx,
-            agent_signal_receiver: mut receiver,
+            agent_signal_receiver: receiver,
             agent_message_sender,
+            dingtalk_config,
         } = self;
         let ctx = Arc::clone(&ctx);
         let join_handle = std::thread::spawn(move || {
@@ -51,40 +110,38 @@ impl CliChannel {
                 .enable_all()
                 .build()
                 .expect("unexpected err");
-            let mut rl = DefaultEditor::new().expect("unexpected err");
-            let _ = rt.block_on(async move {
-                loop {
-                    let readline = rl.readline(">> ");
-                    match readline {
-                        Ok(line) => {
-                            let line = line.trim();
-                            if !line.is_empty() {
-                                if line.starts_with('/') {
-                                    Console::handle_console_cmd(Arc::clone(&ctx), &line).await;
-                                    continue;
-                                }
-                                let ctx = ctx.read().await;
-                                let message = Message::user(line);
-                                let _ = agent_message_sender.send(message).await;
-                                let _ = Self::poll_agent_signal(&ctx, &mut receiver).await;
-                            }
-                        }
-                        Err(ReadlineError::Interrupted) => {
-                            println!("CTRL-C");
-                            break;
-                        }
-                        Err(err) => {
-                            eprintln!("Error: {:?}", err);
-                        }
-                    }
-                }
+            let ctx0 = Arc::clone(&ctx);
+            let dingtalk_stream_handle = rt.spawn(async move {
+                let cb_handler = DingTalkCallbackHandler {
+                    ctx: ctx0,
+                    dingtalk_config: dingtalk_config.clone(),
+                    dingtalk_bot_topic: MessageTopic::Callback(
+                        dingtalk_stream::TOPIC_ROBOT.to_string(),
+                    ),
+                    agent_message_sender,
+                };
+                let mut dingtalk_stream = DingTalkStream::new(dingtalk_config.credential)
+                    .register_callback_handler(cb_handler);
+                dingtalk_stream.start_forever().await;
+            });
+            let ctx1 = Arc::clone(&ctx);
+            let agent_handle = rt.spawn(async move {
+                let ctx = Arc::clone(&ctx1);
+                let mut receiver = receiver;
+                let _ = DingtalkChannel::poll_agent_signal(&ctx, &mut receiver).await;
+            });
+            rt.block_on(async {
+                let _ = dingtalk_stream_handle.await;
+                let _ = agent_handle.await;
             });
         });
         Ok(join_handle)
     }
+}
 
+impl DingtalkChannel {
     async fn poll_agent_signal(
-        ctx: &ChannelContext,
+        ctx: &Arc<RwLock<ChannelContext>>,
         receiver: &mut Receiver<AgentSignal>,
     ) -> crate::Result<()> {
         let mut state = AgentRespState::Init;
@@ -93,9 +150,10 @@ impl CliChannel {
             tokio::select! {
                 message = receiver.recv() => {
                     if let Some(signal) = message {
-                        match  Self::handle_agent_signal(ctx, &signal, state).await{
+                        let ctx = ctx.read().await;
+                        match  Self::handle_agent_signal(&*ctx, &signal, state).await{
                             Ok(AgentRespState::Final) | Err( _)=> {
-                                return Ok(());
+                                // return Ok(());
                             },
                             Ok(next)=>{
                                 state = next;
@@ -106,9 +164,7 @@ impl CliChannel {
                 _ = interval.tick() => {
                     match state{
                         AgentRespState::Init|AgentRespState::Start => {
-                           let mut stdout = stdout();
-                            print!(".");
-                            stdout.flush().expect("unexpected error");
+                           //todo!()
                         }
                         _=>{}
                     }
@@ -136,13 +192,8 @@ impl CliChannel {
             AgentSignal::ReasoningStream(reasoning) => {
                 match curr_state {
                     AgentRespState::Start => {
-                        cli_line_clear();
                         if ctx.config.show_reasoning {
-                            println!(
-                                r#"
-Reasoning >> ////////
-"#
-                            );
+                            //todo!("Reasoning start")
                         }
                     }
                     _ => {}
@@ -159,15 +210,11 @@ Reasoning >> ////////
             AgentSignal::MessageStream(message) => {
                 match curr_state {
                     AgentRespState::Start => {
-                        cli_line_clear();
+                        //todo!()
                     }
                     AgentRespState::Reasoning => {
                         if ctx.config.show_reasoning {
-                            println!(
-                                r#"
-//////// << Reasoning
-"#
-                            );
+                            //todo!("Reasoning end")
                         }
                     }
                     _ => {}
@@ -200,7 +247,6 @@ Reasoning >> ////////
                 Ok(AgentRespState::Final)
             }
             AgentSignal::Error(error) => {
-                cli_line_clear();
                 eprintln!("{}", error);
                 Err(anyhow!("Agent error: {}", error))
             }
@@ -215,8 +261,4 @@ enum AgentRespState {
     Reasoning,
     Messaging,
     Final,
-}
-
-fn cli_line_clear() {
-    print!("\r\x1b[K");
 }

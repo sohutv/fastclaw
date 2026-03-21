@@ -1,5 +1,5 @@
 use crate::config::logger::LogConfig;
-use crate::model_provider::{ModelName, ModelProviders, ModelProviderName};
+use crate::model_provider::{ModelName, ModelProviderName, ModelProviders};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
@@ -13,4 +13,12 @@ pub struct Config {
     pub show_reasoning: bool,
     model_providers: BTreeMap<ModelProviderName, ModelProviders>,
     log_config: LogConfig,
+    #[cfg(feature = "channel_dingtalk_channel")]
+    pub dingtalk_config: Option<DingTalkConfig>,
+}
+
+#[cfg(feature = "channel_dingtalk_channel")]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DingTalkConfig {
+    pub credential: dingtalk_stream::Credential,
 }

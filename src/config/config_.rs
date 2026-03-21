@@ -1,7 +1,7 @@
 use crate::btree_map;
 use crate::config::Config;
 use crate::config::logger::LogConfig;
-use crate::model_provider::{ModelName, ModelProviders, ModelProviderName};
+use crate::model_provider::{ModelName, ModelProviderName, ModelProviders};
 use anyhow::anyhow;
 use std::path::PathBuf;
 use std::str::FromStr;
@@ -39,6 +39,7 @@ impl Default for Config {
                 ModelProviderName::from_str("custom_model_provider_name").expect("unexpected err") => ModelProviders::default()
             ),
             log_config: LogConfig::default(),
+            dingtalk_config: None,
         }
     }
 }
