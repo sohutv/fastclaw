@@ -101,6 +101,8 @@ impl CliChannel {
                                 state = next;
                             }
                         }
+                    } else {
+                        return Ok(());
                     }
                 },
                 _ = interval.tick() => {

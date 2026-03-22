@@ -85,6 +85,8 @@ impl CmdRunner for Start {
                 message = message_receiver.recv()=>{
                     if let Some(message)= message{
                         let _ = channel_message_sender.send(message).await;
+                    } else {
+                        break;
                     }
                 },
                 _= tokio::signal::ctrl_c() => {

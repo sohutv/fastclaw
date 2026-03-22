@@ -4,7 +4,11 @@ use crate::channels::{ChannelContext, ChannelMessageSender};
 use crate::config::{Config, DingTalkConfig};
 use anyhow::anyhow;
 use async_trait::async_trait;
-use dingtalk_stream::frames::{CallbackMessageData, CallbackMessagePayload, RichTextItem};
+use dingtalk_stream::client::DingtalkMessageSender;
+use dingtalk_stream::frames::{
+    CallbackMessageData, CallbackMessagePayload, CallbackWebhookMessage, RichTextItem,
+    RobotBatchMessage,
+};
 use dingtalk_stream::{CallbackMessage, DingTalkStream, Error, ErrorCode, MessageTopic, Resp};
 use itertools::Itertools;
 use rig::completion::{AssistantContent, Message};
@@ -12,7 +16,7 @@ use rig::message::ReasoningContent;
 use std::sync::Arc;
 use std::thread::JoinHandle;
 use tokio::sync::RwLock;
-use tokio::sync::mpsc::Receiver;
+use tokio::sync::mpsc::{Receiver, Sender};
 
 pub struct DingtalkChannel {
     ctx: Arc<RwLock<ChannelContext>>,
@@ -54,9 +58,13 @@ struct DingTalkCallbackHandler {
 
 #[async_trait]
 impl dingtalk_stream::CallbackHandler for DingTalkCallbackHandler {
-    async fn process(&self, CallbackMessage { data, .. }: &CallbackMessage) -> Result<Resp, Error> {
+    async fn process(
+        &self,
+        CallbackMessage { data, .. }: &CallbackMessage,
+        _cb_msg_sender: Option<Sender<CallbackWebhookMessage>>,
+    ) -> Result<Resp, Error> {
         let Some(CallbackMessageData {
-            msg_id: Some(_),
+            msg_id: _,
             payload: Some(payload),
             ..
         }) = data
@@ -104,32 +112,52 @@ impl DingtalkChannel {
             agent_message_sender,
             dingtalk_config,
         } = self;
-        let ctx = Arc::clone(&ctx);
+        let cb_handler = {
+            let ctx = Arc::clone(&ctx);
+            DingTalkCallbackHandler {
+                ctx,
+                dingtalk_config: dingtalk_config.clone(),
+                dingtalk_bot_topic: MessageTopic::Callback(
+                    dingtalk_stream::TOPIC_ROBOT.to_string(),
+                ),
+                agent_message_sender,
+            }
+        };
+        let (mut dingtalk_stream, dingtalk_msg_sender) =
+            DingTalkStream::new(dingtalk_config.credential)
+                .register_callback_handler(cb_handler)
+                .create_message_sender()
+                .await;
         let join_handle = std::thread::spawn(move || {
             let rt = tokio::runtime::Builder::new_current_thread()
                 .enable_all()
                 .build()
                 .expect("unexpected err");
-            let ctx0 = Arc::clone(&ctx);
-            let dingtalk_stream_handle = rt.spawn(async move {
-                let cb_handler = DingTalkCallbackHandler {
-                    ctx: ctx0,
-                    dingtalk_config: dingtalk_config.clone(),
-                    dingtalk_bot_topic: MessageTopic::Callback(
-                        dingtalk_stream::TOPIC_ROBOT.to_string(),
-                    ),
-                    agent_message_sender,
-                };
-                let mut dingtalk_stream = DingTalkStream::new(dingtalk_config.credential)
-                    .register_callback_handler(cb_handler);
-                dingtalk_stream.start_forever().await;
-            });
-            let ctx1 = Arc::clone(&ctx);
-            let agent_handle = rt.spawn(async move {
-                let ctx = Arc::clone(&ctx1);
-                let mut receiver = receiver;
-                let _ = DingtalkChannel::poll_agent_signal(&ctx, &mut receiver).await;
-            });
+            let dingtalk_stream_handle = {
+                rt.spawn(async move {
+                    let stop_tx = Arc::clone(&dingtalk_stream.stop_tx);
+                    tokio::spawn(async move {
+                        dingtalk_stream.start_forever().await;
+                    });
+                    let _ = tokio::signal::ctrl_c().await;
+                    let stop_tx = stop_tx.lock().await;
+                    if let Some(stop_tx) = stop_tx.as_ref() {
+                        let _ = stop_tx.send(()).await;
+                    }
+                })
+            };
+            let agent_handle = {
+                let ctx = Arc::clone(&ctx);
+                rt.spawn(async move {
+                    let mut receiver = receiver;
+                    let _ = DingtalkChannel::poll_agent_signal(
+                        &ctx,
+                        &mut receiver,
+                        &dingtalk_msg_sender,
+                    )
+                    .await;
+                })
+            };
             rt.block_on(async {
                 let _ = dingtalk_stream_handle.await;
                 let _ = agent_handle.await;
@@ -143,6 +171,7 @@ impl DingtalkChannel {
     async fn poll_agent_signal(
         ctx: &Arc<RwLock<ChannelContext>>,
         receiver: &mut Receiver<AgentSignal>,
+        dingtalk_msg_sender: &DingtalkMessageSender,
     ) -> crate::Result<()> {
         let mut state = AgentRespState::Init;
         let mut interval = tokio::time::interval(std::time::Duration::from_millis(500));
@@ -151,7 +180,7 @@ impl DingtalkChannel {
                 message = receiver.recv() => {
                     if let Some(signal) = message {
                         let ctx = ctx.read().await;
-                        match  Self::handle_agent_signal(&*ctx, &signal, state).await{
+                        match  Self::handle_agent_signal(&*ctx, &signal, state, &dingtalk_msg_sender).await{
                             Ok(AgentRespState::Final) | Err( _)=> {
                                 // return Ok(());
                             },
@@ -159,6 +188,8 @@ impl DingtalkChannel {
                                 state = next;
                             }
                         }
+                    } else {
+                        return Ok(());
                     }
                 },
                 _ = interval.tick() => {
@@ -180,6 +211,7 @@ impl DingtalkChannel {
         ctx: &ChannelContext,
         signal: &AgentSignal,
         curr_state: AgentRespState,
+        dingtalk_msg_sender: &DingtalkMessageSender,
     ) -> crate::Result<AgentRespState> {
         match signal {
             AgentSignal::Start => {
@@ -201,7 +233,13 @@ impl DingtalkChannel {
                 for content in reasoning.content.iter() {
                     if let ReasoningContent::Text { text, .. } = content {
                         if !text.is_empty() {
-                            print!("{}", text);
+                            let _ = dingtalk_msg_sender
+                                .send(RobotBatchMessage {
+                                    user_ids: vec!["032615015535634423".into()],
+                                    content: text.into(),
+                                    send_result_cb: None,
+                                })
+                                .await;
                         }
                     }
                 }

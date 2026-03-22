@@ -30,6 +30,7 @@ derive_more = { version = "2.1", features = ["full"] }
 strum = { version = "0.28", features = ["derive"] }
 regex = { version = "1.12" }
 lazy_static = { version = "1.5" }
+chrono = { version = "0.4" }
 rig-core = { version = "0.33" }
 async-trait = { version = "0.1" }
 rustyline = { version = "17.0", optional = true }

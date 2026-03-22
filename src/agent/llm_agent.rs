@@ -117,8 +117,12 @@ where
             loop {
                 tokio::select! {
                     message = agent.msg_receiver.recv() => {
-                        if let Some(message) = message.and_then(|it|agent.user_message_filter(it)) {
-                            agent.handle_message(message).await;
+                        if let Some(message) = message {
+                            if let Some(message) = agent.user_message_filter(message) {
+                                   agent.handle_message(message).await;
+                            }
+                        } else {
+                            break;
                         }
                     },
                     ctl_signal = agent.ctl_signal_receiver.recv() => {
