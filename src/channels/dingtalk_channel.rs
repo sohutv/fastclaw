@@ -241,7 +241,7 @@ impl DingtalkChannel {
                     .send(RobotBatchMessage {
                         user_ids: vec![USER_ID.into()],
                         content: UpMessageContentMarkdown::from((
-                            format!("工具调用: {name}"),
+                            format!("思考中...(工具调用: {name})"),
                             format!(
                                 r#"
 ### 工具调用: {name}
@@ -288,7 +288,7 @@ impl DingtalkChannel {
                                 .send(RobotBatchMessage {
                                     user_ids: vec![USER_ID.into()],
                                     content: UpMessageContentMarkdown::from((
-                                        "正在思考...",
+                                        "思考完成...",
                                         format!(
                                             r#"
 ### 正在思考...
