@@ -65,7 +65,7 @@ impl dingtalk_stream::CallbackHandler for DingTalkCallbackHandler {
     async fn process(
         &self,
         CallbackMessage { data, .. }: &CallbackMessage,
-        _cb_msg_sender: Option<Sender<CallbackWebhookMessage>>,
+        cb_msg_sender: Option<Sender<CallbackWebhookMessage>>,
     ) -> Result<Resp, Error> {
         let Some(CallbackMessageData {
             msg_id: _,
@@ -80,23 +80,40 @@ impl dingtalk_stream::CallbackHandler for DingTalkCallbackHandler {
                 msg: "unexpected data".to_string(),
             });
         };
-
+        let Some(dingtalk_user_id) = &sender.sender_staff_id else {
+            return Err(Error {
+                code: ErrorCode::BadRequest,
+                msg: "sender_staff_id is required".to_string(),
+            });
+        };
+        let DingTalkConfig {
+            master_user_id,
+            allow_user_ids,
+            ..
+        } = &self.dingtalk_config;
+        let is_master = master_user_id.eq(dingtalk_user_id.deref());
+        if let (0, false, Some(cb_msg_sender)) = (
+            allow_user_ids
+                .iter()
+                .filter(|&it| it.eq(dingtalk_user_id.deref()))
+                .count(),
+            is_master,
+            cb_msg_sender,
+        ) {
+            let _ = cb_msg_sender
+                .send(CallbackWebhookMessage {
+                    content: UpMessageContent::from("forbidden, not allowed"),
+                    at: dingtalk_user_id.into(),
+                    send_result_cb: None,
+                })
+                .await;
+        }
         let session_id = {
             let mut ctx = self.ctx.write().await;
             let session = match conversation {
-                CallbackMessageConversation::Private { .. } => {
-                    let Some(session_id) = sender
-                        .sender_staff_id
-                        .as_deref()
-                        .map(|it| SessionId::from(it.to_string()))
-                    else {
-                        return Err(Error {
-                            code: ErrorCode::BadRequest,
-                            msg: "sender_staff_id is required".to_string(),
-                        });
-                    };
-                    Session::Private { session_id }
-                }
+                CallbackMessageConversation::Private { .. } => Session::Private {
+                    session_id: SessionId::from(dingtalk_user_id.deref().to_string()),
+                },
                 CallbackMessageConversation::Group { id, .. } => Session::Group {
                     session_id: SessionId::from(id.deref().to_string()),
                 },
@@ -123,6 +140,16 @@ impl dingtalk_stream::CallbackHandler for DingTalkCallbackHandler {
             if line.starts_with('/') {
                 Console::handle_console_cmd(Arc::clone(&self.ctx), &line).await;
             } else {
+                let line = if is_master {
+                    line.to_string()
+                } else {
+                    format!(
+                        r#"
+{line}
+**注意**: 当前与你说话的不是你的主人, 说话时注意安全
+"#
+                    )
+                };
                 let _ = self
                     .agent_message_sender
                     .send(AgentMessage::Private {

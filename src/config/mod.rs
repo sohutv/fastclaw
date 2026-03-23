@@ -21,4 +21,6 @@ pub struct Config {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DingTalkConfig {
     pub credential: dingtalk_stream::Credential,
+    pub master_user_id: String,
+    pub allow_user_ids: Vec<String>,
 }

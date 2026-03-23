@@ -3,6 +3,7 @@ use crate::channels::cli_channel::CliChannel;
 use crate::channels::dingtalk_channel::DingtalkChannel;
 use crate::config::Config;
 use derive_more::{Deref, From, FromStr};
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::ops::Deref;
 use std::thread::JoinHandle;
@@ -101,7 +102,7 @@ pub enum Session {
     Group { session_id: SessionId },
 }
 
-#[derive(Debug, Clone, From, FromStr, Deref, Eq, PartialEq, Hash)]
+#[derive(Debug, Clone, From, FromStr, Deref, Eq, PartialEq, Hash, Serialize, Deserialize)]
 pub struct SessionId(String);
 
 impl Deref for Session {
