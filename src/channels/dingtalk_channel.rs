@@ -7,12 +7,12 @@ use async_trait::async_trait;
 use dingtalk_stream::client::DingtalkMessageSender;
 use dingtalk_stream::frames::{
     CallbackMessageData, CallbackMessagePayload, CallbackWebhookMessage, RichTextItem,
-    RobotBatchMessage,
+    RobotBatchMessage, UpMessageContentMarkdown,
 };
 use dingtalk_stream::{CallbackMessage, DingTalkStream, Error, ErrorCode, MessageTopic, Resp};
 use itertools::Itertools;
 use rig::completion::{AssistantContent, Message};
-use rig::message::ReasoningContent;
+use rig::message::{ReasoningContent, ToolCall, ToolFunction};
 use std::sync::Arc;
 use std::thread::JoinHandle;
 use tokio::sync::RwLock;
@@ -173,16 +173,18 @@ impl DingtalkChannel {
         receiver: &mut Receiver<AgentSignal>,
         dingtalk_msg_sender: &DingtalkMessageSender,
     ) -> crate::Result<()> {
-        let mut state = AgentRespState::Init;
+        let mut state = AgentRespState::Wait;
         let mut interval = tokio::time::interval(std::time::Duration::from_millis(500));
+        let mut buff = Vec::<String>::new();
         loop {
             tokio::select! {
                 message = receiver.recv() => {
                     if let Some(signal) = message {
                         let ctx = ctx.read().await;
-                        match  Self::handle_agent_signal(&*ctx, &signal, state, &dingtalk_msg_sender).await{
+                        match  Self::handle_agent_signal(&*ctx, &signal, state, &mut buff, &dingtalk_msg_sender).await{
                             Ok(AgentRespState::Final) | Err( _)=> {
-                                // return Ok(());
+                                state = AgentRespState::Wait;
+                                buff.clear();
                             },
                             Ok(next)=>{
                                 state = next;
@@ -194,7 +196,7 @@ impl DingtalkChannel {
                 },
                 _ = interval.tick() => {
                     match state{
-                        AgentRespState::Init|AgentRespState::Start => {
+                        AgentRespState::Wait|AgentRespState::Start => {
                            //todo!()
                         }
                         _=>{}
@@ -211,35 +213,62 @@ impl DingtalkChannel {
         ctx: &ChannelContext,
         signal: &AgentSignal,
         curr_state: AgentRespState,
+        buff: &mut Vec<String>,
         dingtalk_msg_sender: &DingtalkMessageSender,
     ) -> crate::Result<AgentRespState> {
         match signal {
             AgentSignal::Start => {
-                if let AgentRespState::Init = curr_state {
+                if let AgentRespState::Wait = curr_state {
+                    buff.clear();
+                    let _ = dingtalk_msg_sender
+                        .send(RobotBatchMessage {
+                            user_ids: vec![USER_ID.into()],
+                            content: UpMessageContentMarkdown::from(("思考中...", "正在思考..."))
+                                .into(),
+                            send_result_cb: None,
+                        })
+                        .await;
                     Ok(AgentRespState::Start)
                 } else {
                     Err(anyhow!("AgentRespState must be Init when starting"))
                 }
             }
+            AgentSignal::ToolCall(ToolCall {
+                function: ToolFunction { name, arguments },
+                ..
+            }) => {
+                let _ = dingtalk_msg_sender
+                    .send(RobotBatchMessage {
+                        user_ids: vec![USER_ID.into()],
+                        content: UpMessageContentMarkdown::from((
+                            format!("工具调用: {name}"),
+                            format!(
+                                r#"
+### 工具调用: {name}
+```
+{}
+```json
+                                            "#,
+                                serde_json::to_string_pretty(arguments).unwrap_or_else(
+                                    |err| format!("Error serializing arguments: {}", err)
+                                )
+                            ),
+                        ))
+                        .into(),
+                        send_result_cb: None,
+                    })
+                    .await;
+                Ok(curr_state)
+            }
             AgentSignal::ReasoningStream(reasoning) => {
                 match curr_state {
-                    AgentRespState::Start => {
-                        if ctx.config.show_reasoning {
-                            //todo!("Reasoning start")
-                        }
-                    }
+                    AgentRespState::Start => if ctx.config.show_reasoning {},
                     _ => {}
                 }
                 for content in reasoning.content.iter() {
                     if let ReasoningContent::Text { text, .. } = content {
                         if !text.is_empty() {
-                            let _ = dingtalk_msg_sender
-                                .send(RobotBatchMessage {
-                                    user_ids: vec!["032615015535634423".into()],
-                                    content: text.into(),
-                                    send_result_cb: None,
-                                })
-                                .await;
+                            buff.push(text.clone());
                         }
                     }
                 }
@@ -247,12 +276,30 @@ impl DingtalkChannel {
             }
             AgentSignal::MessageStream(message) => {
                 match curr_state {
-                    AgentRespState::Start => {
-                        //todo!()
-                    }
+                    AgentRespState::Start => {}
                     AgentRespState::Reasoning => {
                         if ctx.config.show_reasoning {
-                            //todo!("Reasoning end")
+                            let content = {
+                                let string = buff.join("");
+                                buff.clear();
+                                string
+                            };
+                            let _ = dingtalk_msg_sender
+                                .send(RobotBatchMessage {
+                                    user_ids: vec![USER_ID.into()],
+                                    content: UpMessageContentMarkdown::from((
+                                        "正在思考...",
+                                        format!(
+                                            r#"
+### 正在思考...
+{content}
+                                    "#
+                                        ),
+                                    ))
+                                    .into(),
+                                    send_result_cb: None,
+                                })
+                                .await;
                         }
                     }
                     _ => {}
@@ -264,7 +311,7 @@ impl DingtalkChannel {
                                 AssistantContent::Text(text) => {
                                     let text_str = text.to_string();
                                     if !text_str.is_empty() {
-                                        print!("{}", text);
+                                        buff.push(text_str);
                                     }
                                 }
                                 _ => {}
@@ -276,12 +323,31 @@ impl DingtalkChannel {
                 Ok(AgentRespState::Messaging)
             }
             AgentSignal::Final(usage) => {
-                println!(
-                    r#"
-<<Tokens:{}↑{}↓{}>>
+                let content = {
+                    let content = UpMessageContentMarkdown::from((
+                        "回复中...",
+                        format!(
+                            r#"
+{}
+
+*<<Tokens:{}↑{}↓{}>>*
                     "#,
-                    usage.total_tokens, usage.input_tokens, usage.output_tokens
-                );
+                            buff.join(""),
+                            usage.total_tokens,
+                            usage.input_tokens,
+                            usage.output_tokens
+                        ),
+                    ));
+                    buff.clear();
+                    content
+                };
+                let _ = dingtalk_msg_sender
+                    .send(RobotBatchMessage {
+                        user_ids: vec![USER_ID.into()],
+                        content: content.into(),
+                        send_result_cb: None,
+                    })
+                    .await;
                 Ok(AgentRespState::Final)
             }
             AgentSignal::Error(error) => {
@@ -292,9 +358,11 @@ impl DingtalkChannel {
     }
 }
 
+const USER_ID: &str = "032615015535634423";
+
 #[derive(Debug, Clone, Copy)]
 enum AgentRespState {
-    Init,
+    Wait,
     Start,
     Reasoning,
     Messaging,

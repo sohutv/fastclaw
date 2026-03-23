@@ -2,7 +2,7 @@ use crate::agent::llm_agent::LlmAgent;
 use crate::channels::ChannelMessageSender;
 use derive_more::{Deref, Display, From, FromStr};
 use rig::completion::Usage;
-use rig::message::{Message, Reasoning};
+use rig::message::{Message, Reasoning, ToolCall};
 use std::path::{Path, PathBuf};
 use tokio::sync::mpsc::Sender;
 use tokio::task::JoinHandle;
@@ -81,6 +81,7 @@ pub struct AgentMessageSender(Sender<Message>);
 #[derive(Clone)]
 pub enum AgentSignal {
     Start,
+    ToolCall(ToolCall),
     ReasoningStream(Reasoning),
     MessageStream(Message),
     Final(Usage),

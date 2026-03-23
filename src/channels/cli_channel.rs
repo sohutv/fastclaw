@@ -4,7 +4,7 @@ use crate::channels::{ChannelContext, ChannelMessageSender};
 use crate::config::Config;
 use anyhow::anyhow;
 use rig::completion::Message;
-use rig::message::{AssistantContent, ReasoningContent};
+use rig::message::{AssistantContent, ReasoningContent, ToolCall, ToolFunction};
 use rustyline::DefaultEditor;
 use rustyline::error::ReadlineError;
 use std::io::{Write, stdout};
@@ -134,6 +134,20 @@ impl CliChannel {
                 } else {
                     Err(anyhow!("AgentRespState must be Init when starting"))
                 }
+            }
+            AgentSignal::ToolCall(ToolCall {
+                function: ToolFunction { name, arguments },
+                ..
+            }) => {
+                println!(
+                    r#"
+//////// ToolCall: {name}
+{}
+"#,
+                    serde_json::to_string_pretty(arguments)
+                        .unwrap_or_else(|err| format!("Error serializing arguments: {}", err))
+                );
+                Ok(curr_state)
             }
             AgentSignal::ReasoningStream(reasoning) => {
                 match curr_state {

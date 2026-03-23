@@ -165,6 +165,9 @@ where
                     StreamedAssistantContent::Text(text) => {
                         Some(AgentSignal::MessageStream(Message::assistant(text.text())))
                     }
+                    StreamedAssistantContent::ToolCall {tool_call,..} => {
+                        Some(AgentSignal::ToolCall(tool_call))
+                    }
                     _ => None,
                 },
                 Ok(MultiTurnStreamItem::StreamUserItem(_)) => None,
