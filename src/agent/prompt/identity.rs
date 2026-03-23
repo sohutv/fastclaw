@@ -14,6 +14,7 @@ const IDENTITY_MD_FILES: &[&str] = &[
     "HEARTBEAT.md",
     "BOOTSTRAP.md",
     "MEMORY.md",
+    "cron/README.md",
 ];
 impl IdentityPrompt {
     pub async fn build(

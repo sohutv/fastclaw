@@ -1,5 +1,6 @@
 use crate::cli::CmdRunner;
 use crate::config::Config;
+use crate::heartbeat::Heartbeat;
 use anyhow::anyhow;
 use clap::Args;
 use derive_more::FromStr;
@@ -40,22 +41,42 @@ impl CmdRunner for Start {
             config
         };
         let _ = config.init_logger()?;
-        let (message_sender, mut message_receiver) = tokio::sync::mpsc::channel(1024);
-        let (main_agent_channel_sender, main_agent_handle) = {
-            let main_agent = crate::agent::create_agent(
+        let (main_agent_channel_sender, mut main_agent_channel_message_receiver, main_agent_handle) = {
+            let (agent, channel_message_receiver) = crate::agent::create_agent(
                 "main",
                 config,
                 &workdir,
                 config.default_model_provider()?,
                 config.default_model().clone(),
-                message_sender.into(),
             )
             .await?;
-            let sender = main_agent.msg_sender();
-            let handle = main_agent.run()?;
-            (sender, handle)
+            let sender = agent.msg_sender();
+            let handle = agent.run()?;
+            (sender, channel_message_receiver, handle)
+        };
+        let (
+            heartbeat_agent_channel_sender,
+            mut heartbeat_agent_channel_message_receiver,
+            heartbeat_agent_handle,
+        ) = {
+            let (agent, channel_message_receiver) = crate::agent::create_agent(
+                "heartbeat",
+                config,
+                &workdir,
+                config.default_model_provider()?,
+                config.default_model().clone(),
+            )
+            .await?;
+            let sender = agent.msg_sender();
+            let handle = agent.run()?;
+            (sender, channel_message_receiver, handle)
         };
 
+        let heartbeat_handle = {
+            let mut heartbeat = Heartbeat::new(config)?;
+            let handle = heartbeat.start(heartbeat_agent_channel_sender).await?;
+            handle
+        };
         let (channel_message_sender, channel_handle) = match channel {
             #[cfg(feature = "channel_cli_channel")]
             Channel::Cli => {
@@ -82,19 +103,28 @@ impl CmdRunner for Start {
         };
         loop {
             tokio::select! {
-                message = message_receiver.recv()=>{
-                    if let Some(message)= message{
+                message = main_agent_channel_message_receiver.recv()=>{
+                    if let Some(message) = message{
                         let _ = channel_message_sender.send(message).await;
                     } else {
                         break;
                     }
                 },
+                message = heartbeat_agent_channel_message_receiver.recv()=> {
+                    if let Some(message) = message{
+                        let _ = channel_message_sender.send(message).await;
+                    } else {
+                        break;
+                    }
+                }
                 _= tokio::signal::ctrl_c() => {
                     break;
                 }
             }
         }
         let _ = main_agent_handle.await;
+        let _ = heartbeat_agent_handle.await;
+        let _ = heartbeat_handle.await;
         let _ = channel_handle.join();
         Ok(())
     }

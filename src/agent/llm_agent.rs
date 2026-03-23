@@ -2,21 +2,21 @@ use crate::agent::{
     AgentContext, AgentCtlSignal, AgentMessage, AgentMessageSender, AgentName, AgentSignal,
     Workspace,
 };
-use crate::channels::{ChannelMessage, ChannelMessageSender, SessionId};
+use crate::channels::{ChannelMessage, ChannelMessageReceiver, SessionId};
 use crate::config::Config;
 use crate::model_provider::{ModelName, ModelProvider, ModelSettings};
 use itertools::Itertools;
 use log::{error, warn};
+use rig::OneOrMany;
 use rig::agent::{Agent, MultiTurnStreamItem};
 use rig::client::CompletionClient;
 use rig::completion::{Message, Usage};
 use rig::message::UserContent;
 use rig::streaming::{StreamedAssistantContent, StreamingChat};
-use rig::OneOrMany;
 use std::path::Path;
 use std::sync::Arc;
-use tokio::sync::mpsc::Receiver;
 use tokio::sync::RwLock;
+use tokio::sync::mpsc::Receiver;
 use tokio::task::JoinHandle;
 use tokio_stream::StreamExt;
 
@@ -36,7 +36,24 @@ where
     pub msg_sender: AgentMessageSender,
     msg_receiver: Receiver<AgentMessage>,
     ctl_signal_receiver: Receiver<AgentCtlSignal>,
-    channel_message_sender: ChannelMessageSender,
+}
+
+impl<C, P> LlmAgent<C, P>
+where
+    C: CompletionClient,
+    P: ModelProvider<C>,
+{
+    #[allow(unused)]
+    pub(crate) async fn fork(&self) -> crate::Result<(Self, ChannelMessageReceiver)> {
+        Self::new(
+            self.name.clone(),
+            self.ctx.config,
+            &self.ctx.workspace.path,
+            self.model_provider.clone(),
+            self.model.clone(),
+        )
+        .await
+    }
 }
 
 impl<C, P> LlmAgent<C, P>
@@ -50,35 +67,38 @@ where
         workdir: WorkDir,
         model_provider: P,
         model: ModelName,
-        channel_message_sender: ChannelMessageSender,
-    ) -> crate::Result<Self> {
+    ) -> crate::Result<(Self, ChannelMessageReceiver)> {
         let (msg_sender, msg_receiver) = tokio::sync::mpsc::channel(1);
         let (ctl_signal_sender, ctl_signal_receiver) = tokio::sync::mpsc::channel(1);
+        let (channel_message_sender, channel_message_receiver) = tokio::sync::mpsc::channel(1024);
         let ctx = Arc::new(AgentContext {
             config,
             workspace: Workspace::from(&workdir),
             msg_sender: msg_sender.clone().into(),
             ctl_signal_sender: ctl_signal_sender.into(),
+            channel_message_sender: channel_message_sender.clone().into(),
         });
         let model_settings = *model_provider
             .model_settings(&model)
             .expect("model settings not found");
         let agent =
             Self::create_agent(&model_provider, &model, &model_settings, Arc::clone(&ctx)).await?;
-        Ok(Self {
-            name: name.into(),
-            ctx,
-            model_provider,
-            model,
-            model_settings,
-            agent: RwLock::new(agent),
-            history: Default::default(),
-            usage: Default::default(),
-            msg_sender: msg_sender.into(),
-            msg_receiver,
-            ctl_signal_receiver,
-            channel_message_sender,
-        })
+        Ok((
+            Self {
+                name: name.into(),
+                ctx,
+                model_provider,
+                model,
+                model_settings,
+                agent: RwLock::new(agent),
+                history: Default::default(),
+                usage: Default::default(),
+                msg_sender: msg_sender.into(),
+                msg_receiver,
+                ctl_signal_receiver,
+            },
+            channel_message_receiver.into(),
+        ))
     }
 
     async fn create_agent(
@@ -151,15 +171,16 @@ where
     C: CompletionClient + 'static + Send + Sync,
     P: ModelProvider<C> + 'static + Send + Sync,
 {
-    async fn handle_message(
-        &mut self,
-        agent_message: AgentMessage,
-    ) {
+    async fn handle_message(&mut self, agent_message: AgentMessage) {
         let (ref session_id, message) = match agent_message {
-            AgentMessage::Private { session_id, message } => (Some(session_id), message),
+            AgentMessage::Private {
+                session_id,
+                message,
+            } => (Some(session_id), message),
             AgentMessage::Group { message } => (None, message),
         };
         let _ = self
+            .ctx
             .channel_message_sender
             .send(Self::create_channel_message(session_id, AgentSignal::Start))
             .await;
@@ -194,6 +215,7 @@ where
             };
             if let Some(agent_signal) = agent_signal {
                 let _ = self
+                    .ctx
                     .channel_message_sender
                     .send(Self::create_channel_message(session_id, agent_signal))
                     .await;
@@ -212,7 +234,7 @@ where
                     &self.model_settings,
                     Arc::clone(&self.ctx),
                 )
-                    .await
+                .await
                 {
                     Ok(update_agent) => {
                         *agent = update_agent;
@@ -282,16 +304,17 @@ where
         }
     }
 
-    fn create_channel_message(session_id: &Option<SessionId>, signal: AgentSignal) -> ChannelMessage {
+    fn create_channel_message(
+        session_id: &Option<SessionId>,
+        signal: AgentSignal,
+    ) -> ChannelMessage {
         if let Some(session_id) = session_id {
             ChannelMessage::Private {
                 session_id: session_id.clone(),
                 signal,
             }
         } else {
-            ChannelMessage::Group {
-                signal,
-            }
+            ChannelMessage::Group { signal }
         }
     }
 }

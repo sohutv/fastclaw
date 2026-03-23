@@ -15,6 +15,8 @@ pub struct Config {
     log_config: LogConfig,
     #[cfg(feature = "channel_dingtalk_channel")]
     pub dingtalk_config: Option<DingTalkConfig>,
+    #[serde(default)]
+    pub heartbeat_config: HeartbeatConfig,
 }
 
 #[cfg(feature = "channel_dingtalk_channel")]
@@ -23,4 +25,16 @@ pub struct DingTalkConfig {
     pub credential: dingtalk_stream::Credential,
     pub master_user_id: String,
     pub allow_user_ids: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct HeartbeatConfig {
+    /// interval in seconds
+    pub interval: u64,
+}
+
+impl Default for HeartbeatConfig {
+    fn default() -> Self {
+        Self { interval: 60 }
+    }
 }

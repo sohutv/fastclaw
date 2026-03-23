@@ -20,14 +20,8 @@ pub struct Args {
     approved: bool,
     relation_cmds: Vec<String>,
     relation_paths: Vec<String>,
-    risk_level: RiskLevel,
+    risk_level: super::RiskLevel,
     timeout: u64,
-}
-#[derive(Debug, Copy, Clone, serde::Deserialize)]
-pub enum RiskLevel {
-    Low,
-    Medium,
-    High,
 }
 
 impl ShellTool {

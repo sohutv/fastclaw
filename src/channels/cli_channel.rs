@@ -227,6 +227,22 @@ Reasoning >> ////////
                 );
                 Ok(AgentRespState::Final)
             }
+            AgentSignal::Message(message) => {
+                match message {
+                    Message::Assistant { content, .. } => {
+                        for content in content.iter() {
+                            match content {
+                                AssistantContent::Text(text) => {
+                                    println!("{}", text.to_string());
+                                }
+                                _ => {}
+                            }
+                        }
+                    }
+                    _ => {}
+                }
+                Ok(curr_state)
+            }
             AgentSignal::Error(error) => {
                 cli_line_clear();
                 eprintln!("{}", error);

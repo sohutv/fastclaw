@@ -2,12 +2,12 @@ use crate::agent::{AgentMessageSender, AgentSignal};
 use crate::channels::cli_channel::CliChannel;
 use crate::channels::dingtalk_channel::DingtalkChannel;
 use crate::config::Config;
-use derive_more::{Deref, From, FromStr};
+use derive_more::{Deref, DerefMut, Display, From, FromStr};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::ops::Deref;
 use std::thread::JoinHandle;
-use tokio::sync::mpsc::Sender;
+use tokio::sync::mpsc::{Receiver, Sender};
 
 #[cfg(feature = "channel_cli_channel")]
 pub(crate) mod cli_channel;
@@ -37,6 +37,9 @@ pub struct ChannelContext {
 
 #[derive(Clone, Deref, From)]
 pub struct ChannelMessageSender(Sender<ChannelMessage>);
+
+#[derive(Deref, From, DerefMut)]
+pub struct ChannelMessageReceiver(Receiver<ChannelMessage>);
 
 #[derive(Clone)]
 pub enum ChannelMessage {
@@ -102,7 +105,20 @@ pub enum Session {
     Group { session_id: SessionId },
 }
 
-#[derive(Debug, Clone, From, FromStr, Deref, Eq, PartialEq, Hash, Serialize, Deserialize)]
+#[derive(
+    Debug,
+    Clone,
+    From,
+    FromStr,
+    Deref,
+    Eq,
+    PartialEq,
+    Hash,
+    Serialize,
+    Deserialize,
+    Default,
+    Display,
+)]
 pub struct SessionId(String);
 
 impl Deref for Session {

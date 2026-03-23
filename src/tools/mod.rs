@@ -5,6 +5,16 @@ use std::sync::Arc;
 
 mod reload_self_tool;
 mod shell_tool;
+mod task_callback_tool;
+
+mod time_tool;
+
+#[derive(Debug, Copy, Clone, serde::Deserialize)]
+pub enum RiskLevel {
+    Low,
+    Medium,
+    High,
+}
 
 #[derive(Debug, thiserror::Error)]
 #[error("{0}")]
@@ -25,6 +35,8 @@ impl FunctionTool {
         Ok(vec![
             Box::new(shell_tool::ShellTool::new(Arc::clone(&ctx))?),
             Box::new(reload_self_tool::ReloadSelfTool::new(Arc::clone(&ctx))?),
+            Box::new(time_tool::CurrentTimeTool),
+            Box::new(task_callback_tool::TaskCallbackTool::new(Arc::clone(&ctx))?),
         ])
     }
 }

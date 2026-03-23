@@ -40,6 +40,7 @@ impl Default for Config {
             ),
             log_config: LogConfig::default(),
             dingtalk_config: None,
+            heartbeat_config: Default::default(),
         }
     }
 }

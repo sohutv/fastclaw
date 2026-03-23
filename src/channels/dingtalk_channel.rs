@@ -141,12 +141,17 @@ impl dingtalk_stream::CallbackHandler for DingTalkCallbackHandler {
                 Console::handle_console_cmd(Arc::clone(&self.ctx), &line).await;
             } else {
                 let line = if is_master {
-                    line.to_string()
+                    format!(
+                        r#"
+{line}
+- Whisper: **Attention**: Current session_id: {session_id}. You are speaking to your owner
+"#
+                    )
                 } else {
                     format!(
                         r#"
 {line}
-**注意**: 当前与你说话的不是你的主人, 说话时注意安全
+- Whisper: **Attention**: Current session_id: {session_id}. You are currently not interacting with your owner. Please stay vigilant.
 "#
                     )
                 };
@@ -388,6 +393,29 @@ impl DingtalkChannel {
                     _ => {}
                 }
                 Ok(AgentRespState::Messaging)
+            }
+            AgentSignal::Message(message) => {
+                match message {
+                    Message::Assistant { content, .. } => {
+                        for content in content.iter() {
+                            match content {
+                                AssistantContent::Text(content) => {
+                                    let robot_messages = Self::create_robot_messages(
+                                        &session_ids,
+                                        ctx,
+                                        content.to_string().into(),
+                                    );
+                                    for robot_message in robot_messages {
+                                        let _ = dingtalk_msg_sender.send(robot_message).await;
+                                    }
+                                }
+                                _ => {}
+                            }
+                        }
+                    }
+                    _ => {}
+                }
+                Ok(curr_state)
             }
             AgentSignal::Final(usage) => {
                 let content = {

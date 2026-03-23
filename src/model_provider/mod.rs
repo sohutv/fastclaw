@@ -6,7 +6,7 @@ use std::fmt::Debug;
 #[cfg(feature = "model_provider_openai_compatible")]
 pub mod openai_compatible;
 
-pub trait ModelProvider<Client>
+pub trait ModelProvider<Client>: Clone
 where
     Client: CompletionClient,
 {

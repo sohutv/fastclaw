@@ -1,5 +1,5 @@
 use crate::agent::llm_agent::LlmAgent;
-use crate::channels::{ChannelMessageSender, SessionId};
+use crate::channels::{ChannelMessageReceiver, ChannelMessageSender, SessionId};
 use derive_more::{Deref, Display, From, FromStr};
 use rig::completion::Usage;
 use rig::message::{Message, Reasoning, ToolCall};
@@ -21,6 +21,7 @@ pub struct AgentContext {
     pub workspace: Workspace,
     pub msg_sender: AgentMessageSender,
     pub ctl_signal_sender: AgentCtlSignalSender,
+    pub channel_message_sender: ChannelMessageSender,
 }
 
 #[derive(Debug, Clone)]
@@ -57,20 +58,11 @@ pub async fn create_agent<N: Into<AgentName>, WorkDir: AsRef<Path>>(
     workdir: WorkDir,
     model_provider: ModelProviders,
     model: ModelName,
-    channel_message_sender: ChannelMessageSender,
-) -> crate::Result<Box<dyn Agent>> {
+) -> crate::Result<(Box<dyn Agent>, ChannelMessageReceiver)> {
     match model_provider {
         ModelProviders::OpenaiCompatible(provider) => {
-            let agent = LlmAgent::new(
-                name,
-                config,
-                workdir,
-                provider,
-                model,
-                channel_message_sender,
-            )
-            .await?;
-            Ok(Box::new(agent))
+            let (agent, receiver) = LlmAgent::new(name, config, workdir, provider, model).await?;
+            Ok((Box::new(agent), receiver))
         }
     }
 }
@@ -96,6 +88,7 @@ pub enum AgentSignal {
     ReasoningStream(Reasoning),
     MessageStream(Message),
     Final(Usage),
+    Message(Message),
     Error(String),
 }
 

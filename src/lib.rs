@@ -6,6 +6,7 @@ mod config;
 mod memory;
 mod skills;
 mod tools;
+mod heartbeat;
 
 pub type Result<T, E = anyhow::Error> = anyhow::Result<T, E>;
 
