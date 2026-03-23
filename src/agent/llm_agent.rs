@@ -1,21 +1,22 @@
 use crate::agent::{
-    AgentContext, AgentCtlSignal, AgentMessageSender, AgentName, AgentSignal, Workspace,
+    AgentContext, AgentCtlSignal, AgentMessage, AgentMessageSender, AgentName, AgentSignal,
+    Workspace,
 };
-use crate::channels::ChannelMessageSender;
+use crate::channels::{ChannelMessage, ChannelMessageSender, SessionId};
 use crate::config::Config;
 use crate::model_provider::{ModelName, ModelProvider, ModelSettings};
 use itertools::Itertools;
 use log::{error, warn};
-use rig::OneOrMany;
 use rig::agent::{Agent, MultiTurnStreamItem};
 use rig::client::CompletionClient;
 use rig::completion::{Message, Usage};
 use rig::message::UserContent;
 use rig::streaming::{StreamedAssistantContent, StreamingChat};
+use rig::OneOrMany;
 use std::path::Path;
 use std::sync::Arc;
-use tokio::sync::RwLock;
 use tokio::sync::mpsc::Receiver;
+use tokio::sync::RwLock;
 use tokio::task::JoinHandle;
 use tokio_stream::StreamExt;
 
@@ -33,7 +34,7 @@ where
     history: Vec<Message>,
     usage: Usage,
     pub msg_sender: AgentMessageSender,
-    msg_receiver: Receiver<Message>,
+    msg_receiver: Receiver<AgentMessage>,
     ctl_signal_receiver: Receiver<AgentCtlSignal>,
     channel_message_sender: ChannelMessageSender,
 }
@@ -150,8 +151,18 @@ where
     C: CompletionClient + 'static + Send + Sync,
     P: ModelProvider<C> + 'static + Send + Sync,
 {
-    async fn handle_message(&mut self, message: Message) {
-        let _ = self.channel_message_sender.send(AgentSignal::Start).await;
+    async fn handle_message(
+        &mut self,
+        agent_message: AgentMessage,
+    ) {
+        let (ref session_id, message) = match agent_message {
+            AgentMessage::Private { session_id, message } => (Some(session_id), message),
+            AgentMessage::Group { message } => (None, message),
+        };
+        let _ = self
+            .channel_message_sender
+            .send(Self::create_channel_message(session_id, AgentSignal::Start))
+            .await;
         let agent = self.agent.read().await;
         let mut stream = agent.stream_chat(message, self.history.clone()).await;
         while let Some(result) = stream.next().await {
@@ -165,7 +176,7 @@ where
                     StreamedAssistantContent::Text(text) => {
                         Some(AgentSignal::MessageStream(Message::assistant(text.text())))
                     }
-                    StreamedAssistantContent::ToolCall {tool_call,..} => {
+                    StreamedAssistantContent::ToolCall { tool_call, .. } => {
                         Some(AgentSignal::ToolCall(tool_call))
                     }
                     _ => None,
@@ -182,7 +193,10 @@ where
                 Err(err) => Some(AgentSignal::Error(err.to_string())),
             };
             if let Some(agent_signal) = agent_signal {
-                let _ = self.channel_message_sender.send(agent_signal).await;
+                let _ = self
+                    .channel_message_sender
+                    .send(Self::create_channel_message(session_id, agent_signal))
+                    .await;
             }
         }
     }
@@ -198,7 +212,7 @@ where
                     &self.model_settings,
                     Arc::clone(&self.ctx),
                 )
-                .await
+                    .await
                 {
                     Ok(update_agent) => {
                         *agent = update_agent;
@@ -206,9 +220,11 @@ where
                         let _ = self
                             .ctx
                             .msg_sender
-                            .send(Message::user(
-                                "You have been reloaded, continue your conversation.",
-                            ))
+                            .send(AgentMessage::Group {
+                                message: Message::user(
+                                    "You have been reloaded, continue your conversation.",
+                                ),
+                            })
                             .await;
                     }
                     Err(err) => {
@@ -218,7 +234,29 @@ where
             }
         }
     }
-    fn user_message_filter(&self, message: Message) -> Option<Message> {
+    fn user_message_filter(&self, agent_message: AgentMessage) -> Option<AgentMessage> {
+        match agent_message {
+            AgentMessage::Private {
+                session_id,
+                message,
+            } => {
+                if let Some(message) = self.user_message_filter_actual(message) {
+                    return Some(AgentMessage::Private {
+                        session_id,
+                        message,
+                    });
+                }
+            }
+            AgentMessage::Group { message } => {
+                if let Some(message) = self.user_message_filter_actual(message) {
+                    return Some(AgentMessage::Group { message });
+                }
+            }
+        }
+        None
+    }
+
+    fn user_message_filter_actual(&self, message: Message) -> Option<Message> {
         if let Message::User { content, .. } = message {
             let mut vec = content
                 .into_iter()
@@ -241,6 +279,19 @@ where
             }
         } else {
             Some(message)
+        }
+    }
+
+    fn create_channel_message(session_id: &Option<SessionId>, signal: AgentSignal) -> ChannelMessage {
+        if let Some(session_id) = session_id {
+            ChannelMessage::Private {
+                session_id: session_id.clone(),
+                signal,
+            }
+        } else {
+            ChannelMessage::Group {
+                signal,
+            }
         }
     }
 }

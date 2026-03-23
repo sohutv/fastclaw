@@ -1,5 +1,5 @@
 use crate::agent::llm_agent::LlmAgent;
-use crate::channels::ChannelMessageSender;
+use crate::channels::{ChannelMessageSender, SessionId};
 use derive_more::{Deref, Display, From, FromStr};
 use rig::completion::Usage;
 use rig::message::{Message, Reasoning, ToolCall};
@@ -76,7 +76,18 @@ pub async fn create_agent<N: Into<AgentName>, WorkDir: AsRef<Path>>(
 }
 
 #[derive(Clone, Deref, From)]
-pub struct AgentMessageSender(Sender<Message>);
+pub struct AgentMessageSender(Sender<AgentMessage>);
+
+#[derive(Clone)]
+pub enum AgentMessage {
+    Private {
+        session_id: SessionId,
+        message: Message,
+    },
+    Group {
+        message: Message,
+    },
+}
 
 #[derive(Clone)]
 pub enum AgentSignal {

@@ -23,3 +23,18 @@ macro_rules! btree_map {
         }
     }
 }
+
+
+#[macro_export]
+macro_rules! hash_map {
+    () => {
+        {
+            std::collections::HashMap::new()
+        }
+    };
+    ( $($key:expr => $value:expr),* )=>{
+        {
+            std::collections::HashMap::from_iter([($($key, $value),*)])
+        }
+    }
+}

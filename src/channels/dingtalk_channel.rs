@@ -1,18 +1,21 @@
-use crate::agent::{AgentMessageSender, AgentSignal};
+use crate::agent::{AgentMessage, AgentMessageSender, AgentSignal};
 use crate::channels::console_cmd::Console;
-use crate::channels::{ChannelContext, ChannelMessageSender};
+use crate::channels::{ChannelContext, ChannelMessage, ChannelMessageSender, Session, SessionId};
 use crate::config::{Config, DingTalkConfig};
 use anyhow::anyhow;
 use async_trait::async_trait;
 use dingtalk_stream::client::DingtalkMessageSender;
 use dingtalk_stream::frames::{
-    CallbackMessageData, CallbackMessagePayload, CallbackWebhookMessage, RichTextItem,
-    RobotBatchMessage, UpMessageContentMarkdown,
+    CallbackMessageConversation, CallbackMessageData, CallbackMessagePayload,
+    CallbackWebhookMessage, DingTalkGroupConversationId, DingTalkUserId, RichTextItem,
+    RobotGroupMessage, RobotMessage, RobotPrivateMessage, UpMessageContent,
+    UpMessageContentMarkdown,
 };
 use dingtalk_stream::{CallbackMessage, DingTalkStream, Error, ErrorCode, MessageTopic, Resp};
 use itertools::Itertools;
 use rig::completion::{AssistantContent, Message};
 use rig::message::{ReasoningContent, ToolCall, ToolFunction};
+use std::ops::Deref;
 use std::sync::Arc;
 use std::thread::JoinHandle;
 use tokio::sync::RwLock;
@@ -20,7 +23,7 @@ use tokio::sync::mpsc::{Receiver, Sender};
 
 pub struct DingtalkChannel {
     ctx: Arc<RwLock<ChannelContext>>,
-    agent_signal_receiver: Receiver<AgentSignal>,
+    agent_signal_receiver: Receiver<ChannelMessage>,
     agent_message_sender: AgentMessageSender,
     dingtalk_config: DingTalkConfig,
 }
@@ -35,6 +38,7 @@ impl DingtalkChannel {
             Self {
                 ctx: Arc::new(RwLock::new(ChannelContext {
                     config: config.clone(),
+                    sessions: Default::default(),
                 })),
                 agent_signal_receiver: receiver,
                 agent_message_sender,
@@ -66,6 +70,8 @@ impl dingtalk_stream::CallbackHandler for DingTalkCallbackHandler {
         let Some(CallbackMessageData {
             msg_id: _,
             payload: Some(payload),
+            sender,
+            conversation,
             ..
         }) = data
         else {
@@ -73,6 +79,31 @@ impl dingtalk_stream::CallbackHandler for DingTalkCallbackHandler {
                 code: ErrorCode::BadRequest,
                 msg: "unexpected data".to_string(),
             });
+        };
+
+        let session_id = {
+            let mut ctx = self.ctx.write().await;
+            let session = match conversation {
+                CallbackMessageConversation::Private { .. } => {
+                    let Some(session_id) = sender
+                        .sender_staff_id
+                        .as_deref()
+                        .map(|it| SessionId::from(it.to_string()))
+                    else {
+                        return Err(Error {
+                            code: ErrorCode::BadRequest,
+                            msg: "sender_staff_id is required".to_string(),
+                        });
+                    };
+                    Session::Private { session_id }
+                }
+                CallbackMessageConversation::Group { id, .. } => Session::Group {
+                    session_id: SessionId::from(id.deref().to_string()),
+                },
+            };
+            let session_id = session.deref().clone();
+            ctx.sessions.entry(session_id.clone()).or_insert(session);
+            session_id
         };
         let line = match payload {
             CallbackMessagePayload::Text { text } => text.content.to_string(),
@@ -92,8 +123,13 @@ impl dingtalk_stream::CallbackHandler for DingTalkCallbackHandler {
             if line.starts_with('/') {
                 Console::handle_console_cmd(Arc::clone(&self.ctx), &line).await;
             } else {
-                let message = Message::user(line);
-                let _ = self.agent_message_sender.send(message).await;
+                let _ = self
+                    .agent_message_sender
+                    .send(AgentMessage::Private {
+                        session_id,
+                        message: Message::user(line),
+                    })
+                    .await;
             }
         }
         Ok(Resp::Text(format!("echo {}", line)))
@@ -170,7 +206,7 @@ impl DingtalkChannel {
 impl DingtalkChannel {
     async fn poll_agent_signal(
         ctx: &Arc<RwLock<ChannelContext>>,
-        receiver: &mut Receiver<AgentSignal>,
+        receiver: &mut Receiver<ChannelMessage>,
         dingtalk_msg_sender: &DingtalkMessageSender,
     ) -> crate::Result<()> {
         let mut state = AgentRespState::Wait;
@@ -179,9 +215,9 @@ impl DingtalkChannel {
         loop {
             tokio::select! {
                 message = receiver.recv() => {
-                    if let Some(signal) = message {
+                    if let Some(message) = message {
                         let ctx = ctx.read().await;
-                        match  Self::handle_agent_signal(&*ctx, &signal, state, &mut buff, &dingtalk_msg_sender).await{
+                        match  Self::handle_agent_signal(&*ctx, &message, state, &mut buff, &dingtalk_msg_sender).await{
                             Ok(AgentRespState::Final) | Err( _)=> {
                                 state = AgentRespState::Wait;
                                 buff.clear();
@@ -211,23 +247,28 @@ impl DingtalkChannel {
 
     async fn handle_agent_signal(
         ctx: &ChannelContext,
-        signal: &AgentSignal,
+        channel_message: &ChannelMessage,
         curr_state: AgentRespState,
         buff: &mut Vec<String>,
         dingtalk_msg_sender: &DingtalkMessageSender,
     ) -> crate::Result<AgentRespState> {
-        match signal {
+        let session_ids = if let ChannelMessage::Private { session_id, .. } = channel_message {
+            vec![session_id]
+        } else {
+            ctx.sessions.keys().collect_vec()
+        };
+        match channel_message.deref() {
             AgentSignal::Start => {
                 if let AgentRespState::Wait = curr_state {
                     buff.clear();
-                    let _ = dingtalk_msg_sender
-                        .send(RobotBatchMessage {
-                            user_ids: vec![USER_ID.into()],
-                            content: UpMessageContentMarkdown::from(("思考中...", "正在思考..."))
-                                .into(),
-                            send_result_cb: None,
-                        })
-                        .await;
+                    let robot_messages = Self::create_robot_messages(
+                        &session_ids,
+                        ctx,
+                        UpMessageContentMarkdown::from(("思考中...", "正在思考...")).into(),
+                    );
+                    for robot_message in robot_messages {
+                        let _ = dingtalk_msg_sender.send(robot_message).await;
+                    }
                     Ok(AgentRespState::Start)
                 } else {
                     Err(anyhow!("AgentRespState must be Init when starting"))
@@ -237,27 +278,29 @@ impl DingtalkChannel {
                 function: ToolFunction { name, arguments },
                 ..
             }) => {
-                let _ = dingtalk_msg_sender
-                    .send(RobotBatchMessage {
-                        user_ids: vec![USER_ID.into()],
-                        content: UpMessageContentMarkdown::from((
-                            format!("思考中...(工具调用: {name})"),
-                            format!(
-                                r#"
+                let robot_messages = Self::create_robot_messages(
+                    &session_ids,
+                    ctx,
+                    UpMessageContentMarkdown::from((
+                        format!("思考中...(工具调用: {name})"),
+                        format!(
+                            r#"
 ### 工具调用: {name}
 ```
 {}
 ```json
                                             "#,
-                                serde_json::to_string_pretty(arguments).unwrap_or_else(
-                                    |err| format!("Error serializing arguments: {}", err)
-                                )
-                            ),
-                        ))
-                        .into(),
-                        send_result_cb: None,
-                    })
-                    .await;
+                            serde_json::to_string_pretty(arguments).unwrap_or_else(|err| format!(
+                                "Error serializing arguments: {}",
+                                err
+                            ))
+                        ),
+                    ))
+                    .into(),
+                );
+                for robot_message in robot_messages {
+                    let _ = dingtalk_msg_sender.send(robot_message).await;
+                }
                 Ok(curr_state)
             }
             AgentSignal::ReasoningStream(reasoning) => {
@@ -280,26 +323,23 @@ impl DingtalkChannel {
                     AgentRespState::Reasoning => {
                         if ctx.config.show_reasoning {
                             let content = {
-                                let string = buff.join("");
+                                let content = buff.join("");
                                 buff.clear();
-                                string
-                            };
-                            let _ = dingtalk_msg_sender
-                                .send(RobotBatchMessage {
-                                    user_ids: vec![USER_ID.into()],
-                                    content: UpMessageContentMarkdown::from((
-                                        "思考完成...",
-                                        format!(
-                                            r#"
+                                UpMessageContentMarkdown::from((
+                                    "思考完成...",
+                                    format!(
+                                        r#"
 ### 正在思考...
 {content}
                                     "#
-                                        ),
-                                    ))
-                                    .into(),
-                                    send_result_cb: None,
-                                })
-                                .await;
+                                    ),
+                                ))
+                            };
+                            let robot_messages =
+                                Self::create_robot_messages(&session_ids, ctx, content.into());
+                            for robot_message in robot_messages {
+                                let _ = dingtalk_msg_sender.send(robot_message).await;
+                            }
                         }
                     }
                     _ => {}
@@ -341,13 +381,10 @@ impl DingtalkChannel {
                     buff.clear();
                     content
                 };
-                let _ = dingtalk_msg_sender
-                    .send(RobotBatchMessage {
-                        user_ids: vec![USER_ID.into()],
-                        content: content.into(),
-                        send_result_cb: None,
-                    })
-                    .await;
+                let robot_messages = Self::create_robot_messages(&session_ids, ctx, content.into());
+                for robot_message in robot_messages {
+                    let _ = dingtalk_msg_sender.send(robot_message).await;
+                }
                 Ok(AgentRespState::Final)
             }
             AgentSignal::Error(error) => {
@@ -356,9 +393,32 @@ impl DingtalkChannel {
             }
         }
     }
-}
 
-const USER_ID: &str = "032615015535634423";
+    fn create_robot_messages(
+        session_ids: &[&SessionId],
+        ctx: &ChannelContext,
+        content: UpMessageContent,
+    ) -> Vec<RobotMessage> {
+        session_ids
+            .iter()
+            .flat_map(|&session_id| ctx.sessions.get(session_id))
+            .map(|session| match session {
+                Session::Private { session_id } => RobotPrivateMessage {
+                    user_ids: vec![DingTalkUserId::from(session_id.deref())],
+                    content: content.clone(),
+                    send_result_cb: None,
+                }
+                .into(),
+                Session::Group { session_id } => RobotGroupMessage {
+                    group_id: DingTalkGroupConversationId::from(session_id.deref()),
+                    content: content.clone(),
+                    send_result_cb: None,
+                }
+                .into(),
+            })
+            .collect_vec()
+    }
+}
 
 #[derive(Debug, Clone, Copy)]
 enum AgentRespState {

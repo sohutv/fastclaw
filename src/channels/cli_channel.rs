@@ -1,7 +1,8 @@
-use crate::agent::{AgentMessageSender, AgentSignal};
+use crate::agent::{AgentMessage, AgentMessageSender, AgentSignal};
 use crate::channels::console_cmd::Console;
-use crate::channels::{ChannelContext, ChannelMessageSender};
+use crate::channels::{ChannelContext, ChannelMessage, ChannelMessageSender, Session, SessionId};
 use crate::config::Config;
+use crate::hash_map;
 use anyhow::anyhow;
 use rig::completion::Message;
 use rig::message::{AssistantContent, ReasoningContent, ToolCall, ToolFunction};
@@ -15,7 +16,7 @@ use tokio::sync::mpsc::Receiver;
 
 pub struct CliChannel {
     ctx: Arc<RwLock<ChannelContext>>,
-    agent_signal_receiver: Receiver<AgentSignal>,
+    agent_signal_receiver: Receiver<ChannelMessage>,
     agent_message_sender: AgentMessageSender,
 }
 
@@ -29,6 +30,10 @@ impl CliChannel {
             CliChannel {
                 ctx: Arc::new(RwLock::new(ChannelContext {
                     config: config.clone(),
+                    sessions: {
+                        let session_id = SessionId::from("cli-session-channel".to_string());
+                        hash_map!(session_id.clone() => Session::Private{session_id: session_id})
+                    },
                 })),
                 agent_signal_receiver: receiver,
                 agent_message_sender,
@@ -64,8 +69,15 @@ impl CliChannel {
                                     continue;
                                 }
                                 let ctx = ctx.read().await;
+                                let session_id =
+                                    ctx.sessions.keys().next().expect("unexpected sessions");
                                 let message = Message::user(line);
-                                let _ = agent_message_sender.send(message).await;
+                                let _ = agent_message_sender
+                                    .send(AgentMessage::Private {
+                                        session_id: session_id.clone(),
+                                        message,
+                                    })
+                                    .await;
                                 let _ = Self::poll_agent_signal(&ctx, &mut receiver).await;
                             }
                         }
@@ -85,14 +97,14 @@ impl CliChannel {
 
     async fn poll_agent_signal(
         ctx: &ChannelContext,
-        receiver: &mut Receiver<AgentSignal>,
+        receiver: &mut Receiver<ChannelMessage>,
     ) -> crate::Result<()> {
         let mut state = AgentRespState::Init;
         let mut interval = tokio::time::interval(std::time::Duration::from_millis(500));
         loop {
             tokio::select! {
                 message = receiver.recv() => {
-                    if let Some(signal) = message {
+                    if let Some(ChannelMessage::Private {signal,..})|Some(ChannelMessage::Group {signal,}) = message {
                         match  Self::handle_agent_signal(ctx, &signal, state).await{
                             Ok(AgentRespState::Final) | Err( _)=> {
                                 return Ok(());

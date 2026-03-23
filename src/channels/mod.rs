@@ -2,7 +2,9 @@ use crate::agent::{AgentMessageSender, AgentSignal};
 use crate::channels::cli_channel::CliChannel;
 use crate::channels::dingtalk_channel::DingtalkChannel;
 use crate::config::Config;
-use derive_more::{Deref, From};
+use derive_more::{Deref, From, FromStr};
+use std::collections::HashMap;
+use std::ops::Deref;
 use std::thread::JoinHandle;
 use tokio::sync::mpsc::Sender;
 
@@ -29,10 +31,33 @@ pub enum Channel {
 #[derive(Clone)]
 pub struct ChannelContext {
     pub config: Config,
+    pub sessions: HashMap<SessionId, Session>,
 }
 
 #[derive(Clone, Deref, From)]
-pub struct ChannelMessageSender(Sender<AgentSignal>);
+pub struct ChannelMessageSender(Sender<ChannelMessage>);
+
+#[derive(Clone)]
+pub enum ChannelMessage {
+    Private {
+        session_id: SessionId,
+        signal: AgentSignal,
+    },
+    Group {
+        signal: AgentSignal,
+    },
+}
+
+impl Deref for ChannelMessage {
+    type Target = AgentSignal;
+
+    fn deref(&self) -> &Self::Target {
+        match self {
+            ChannelMessage::Private { signal, .. } => signal,
+            ChannelMessage::Group { signal } => signal,
+        }
+    }
+}
 
 impl Channel {
     #[cfg(feature = "channel_cli_channel")]
@@ -65,6 +90,27 @@ impl Channel {
         match self {
             Channel::Cli { sender, .. } => sender.clone(),
             Channel::Dingtalk { sender, .. } => sender.clone(),
+        }
+    }
+}
+
+#[allow(unused)]
+#[derive(Debug, Clone)]
+pub enum Session {
+    Private { session_id: SessionId },
+    Group { session_id: SessionId },
+}
+
+#[derive(Debug, Clone, From, FromStr, Deref, Eq, PartialEq, Hash)]
+pub struct SessionId(String);
+
+impl Deref for Session {
+    type Target = SessionId;
+
+    fn deref(&self) -> &Self::Target {
+        match self {
+            Session::Private { session_id } => session_id,
+            Session::Group { session_id } => session_id,
         }
     }
 }
