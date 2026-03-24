@@ -1,9 +1,10 @@
-use crate::agent::{AgentMessage, AgentMessageSender, AgentSignal};
+use crate::agent::{AgentRequest, AgentResponse};
 use crate::channels::console_cmd::Console;
-use crate::channels::{ChannelContext, ChannelMessage, ChannelMessageSender, Session, SessionId};
+use crate::channels::{Channel, ChannelContext, ChannelMessage, Session, SessionId};
 use crate::config::Config;
 use crate::hash_map;
 use anyhow::anyhow;
+use async_trait::async_trait;
 use rig::completion::Message;
 use rig::message::{AssistantContent, ReasoningContent, ToolCall, ToolFunction};
 use rustyline::DefaultEditor;
@@ -12,42 +13,39 @@ use std::io::{Write, stdout};
 use std::sync::Arc;
 use std::thread::JoinHandle;
 use tokio::sync::RwLock;
-use tokio::sync::mpsc::Receiver;
+use tokio::sync::mpsc::{Receiver, Sender};
 
 pub struct CliChannel {
     ctx: Arc<RwLock<ChannelContext>>,
-    agent_signal_receiver: Receiver<ChannelMessage>,
-    agent_message_sender: AgentMessageSender,
+    agent_message_sender: Sender<AgentRequest>,
 }
 
 impl CliChannel {
-    pub(super) fn new(
+    pub(crate) fn new(
         config: &'static Config,
-        agent_message_sender: AgentMessageSender,
-    ) -> crate::Result<(Self, ChannelMessageSender)> {
-        let (sender, receiver) = tokio::sync::mpsc::channel(1);
-        Ok((
-            CliChannel {
-                ctx: Arc::new(RwLock::new(ChannelContext {
-                    config: config.clone(),
-                    sessions: {
-                        let session_id = SessionId::from("cli-session-channel".to_string());
-                        hash_map!(session_id.clone() => Session::Private{session_id: session_id})
-                    },
-                })),
-                agent_signal_receiver: receiver,
-                agent_message_sender,
-            },
-            sender.into(),
-        ))
+        agent_message_sender: Sender<AgentRequest>,
+    ) -> crate::Result<Self> {
+        Ok(CliChannel {
+            ctx: Arc::new(RwLock::new(ChannelContext {
+                config: config.clone(),
+                sessions: {
+                    let session_id = SessionId::from("cli-session-channel".to_string());
+                    hash_map!(session_id.clone() => Session::Private{session_id})
+                },
+            })),
+            agent_message_sender,
+        })
     }
 }
 
-impl CliChannel {
-    pub async fn start(self) -> crate::Result<JoinHandle<()>> {
+#[async_trait]
+impl Channel for CliChannel {
+    async fn start(
+        self,
+        mut message_receiver: Receiver<ChannelMessage>,
+    ) -> crate::Result<JoinHandle<()>> {
         let Self {
             ctx,
-            agent_signal_receiver: mut receiver,
             agent_message_sender,
         } = self;
         let ctx = Arc::clone(&ctx);
@@ -73,12 +71,12 @@ impl CliChannel {
                                     ctx.sessions.keys().next().expect("unexpected sessions");
                                 let message = Message::user(line);
                                 let _ = agent_message_sender
-                                    .send(AgentMessage::Private {
+                                    .send(AgentRequest {
                                         session_id: session_id.clone(),
                                         message,
                                     })
                                     .await;
-                                let _ = Self::poll_agent_signal(&ctx, &mut receiver).await;
+                                let _ = Self::poll_agent_message(&ctx, &mut message_receiver).await;
                             }
                         }
                         Err(ReadlineError::Interrupted) => {
@@ -94,8 +92,10 @@ impl CliChannel {
         });
         Ok(join_handle)
     }
+}
 
-    async fn poll_agent_signal(
+impl CliChannel {
+    async fn poll_agent_message(
         ctx: &ChannelContext,
         receiver: &mut Receiver<ChannelMessage>,
     ) -> crate::Result<()> {
@@ -104,8 +104,8 @@ impl CliChannel {
         loop {
             tokio::select! {
                 message = receiver.recv() => {
-                    if let Some(ChannelMessage::Private {signal,..})|Some(ChannelMessage::Group {signal,}) = message {
-                        match  Self::handle_agent_signal(ctx, &signal, state).await{
+                    if let Some(message) = message {
+                        match  Self::handle_agent_message(ctx, &message, state).await{
                             Ok(AgentRespState::Final) | Err( _)=> {
                                 return Ok(());
                             },
@@ -134,20 +134,20 @@ impl CliChannel {
         }
     }
 
-    async fn handle_agent_signal(
+    async fn handle_agent_message(
         ctx: &ChannelContext,
-        signal: &AgentSignal,
+        signal: &AgentResponse,
         curr_state: AgentRespState,
     ) -> crate::Result<AgentRespState> {
         match signal {
-            AgentSignal::Start => {
+            AgentResponse::Start => {
                 if let AgentRespState::Init = curr_state {
                     Ok(AgentRespState::Start)
                 } else {
                     Err(anyhow!("AgentRespState must be Init when starting"))
                 }
             }
-            AgentSignal::ToolCall(ToolCall {
+            AgentResponse::ToolCall(ToolCall {
                 function: ToolFunction { name, arguments },
                 ..
             }) => {
@@ -161,7 +161,7 @@ impl CliChannel {
                 );
                 Ok(curr_state)
             }
-            AgentSignal::ReasoningStream(reasoning) => {
+            AgentResponse::ReasoningStream(reasoning) => {
                 match curr_state {
                     AgentRespState::Start => {
                         cli_line_clear();
@@ -184,7 +184,7 @@ Reasoning >> ////////
                 }
                 Ok(AgentRespState::Reasoning)
             }
-            AgentSignal::MessageStream(message) => {
+            AgentResponse::MessageStream(message) => {
                 match curr_state {
                     AgentRespState::Start => {
                         cli_line_clear();
@@ -218,7 +218,7 @@ Reasoning >> ////////
                 }
                 Ok(AgentRespState::Messaging)
             }
-            AgentSignal::Final(usage) => {
+            AgentResponse::Final(usage) => {
                 println!(
                     r#"
 <<Tokens:{}↑{}↓{}>>
@@ -227,23 +227,7 @@ Reasoning >> ////////
                 );
                 Ok(AgentRespState::Final)
             }
-            AgentSignal::Message(message) => {
-                match message {
-                    Message::Assistant { content, .. } => {
-                        for content in content.iter() {
-                            match content {
-                                AssistantContent::Text(text) => {
-                                    println!("{}", text.to_string());
-                                }
-                                _ => {}
-                            }
-                        }
-                    }
-                    _ => {}
-                }
-                Ok(curr_state)
-            }
-            AgentSignal::Error(error) => {
+            AgentResponse::Error(error) => {
                 cli_line_clear();
                 eprintln!("{}", error);
                 Err(anyhow!("Agent error: {}", error))

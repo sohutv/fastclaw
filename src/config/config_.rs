@@ -1,6 +1,6 @@
 use crate::btree_map;
-use crate::config::Config;
 use crate::config::logger::LogConfig;
+use crate::config::Config;
 use crate::model_provider::{ModelName, ModelProviderName, ModelProviders};
 use anyhow::anyhow;
 use std::path::PathBuf;

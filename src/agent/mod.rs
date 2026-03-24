@@ -1,27 +1,52 @@
-use crate::agent::llm_agent::LlmAgent;
-use crate::channels::{ChannelMessageReceiver, ChannelMessageSender, SessionId};
-use derive_more::{Deref, Display, From, FromStr};
+use crate::channels::{ChannelMessage, SessionId};
+use async_trait::async_trait;
+use derive_more::{Deref, Display, Into};
 use rig::completion::Usage;
 use rig::message::{Message, Reasoning, ToolCall};
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
+use tokio::sync::RwLock;
 use tokio::sync::mpsc::Sender;
 use tokio::task::JoinHandle;
 
-mod llm_agent;
+mod jsonl_history_manager;
+pub use jsonl_history_manager::JsonlHistoryManager;
 
+mod llm_agent;
 mod prompt;
 
 use crate::config::Config;
-use crate::model_provider::{ModelName, ModelProviders};
+use crate::model_provider::ModelName;
+
+pub trait Agent: Send + Sync {
+    fn run(
+        self: Self,
+        channel_message_sender: Sender<ChannelMessage>,
+    ) -> crate::Result<(JoinHandle<()>, Sender<AgentRequest>)>;
+}
+
+#[async_trait]
+pub trait HistoryManager: Send + Sync {
+    async fn store(
+        &mut self,
+        session_id: &SessionId,
+        agent: &AgentName,
+        usage: &Usage,
+        message: &[Message],
+    ) -> crate::Result<()>;
+
+    async fn load(&self, session_id: &SessionId, agent: &AgentName) -> crate::Result<Vec<Message>>;
+
+    #[allow(unused)]
+    async fn usage(&self, session_id: &SessionId, agent: &AgentName) -> crate::Result<Usage>;
+}
 
 #[allow(unused)]
 #[derive(Clone)]
 pub struct AgentContext {
     pub config: &'static Config,
-    pub workspace: Workspace,
-    pub msg_sender: AgentMessageSender,
-    pub ctl_signal_sender: AgentCtlSignalSender,
-    pub channel_message_sender: ChannelMessageSender,
+    pub workspace: &'static Workspace,
+    pub history_manager: Arc<RwLock<dyn HistoryManager>>,
 }
 
 #[derive(Debug, Clone)]
@@ -37,65 +62,42 @@ impl<P: AsRef<Path>> From<P> for Workspace {
     }
 }
 
-#[derive(Debug, Clone, From, FromStr, Deref, Eq, PartialEq, Ord, PartialOrd, Display)]
+#[derive(Debug, Clone, Deref, Eq, PartialEq, Ord, PartialOrd, Display)]
 pub struct AgentName(String);
 
-impl From<&str> for AgentName {
-    fn from(value: &str) -> Self {
-        AgentName(value.to_string())
+impl<S: Into<String>> From<S> for AgentName {
+    fn from(value: S) -> Self {
+        Self(value.into())
     }
 }
 
-pub trait Agent {
-    fn run(self: Box<Self>) -> crate::Result<JoinHandle<()>>;
-
-    fn msg_sender(&self) -> AgentMessageSender;
+#[async_trait]
+pub trait LlmAgentSupplier {
+    type A: Agent;
+    async fn create_agent<N: Into<AgentName> + Send>(
+        &self,
+        name: N,
+        config: &'static Config,
+        model: ModelName,
+        history_manager: &Arc<RwLock<dyn HistoryManager>>,
+        workspace: &'static Workspace,
+    ) -> crate::Result<Self::A>;
 }
 
-pub async fn create_agent<N: Into<AgentName>, WorkDir: AsRef<Path>>(
-    name: N,
-    config: &'static Config,
-    workdir: WorkDir,
-    model_provider: ModelProviders,
-    model: ModelName,
-) -> crate::Result<(Box<dyn Agent>, ChannelMessageReceiver)> {
-    match model_provider {
-        ModelProviders::OpenaiCompatible(provider) => {
-            let (agent, receiver) = LlmAgent::new(name, config, workdir, provider, model).await?;
-            Ok((Box::new(agent), receiver))
-        }
-    }
-}
-
-#[derive(Clone, Deref, From)]
-pub struct AgentMessageSender(Sender<AgentMessage>);
-
-#[derive(Clone)]
-pub enum AgentMessage {
-    Private {
-        session_id: SessionId,
-        message: Message,
-    },
-    Group {
-        message: Message,
-    },
+#[derive(Debug, Clone, Deref, Into)]
+pub struct AgentRequest {
+    pub session_id: SessionId,
+    #[deref]
+    #[into]
+    pub message: Message,
 }
 
 #[derive(Clone)]
-pub enum AgentSignal {
+pub enum AgentResponse {
     Start,
     ToolCall(ToolCall),
     ReasoningStream(Reasoning),
     MessageStream(Message),
     Final(Usage),
-    Message(Message),
     Error(String),
 }
-
-#[derive(Debug, Clone)]
-pub enum AgentCtlSignal {
-    Reload { id: uuid::Uuid, reason: String },
-}
-
-#[derive(Clone, From, Deref)]
-pub struct AgentCtlSignalSender(Sender<AgentCtlSignal>);

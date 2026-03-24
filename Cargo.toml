@@ -43,7 +43,6 @@ channel_dingtalk_channel = ["dingtalk-stream-sdk"]
 
 default = [
     "model_provider_openai_compatible",
-    "channel_cli_channel",
     "channel_dingtalk_channel",
 ]
 

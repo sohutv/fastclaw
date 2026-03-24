@@ -1,6 +1,6 @@
-use crate::agent::{AgentMessage, AgentMessageSender, AgentSignal};
+use crate::agent::{AgentRequest, AgentResponse};
 use crate::channels::console_cmd::Console;
-use crate::channels::{ChannelContext, ChannelMessage, ChannelMessageSender, Session, SessionId};
+use crate::channels::{Channel, ChannelContext, ChannelMessage, Session, SessionId};
 use crate::config::{Config, DingTalkConfig};
 use anyhow::anyhow;
 use async_trait::async_trait;
@@ -13,6 +13,7 @@ use dingtalk_stream::frames::{
 };
 use dingtalk_stream::{CallbackMessage, DingTalkStream, Error, ErrorCode, MessageTopic, Resp};
 use itertools::Itertools;
+use log::warn;
 use rig::completion::{AssistantContent, Message};
 use rig::message::{ReasoningContent, ToolCall, ToolFunction};
 use std::ops::Deref;
@@ -23,32 +24,26 @@ use tokio::sync::mpsc::{Receiver, Sender};
 
 pub struct DingtalkChannel {
     ctx: Arc<RwLock<ChannelContext>>,
-    agent_signal_receiver: Receiver<ChannelMessage>,
-    agent_message_sender: AgentMessageSender,
+    agent_message_sender: Sender<AgentRequest>,
     dingtalk_config: DingTalkConfig,
 }
 
 impl DingtalkChannel {
-    pub fn new(
+    pub(crate) fn new(
         config: &'static Config,
-        agent_message_sender: AgentMessageSender,
-    ) -> crate::Result<(Self, ChannelMessageSender)> {
-        let (sender, receiver) = tokio::sync::mpsc::channel(1);
-        Ok((
-            Self {
-                ctx: Arc::new(RwLock::new(ChannelContext {
-                    config: config.clone(),
-                    sessions: Default::default(),
-                })),
-                agent_signal_receiver: receiver,
-                agent_message_sender,
-                dingtalk_config: config
-                    .dingtalk_config
-                    .clone()
-                    .ok_or(anyhow!("dingtalk config not found"))?,
-            },
-            sender.into(),
-        ))
+        agent_message_sender: Sender<AgentRequest>,
+    ) -> crate::Result<Self> {
+        Ok(Self {
+            ctx: Arc::new(RwLock::new(ChannelContext {
+                config: config.clone(),
+                sessions: Default::default(),
+            })),
+            agent_message_sender,
+            dingtalk_config: config
+                .dingtalk_config
+                .clone()
+                .ok_or(anyhow!("dingtalk config not found"))?,
+        })
     }
 }
 
@@ -57,7 +52,7 @@ struct DingTalkCallbackHandler {
     ctx: Arc<RwLock<ChannelContext>>,
     dingtalk_config: DingTalkConfig,
     dingtalk_bot_topic: MessageTopic,
-    agent_message_sender: AgentMessageSender,
+    agent_message_sender: Sender<AgentRequest>,
 }
 
 #[async_trait]
@@ -151,13 +146,13 @@ impl dingtalk_stream::CallbackHandler for DingTalkCallbackHandler {
                     format!(
                         r#"
 {line}
-- Whisper: **Attention**: Current session_id: {session_id}. You are currently not interacting with your owner. Please stay vigilant.
+- Whisper: **Attention**: You are currently not interacting with your owner. Please stay vigilant.
 "#
                     )
                 };
                 let _ = self
                     .agent_message_sender
-                    .send(AgentMessage::Private {
+                    .send(AgentRequest {
                         session_id,
                         message: Message::user(line),
                     })
@@ -172,11 +167,14 @@ impl dingtalk_stream::CallbackHandler for DingTalkCallbackHandler {
     }
 }
 
-impl DingtalkChannel {
-    pub async fn start(self) -> crate::Result<JoinHandle<()>> {
+#[async_trait]
+impl Channel for DingtalkChannel {
+    async fn start(
+        self,
+        message_receiver: Receiver<ChannelMessage>,
+    ) -> crate::Result<JoinHandle<()>> {
         let Self {
             ctx,
-            agent_signal_receiver: receiver,
             agent_message_sender,
             dingtalk_config,
         } = self;
@@ -217,10 +215,10 @@ impl DingtalkChannel {
             let agent_handle = {
                 let ctx = Arc::clone(&ctx);
                 rt.spawn(async move {
-                    let mut receiver = receiver;
-                    let _ = DingtalkChannel::poll_agent_signal(
+                    let mut message_receiver = message_receiver;
+                    let _ = DingtalkChannel::poll_agent_message(
                         &ctx,
-                        &mut receiver,
+                        &mut message_receiver,
                         &dingtalk_msg_sender,
                     )
                     .await;
@@ -236,7 +234,7 @@ impl DingtalkChannel {
 }
 
 impl DingtalkChannel {
-    async fn poll_agent_signal(
+    async fn poll_agent_message(
         ctx: &Arc<RwLock<ChannelContext>>,
         receiver: &mut Receiver<ChannelMessage>,
         dingtalk_msg_sender: &DingtalkMessageSender,
@@ -249,7 +247,7 @@ impl DingtalkChannel {
                 message = receiver.recv() => {
                     if let Some(message) = message {
                         let ctx = ctx.read().await;
-                        match  Self::handle_agent_signal(&*ctx, &message, state, &mut buff, &dingtalk_msg_sender).await{
+                        match  Self::handle_agent_message(&*ctx, &message, state, &mut buff, &dingtalk_msg_sender).await{
                             Ok(AgentRespState::Final) | Err( _)=> {
                                 state = AgentRespState::Wait;
                                 buff.clear();
@@ -277,28 +275,25 @@ impl DingtalkChannel {
         }
     }
 
-    async fn handle_agent_signal(
+    async fn handle_agent_message(
         ctx: &ChannelContext,
-        channel_message: &ChannelMessage,
+        ChannelMessage {
+            session_id,
+            message,
+        }: &ChannelMessage,
         curr_state: AgentRespState,
         buff: &mut Vec<String>,
         dingtalk_msg_sender: &DingtalkMessageSender,
     ) -> crate::Result<AgentRespState> {
-        let session_ids = if let ChannelMessage::Private { session_id, .. } = channel_message {
-            vec![session_id]
-        } else {
-            ctx.sessions.keys().collect_vec()
-        };
-        match channel_message.deref() {
-            AgentSignal::Start => {
+        match message {
+            AgentResponse::Start => {
                 if let AgentRespState::Wait = curr_state {
                     buff.clear();
-                    let robot_messages = Self::create_robot_messages(
-                        &session_ids,
+                    if let Some(robot_message) = Self::create_robot_messages(
+                        session_id,
                         ctx,
                         UpMessageContentMarkdown::from(("思考中...", "正在思考...")).into(),
-                    );
-                    for robot_message in robot_messages {
+                    ) {
                         let _ = dingtalk_msg_sender.send(robot_message).await;
                     }
                     Ok(AgentRespState::Start)
@@ -306,12 +301,12 @@ impl DingtalkChannel {
                     Err(anyhow!("AgentRespState must be Init when starting"))
                 }
             }
-            AgentSignal::ToolCall(ToolCall {
+            AgentResponse::ToolCall(ToolCall {
                 function: ToolFunction { name, arguments },
                 ..
             }) => {
-                let robot_messages = Self::create_robot_messages(
-                    &session_ids,
+                if let Some(robot_message) = Self::create_robot_messages(
+                    session_id,
                     ctx,
                     UpMessageContentMarkdown::from((
                         format!("思考中...(工具调用: {name})"),
@@ -329,13 +324,12 @@ impl DingtalkChannel {
                         ),
                     ))
                     .into(),
-                );
-                for robot_message in robot_messages {
+                ) {
                     let _ = dingtalk_msg_sender.send(robot_message).await;
                 }
                 Ok(curr_state)
             }
-            AgentSignal::ReasoningStream(reasoning) => {
+            AgentResponse::ReasoningStream(reasoning) => {
                 match curr_state {
                     AgentRespState::Start => if ctx.config.show_reasoning {},
                     _ => {}
@@ -349,7 +343,7 @@ impl DingtalkChannel {
                 }
                 Ok(AgentRespState::Reasoning)
             }
-            AgentSignal::MessageStream(message) => {
+            AgentResponse::MessageStream(message) => {
                 match curr_state {
                     AgentRespState::Start => {}
                     AgentRespState::Reasoning => {
@@ -367,9 +361,9 @@ impl DingtalkChannel {
                                     ),
                                 ))
                             };
-                            let robot_messages =
-                                Self::create_robot_messages(&session_ids, ctx, content.into());
-                            for robot_message in robot_messages {
+                            if let Some(robot_message) =
+                                Self::create_robot_messages(session_id, ctx, content.into())
+                            {
                                 let _ = dingtalk_msg_sender.send(robot_message).await;
                             }
                         }
@@ -394,30 +388,7 @@ impl DingtalkChannel {
                 }
                 Ok(AgentRespState::Messaging)
             }
-            AgentSignal::Message(message) => {
-                match message {
-                    Message::Assistant { content, .. } => {
-                        for content in content.iter() {
-                            match content {
-                                AssistantContent::Text(content) => {
-                                    let robot_messages = Self::create_robot_messages(
-                                        &session_ids,
-                                        ctx,
-                                        content.to_string().into(),
-                                    );
-                                    for robot_message in robot_messages {
-                                        let _ = dingtalk_msg_sender.send(robot_message).await;
-                                    }
-                                }
-                                _ => {}
-                            }
-                        }
-                    }
-                    _ => {}
-                }
-                Ok(curr_state)
-            }
-            AgentSignal::Final(usage) => {
+            AgentResponse::Final(usage) => {
                 let content = {
                     let content = UpMessageContentMarkdown::from((
                         "回复中...",
@@ -436,13 +407,14 @@ impl DingtalkChannel {
                     buff.clear();
                     content
                 };
-                let robot_messages = Self::create_robot_messages(&session_ids, ctx, content.into());
-                for robot_message in robot_messages {
+                if let Some(robot_message) =
+                    Self::create_robot_messages(session_id, ctx, content.into())
+                {
                     let _ = dingtalk_msg_sender.send(robot_message).await;
                 }
                 Ok(AgentRespState::Final)
             }
-            AgentSignal::Error(error) => {
+            AgentResponse::Error(error) => {
                 eprintln!("{}", error);
                 Err(anyhow!("Agent error: {}", error))
             }
@@ -450,28 +422,32 @@ impl DingtalkChannel {
     }
 
     fn create_robot_messages(
-        session_ids: &[&SessionId],
+        session_id: &SessionId,
         ctx: &ChannelContext,
         content: UpMessageContent,
-    ) -> Vec<RobotMessage> {
-        session_ids
-            .iter()
-            .flat_map(|&session_id| ctx.sessions.get(session_id))
-            .map(|session| match session {
-                Session::Private { session_id } => RobotPrivateMessage {
+    ) -> Option<RobotMessage> {
+        let Some(session) = ctx.sessions.get(session_id) else {
+            warn!("Session not found for ID: {}", session_id);
+            return None;
+        };
+        match session {
+            Session::Private { session_id } => Some(
+                RobotPrivateMessage {
                     user_ids: vec![DingTalkUserId::from(session_id.deref())],
                     content: content.clone(),
                     send_result_cb: None,
                 }
                 .into(),
-                Session::Group { session_id } => RobotGroupMessage {
+            ),
+            Session::Group { session_id } => Some(
+                RobotGroupMessage {
                     group_id: DingTalkGroupConversationId::from(session_id.deref()),
                     content: content.clone(),
                     send_result_cb: None,
                 }
                 .into(),
-            })
-            .collect_vec()
+            ),
+        }
     }
 }
 

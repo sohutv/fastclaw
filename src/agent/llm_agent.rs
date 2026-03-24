@@ -1,112 +1,106 @@
 use crate::agent::{
-    AgentContext, AgentCtlSignal, AgentMessage, AgentMessageSender, AgentName, AgentSignal,
+    AgentContext, AgentName, AgentRequest, AgentResponse, HistoryManager, LlmAgentSupplier,
     Workspace,
 };
-use crate::channels::{ChannelMessage, ChannelMessageReceiver, SessionId};
+use crate::channels::ChannelMessage;
 use crate::config::Config;
 use crate::model_provider::{ModelName, ModelProvider, ModelSettings};
+use async_trait::async_trait;
 use itertools::Itertools;
-use log::{error, warn};
+use log::warn;
 use rig::OneOrMany;
 use rig::agent::{Agent, MultiTurnStreamItem};
 use rig::client::CompletionClient;
-use rig::completion::{Message, Usage};
+use rig::completion::Message;
 use rig::message::UserContent;
 use rig::streaming::{StreamedAssistantContent, StreamingChat};
-use std::path::Path;
 use std::sync::Arc;
 use tokio::sync::RwLock;
-use tokio::sync::mpsc::Receiver;
+use tokio::sync::mpsc::Sender;
 use tokio::task::JoinHandle;
 use tokio_stream::StreamExt;
 
-pub(crate) struct LlmAgent<C, P>
+#[derive(Clone)]
+pub struct LlmAgent<C>
 where
     C: CompletionClient,
-    P: ModelProvider<C>,
 {
     name: AgentName,
     ctx: Arc<AgentContext>,
-    model_provider: P,
-    model: ModelName,
     model_settings: ModelSettings,
-    agent: RwLock<Agent<C::CompletionModel>>,
-    history: Vec<Message>,
-    usage: Usage,
-    pub msg_sender: AgentMessageSender,
-    msg_receiver: Receiver<AgentMessage>,
-    ctl_signal_receiver: Receiver<AgentCtlSignal>,
+    agent: Agent<C::CompletionModel>,
 }
 
-impl<C, P> LlmAgent<C, P>
+#[async_trait]
+impl<C, P> LlmAgentSupplier for P
 where
-    C: CompletionClient,
-    P: ModelProvider<C>,
+    C: CompletionClient + 'static + Send + Sync,
+    P: ModelProvider<Client = C> + 'static + Send + Sync,
 {
-    #[allow(unused)]
-    pub(crate) async fn fork(&self) -> crate::Result<(Self, ChannelMessageReceiver)> {
-        Self::new(
-            self.name.clone(),
-            self.ctx.config,
-            &self.ctx.workspace.path,
-            self.model_provider.clone(),
-            self.model.clone(),
+    type A = LlmAgent<C>;
+
+    async fn create_agent<N: Into<AgentName> + Send>(
+        &self,
+        name: N,
+        config: &'static Config,
+        model: ModelName,
+        history_manager: &Arc<RwLock<dyn HistoryManager>>,
+        workspace: &'static Workspace,
+    ) -> crate::Result<Self::A> {
+        Ok(LlmAgent::new(
+            name.into(),
+            config,
+            self.clone(),
+            model,
+            Arc::clone(history_manager),
+            workspace,
         )
-        .await
+        .await?)
     }
 }
 
-impl<C, P> LlmAgent<C, P>
+impl<C> LlmAgent<C>
 where
     C: CompletionClient,
-    P: ModelProvider<C>,
 {
-    pub(crate) async fn new<N: Into<AgentName>, WorkDir: AsRef<Path>>(
-        name: N,
+    async fn new<P>(
+        name: AgentName,
         config: &'static Config,
-        workdir: WorkDir,
         model_provider: P,
         model: ModelName,
-    ) -> crate::Result<(Self, ChannelMessageReceiver)> {
-        let (msg_sender, msg_receiver) = tokio::sync::mpsc::channel(1);
-        let (ctl_signal_sender, ctl_signal_receiver) = tokio::sync::mpsc::channel(1);
-        let (channel_message_sender, channel_message_receiver) = tokio::sync::mpsc::channel(1024);
+        history_manager: Arc<RwLock<dyn HistoryManager>>,
+        workspace: &'static Workspace,
+    ) -> crate::Result<Self>
+    where
+        P: ModelProvider<Client = C>,
+    {
         let ctx = Arc::new(AgentContext {
             config,
-            workspace: Workspace::from(&workdir),
-            msg_sender: msg_sender.clone().into(),
-            ctl_signal_sender: ctl_signal_sender.into(),
-            channel_message_sender: channel_message_sender.clone().into(),
+            workspace,
+            history_manager,
         });
         let model_settings = *model_provider
             .model_settings(&model)
             .expect("model settings not found");
         let agent =
             Self::create_agent(&model_provider, &model, &model_settings, Arc::clone(&ctx)).await?;
-        Ok((
-            Self {
-                name: name.into(),
-                ctx,
-                model_provider,
-                model,
-                model_settings,
-                agent: RwLock::new(agent),
-                history: Default::default(),
-                usage: Default::default(),
-                msg_sender: msg_sender.into(),
-                msg_receiver,
-                ctl_signal_receiver,
-            },
-            channel_message_receiver.into(),
-        ))
+        Ok(Self {
+            name: name.into(),
+            ctx,
+            model_settings,
+            agent,
+        })
     }
 
-    async fn create_agent(
+    async fn create_agent<P>(
         provider: &P,
         model: &ModelName,
         model_settings: &ModelSettings,
         ctx: Arc<AgentContext>,
-    ) -> crate::Result<Agent<C::CompletionModel>> {
+    ) -> crate::Result<Agent<C::CompletionModel>>
+    where
+        P: ModelProvider<Client = C>,
+    {
         let model_client = provider.completion_client()?;
         let ModelSettings {
             temperature, tool, ..
@@ -114,91 +108,75 @@ where
         let agent = model_client
             .agent(model.as_str())
             .preamble(&*super::prompt::PromptSection::Identity.build(&ctx).await?)
-            .tools({
-                if *tool {
-                    crate::tools::FunctionTool::required_tools(Arc::clone(&ctx))?
-                } else {
-                    vec![]
-                }
-            })
+            .tools(crate::tools::FunctionTool::required_tools(Arc::clone(
+                &ctx,
+            ))?)
             .temperature(**temperature)
             .default_max_turns(256)
             .build();
         Ok(agent)
     }
 }
-impl<C, P> super::Agent for LlmAgent<C, P>
+impl<C> super::Agent for LlmAgent<C>
 where
     C: CompletionClient + 'static + Send + Sync,
-    P: ModelProvider<C> + 'static + Send + Sync,
 {
-    fn run(self: Box<Self>) -> crate::Result<JoinHandle<()>> {
-        let handle = tokio::spawn(async move {
-            let mut agent = *self;
-            loop {
-                tokio::select! {
-                    message = agent.msg_receiver.recv() => {
-                        if let Some(message) = message {
-                            if let Some(message) = agent.user_message_filter(message) {
-                                   agent.handle_message(message).await;
-                            }
-                        } else {
-                            break;
-                        }
-                    },
-                    ctl_signal = agent.ctl_signal_receiver.recv() => {
-                        if let Some(signal) = ctl_signal {
-                            agent.handle_ctl_signal(signal).await;
-                        }
-                    },
-                    _ = tokio::signal::ctrl_c() => {
-                        break;
-                    }
-                }
+    fn run(
+        self: Self,
+        channel_message_sender: Sender<ChannelMessage>,
+    ) -> crate::Result<(JoinHandle<()>, Sender<AgentRequest>)> {
+        let (request_sender, mut request_receiver) = {
+            let (tx, rx) = tokio::sync::mpsc::channel(1);
+            (tx, rx)
+        };
+        let handle = tokio::task::spawn(async move {
+            let channel_message_sender = channel_message_sender;
+            while let Some(message) = request_receiver.recv().await {
+                self.handle_message(message, channel_message_sender.clone())
+                    .await;
             }
-            log::info!("agent[{}] run exited", agent.name);
         });
-        Ok(handle)
-    }
-
-    fn msg_sender(&self) -> AgentMessageSender {
-        self.msg_sender.clone()
+        Ok((handle, request_sender))
     }
 }
 
-impl<C, P> LlmAgent<C, P>
+impl<C> LlmAgent<C>
 where
     C: CompletionClient + 'static + Send + Sync,
-    P: ModelProvider<C> + 'static + Send + Sync,
 {
-    async fn handle_message(&mut self, agent_message: AgentMessage) {
-        let (ref session_id, message) = match agent_message {
-            AgentMessage::Private {
-                session_id,
-                message,
-            } => (Some(session_id), message),
-            AgentMessage::Group { message } => (None, message),
+    async fn handle_message(
+        &self,
+        request: AgentRequest,
+        channel_message_sender: Sender<ChannelMessage>,
+    ) {
+        let Some(ref request @ AgentRequest { ref session_id, .. }) = self.request_filter(request)
+        else {
+            return;
         };
-        let _ = self
-            .ctx
-            .channel_message_sender
-            .send(Self::create_channel_message(session_id, AgentSignal::Start))
+        let _ = channel_message_sender
+            .send(ChannelMessage {
+                session_id: session_id.clone(),
+                message: AgentResponse::Start,
+            })
             .await;
-        let agent = self.agent.read().await;
-        let mut stream = agent.stream_chat(message, self.history.clone()).await;
+        let history = {
+            let mgr = self.ctx.history_manager.read().await;
+            mgr.load(session_id, &self.name).await.unwrap_or_default()
+        };
+        let mut stream = self.agent.stream_chat(request.clone(), history).await;
         while let Some(result) = stream.next().await {
-            let agent_signal = match result {
+            let response = match result {
                 Ok(MultiTurnStreamItem::StreamAssistantItem(content)) => match content {
                     StreamedAssistantContent::ReasoningDelta { reasoning, .. } => {
-                        Some(AgentSignal::ReasoningStream(
+                        Some(AgentResponse::ReasoningStream(
                             rig::completion::message::Reasoning::new(&reasoning),
                         ))
                     }
-                    StreamedAssistantContent::Text(text) => {
-                        Some(AgentSignal::MessageStream(Message::assistant(text.text())))
-                    }
+                    StreamedAssistantContent::Text(text) => Some(AgentResponse::MessageStream(
+                        Message::assistant(text.text()),
+                    )),
                     StreamedAssistantContent::ToolCall { tool_call, .. } => {
-                        Some(AgentSignal::ToolCall(tool_call))
+                        Some(AgentResponse::ToolCall(tool_call))
                     }
                     _ => None,
                 },
@@ -206,80 +184,39 @@ where
                 Ok(MultiTurnStreamItem::FinalResponse(final_resp)) => {
                     let usage = final_resp.usage();
                     let history = final_resp.history().expect("unexpected empty history!!!");
-                    self.history = history.to_vec();
-                    self.usage = usage;
-                    Some(AgentSignal::Final(usage))
+                    {
+                        let mut mgr = self.ctx.history_manager.write().await;
+                        match mgr
+                            .store(&request.session_id, &self.name, &usage, history)
+                            .await
+                        {
+                            Ok(_) => {}
+                            Err(err) => {
+                                warn!(
+                                    "Store history failed, session_id: {}, agent: {}, err: {}",
+                                    session_id, self.name, err
+                                );
+                            }
+                        }
+                    }
+                    Some(AgentResponse::Final(usage))
                 }
                 Ok(_) => None,
-                Err(err) => Some(AgentSignal::Error(err.to_string())),
+                Err(err) => Some(AgentResponse::Error(err.to_string())),
             };
-            if let Some(agent_signal) = agent_signal {
-                let _ = self
-                    .ctx
-                    .channel_message_sender
-                    .send(Self::create_channel_message(session_id, agent_signal))
+            if let Some(message) = response {
+                let _ = channel_message_sender
+                    .send(ChannelMessage {
+                        session_id: session_id.clone(),
+                        message,
+                    })
                     .await;
             }
         }
     }
 
-    async fn handle_ctl_signal(&mut self, signal: AgentCtlSignal) {
-        match signal {
-            AgentCtlSignal::Reload { id, reason } => {
-                warn!("Received reload signal[{}] with reason: {}", id, reason);
-                let mut agent = self.agent.write().await;
-                match Self::create_agent(
-                    &self.model_provider,
-                    &self.model,
-                    &self.model_settings,
-                    Arc::clone(&self.ctx),
-                )
-                .await
-                {
-                    Ok(update_agent) => {
-                        *agent = update_agent;
-                        warn!("Reload agent with signal[{}] success", id);
-                        let _ = self
-                            .ctx
-                            .msg_sender
-                            .send(AgentMessage::Group {
-                                message: Message::user(
-                                    "You have been reloaded, continue your conversation.",
-                                ),
-                            })
-                            .await;
-                    }
-                    Err(err) => {
-                        error!("Failed to reload agent: {}", err)
-                    }
-                }
-            }
-        }
-    }
-    fn user_message_filter(&self, agent_message: AgentMessage) -> Option<AgentMessage> {
-        match agent_message {
-            AgentMessage::Private {
-                session_id,
-                message,
-            } => {
-                if let Some(message) = self.user_message_filter_actual(message) {
-                    return Some(AgentMessage::Private {
-                        session_id,
-                        message,
-                    });
-                }
-            }
-            AgentMessage::Group { message } => {
-                if let Some(message) = self.user_message_filter_actual(message) {
-                    return Some(AgentMessage::Group { message });
-                }
-            }
-        }
-        None
-    }
-
-    fn user_message_filter_actual(&self, message: Message) -> Option<Message> {
-        if let Message::User { content, .. } = message {
+    fn request_filter(&self, request: AgentRequest) -> Option<AgentRequest> {
+        if let Message::User { content, .. } = request.message {
             let mut vec = content
                 .into_iter()
                 .filter(|item| match item {
@@ -292,29 +229,19 @@ where
                 .collect_vec();
             match vec.len() {
                 0 => None,
-                1 => Some(Message::User {
-                    content: OneOrMany::one(vec.remove(0)),
+                1 => Some(AgentRequest {
+                    session_id: request.session_id,
+                    message: Message::User {
+                        content: OneOrMany::one(vec.remove(0)),
+                    },
                 }),
-                2.. => OneOrMany::many(vec)
-                    .ok()
-                    .map(|content| Message::User { content }),
+                2.. => OneOrMany::many(vec).ok().map(|content| AgentRequest {
+                    session_id: request.session_id,
+                    message: Message::User { content },
+                }),
             }
         } else {
-            Some(message)
-        }
-    }
-
-    fn create_channel_message(
-        session_id: &Option<SessionId>,
-        signal: AgentSignal,
-    ) -> ChannelMessage {
-        if let Some(session_id) = session_id {
-            ChannelMessage::Private {
-                session_id: session_id.clone(),
-                signal,
-            }
-        } else {
-            ChannelMessage::Group { signal }
+            Some(request)
         }
     }
 }

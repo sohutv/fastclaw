@@ -16,7 +16,9 @@ pub struct OpenaiCompatible {
     pub models: BTreeMap<ModelName, ModelSettings>,
 }
 
-impl ModelProvider<Client<OpenAICompletionsExt>> for OpenaiCompatible {
+impl ModelProvider for OpenaiCompatible {
+    type Client = Client<OpenAICompletionsExt>;
+
     fn completion_client(&self) -> crate::Result<Client<OpenAICompletionsExt>> {
         let client = openai::CompletionsClient::builder()
             .base_url(&*self.api_url)
