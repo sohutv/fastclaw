@@ -44,7 +44,7 @@ where
         name: N,
         config: &'static Config,
         model: ModelName,
-        history_manager: &Arc<RwLock<dyn HistoryManager>>,
+        history_manager: Option<Arc<RwLock<dyn HistoryManager>>>,
         workspace: &'static Workspace,
     ) -> crate::Result<Self::A> {
         Ok(LlmAgent::new(
@@ -52,7 +52,7 @@ where
             config,
             self.clone(),
             model,
-            Arc::clone(history_manager),
+            history_manager,
             workspace,
         )
         .await?)
@@ -68,7 +68,7 @@ where
         config: &'static Config,
         model_provider: P,
         model: ModelName,
-        history_manager: Arc<RwLock<dyn HistoryManager>>,
+        history_manager: Option<Arc<RwLock<dyn HistoryManager>>>,
         workspace: &'static Workspace,
     ) -> crate::Result<Self>
     where
@@ -103,7 +103,7 @@ where
     {
         let model_client = provider.completion_client()?;
         let ModelSettings {
-            temperature, tool, ..
+            temperature, ..
         } = model_settings;
         let agent = model_client
             .agent(model.as_str())
@@ -159,9 +159,14 @@ where
                 message: AgentResponse::Start,
             })
             .await;
-        let history = {
-            let mgr = self.ctx.history_manager.read().await;
-            mgr.load(session_id, &self.name).await.unwrap_or_default()
+        let history = if let Some(mgr) = &self.ctx.history_manager {
+            mgr.read()
+                .await
+                .load(session_id, &self.name)
+                .await
+                .unwrap_or_default()
+        } else {
+            vec![]
         };
         let mut stream = self.agent.stream_chat(request.clone(), history).await;
         while let Some(result) = stream.next().await {
@@ -184,18 +189,19 @@ where
                 Ok(MultiTurnStreamItem::FinalResponse(final_resp)) => {
                     let usage = final_resp.usage();
                     let history = final_resp.history().expect("unexpected empty history!!!");
-                    {
-                        let mut mgr = self.ctx.history_manager.write().await;
+                    if let Some(mgr) = &self.ctx.history_manager {
                         match mgr
+                            .write()
+                            .await
                             .store(&request.session_id, &self.name, &usage, history)
                             .await
                         {
                             Ok(_) => {}
                             Err(err) => {
                                 warn!(
-                                    "Store history failed, session_id: {}, agent: {}, err: {}",
-                                    session_id, self.name, err
-                                );
+                                        "Store history failed, session_id: {}, agent: {}, err: {}",
+                                        session_id, self.name, err
+                                    );
                             }
                         }
                     }

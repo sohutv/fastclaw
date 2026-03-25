@@ -3,7 +3,6 @@ use crate::channels;
 use crate::channels::{Channel, ChannelMessage};
 use crate::cli::CmdRunner;
 use crate::config::Config;
-use crate::heartbeat::Heartbeat;
 use crate::model_provider::ModelProviders;
 use anyhow::anyhow;
 use clap::Args;
@@ -62,7 +61,7 @@ impl CmdRunner for Start {
                             "main",
                             config,
                             config.default_model().clone(),
-                            &history_manager,
+                            Some(Arc::clone(&history_manager)),
                             workspace,
                         )
                         .await?
@@ -71,27 +70,13 @@ impl CmdRunner for Start {
             agent.run(channel_message_sender.clone())?
         };
 
-        let (heartbeat_agent_handle, heartbeat_agent_message_sender) = {
-            let agent = Box::new(match config.default_model_provider()? {
-                ModelProviders::OpenaiCompatible(model_provider) => {
-                    model_provider
-                        .create_agent(
-                            "heartbeat",
-                            config,
-                            config.default_model().clone(),
-                            &history_manager,
-                            workspace,
-                        )
-                        .await?
-                }
-            });
-            agent.run(channel_message_sender.clone())?
-        };
+        /* todo
         let heartbeat_handle = {
             let mut heartbeat = Heartbeat::new(config, &history_manager, workspace).await?;
             let handle = heartbeat.start(heartbeat_agent_message_sender).await?;
             handle
         };
+         */
         let channel_handle = match channel {
             #[cfg(feature = "channel_cli_channel")]
             ChannelType::Cli => {
@@ -111,8 +96,7 @@ impl CmdRunner for Start {
             }
         };
         let _ = main_agent_handle.await;
-        let _ = heartbeat_agent_handle.await;
-        let _ = heartbeat_handle.await;
+        //todo let _ = heartbeat_handle.await;
         let _ = channel_handle.join();
         Ok(())
     }

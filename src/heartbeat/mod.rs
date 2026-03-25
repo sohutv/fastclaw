@@ -1,11 +1,9 @@
-use crate::agent::{Agent, AgentRequest, LlmAgentSupplier, HistoryManager, Workspace};
+use crate::agent::{Agent, AgentRequest, LlmAgentSupplier, Workspace};
 use crate::channels::SessionId;
 use crate::config::Config;
 use crate::model_provider::ModelProviders;
 use rig::completion::Message;
-use std::sync::Arc;
 use std::time::Duration;
-use tokio::sync::RwLock;
 use tokio::sync::mpsc::Sender;
 use tokio::task::JoinHandle;
 
@@ -17,7 +15,6 @@ pub struct Heartbeat {
 impl Heartbeat {
     pub async fn new(
         config: &'static Config,
-        history_manager: &Arc<RwLock<dyn HistoryManager>>,
         workspace: &'static Workspace,
     ) -> crate::Result<Self> {
         let agent = Box::new(match config.default_model_provider()? {
@@ -27,7 +24,7 @@ impl Heartbeat {
                         "heartbeat",
                         config,
                         config.default_model().clone(),
-                        &history_manager,
+                        None,
                         workspace,
                     )
                     .await?

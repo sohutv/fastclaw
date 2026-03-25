@@ -46,7 +46,7 @@ pub trait HistoryManager: Send + Sync {
 pub struct AgentContext {
     pub config: &'static Config,
     pub workspace: &'static Workspace,
-    pub history_manager: Arc<RwLock<dyn HistoryManager>>,
+    pub history_manager: Option<Arc<RwLock<dyn HistoryManager>>>,
 }
 
 #[derive(Debug, Clone)]
@@ -79,7 +79,7 @@ pub trait LlmAgentSupplier {
         name: N,
         config: &'static Config,
         model: ModelName,
-        history_manager: &Arc<RwLock<dyn HistoryManager>>,
+        history_manager: Option<Arc<RwLock<dyn HistoryManager>>>,
         workspace: &'static Workspace,
     ) -> crate::Result<Self::A>;
 }
