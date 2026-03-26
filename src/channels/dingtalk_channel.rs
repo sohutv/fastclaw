@@ -224,7 +224,7 @@ impl dingtalk_stream::CallbackHandler for DingTalkCallbackHandler {
                 session_id
             )
         };
-        let mut user_contents = Vec::<UserContent>::new();
+        let mut user_content = Vec::<UserContent>::new();
         if let Some(images) = images {
             for image in images {
                 let mut buf = vec![];
@@ -232,7 +232,7 @@ impl dingtalk_stream::CallbackHandler for DingTalkCallbackHandler {
                 let Ok(_) = image.write_to(cursor, image::ImageFormat::Png) else {
                     continue;
                 };
-                user_contents.push(UserContent::Image(Image {
+                user_content.push(UserContent::Image(Image {
                     data: DocumentSourceKind::Base64(
                         base64::engine::general_purpose::STANDARD.encode(&buf),
                     ),
@@ -261,7 +261,7 @@ impl dingtalk_stream::CallbackHandler for DingTalkCallbackHandler {
                     ("python", DocumentMediaType::Python),
                 ];
                 let file_ext = file_name.split('.').last().unwrap_or_default();
-                user_contents.push(UserContent::Document(Document {
+                user_content.push(UserContent::Document(Document {
                     data: DocumentSourceKind::Base64(
                         base64::engine::general_purpose::STANDARD.encode(bytes),
                     ),
@@ -274,16 +274,16 @@ impl dingtalk_stream::CallbackHandler for DingTalkCallbackHandler {
                 }));
             }
         }
-        if line.is_some() || user_contents.len() > 0 {
-            user_contents.push(UserContent::Text(prompt.into()));
+        if line.is_some() || user_content.len() > 0 {
+            user_content.push(UserContent::Text(prompt.into()));
         }
-        let user_content = if user_contents.is_empty() {
+        let user_content = if user_content.is_empty() {
             None
         } else {
-            if user_contents.len() == 1 {
-                user_contents.pop().map(|it| OneOrMany::one(it))
+            if user_content.len() == 1 {
+                user_content.pop().map(|it| OneOrMany::one(it))
             } else {
-                OneOrMany::many(user_contents).ok()
+                OneOrMany::many(user_content).ok()
             }
         };
         let Some(user_content) = user_content else {
