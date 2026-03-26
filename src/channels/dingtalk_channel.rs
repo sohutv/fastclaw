@@ -8,9 +8,9 @@ use base64::Engine;
 use dingtalk_stream::client::{DingtalkMessageSender, DingtalkResource};
 use dingtalk_stream::frames::{
     CallbackMessageConversation, CallbackMessageData, CallbackMessagePayload,
-    CallbackMessagePayloadFile, CallbackWebhookMessage, DingTalkGroupConversationId,
-    DingTalkUserId, RichTextItem, RobotGroupMessage, RobotMessage, RobotPrivateMessage,
-    UpMessageContent, UpMessageContentMarkdown,
+    CallbackWebhookMessage, DingTalkGroupConversationId, DingTalkUserId, RichTextItem,
+    RobotGroupMessage, RobotMessage, RobotPrivateMessage, UpMessageContent,
+    UpMessageContentMarkdown,
 };
 use dingtalk_stream::{CallbackMessage, DingTalkStream, Error, ErrorCode, MessageTopic, Resp};
 use itertools::Itertools;
@@ -18,8 +18,8 @@ use log::warn;
 use rig::OneOrMany;
 use rig::completion::{AssistantContent, Message};
 use rig::message::{
-    Document, DocumentMediaType, DocumentSourceKind, Image, ImageDetail, ImageMediaType,
-    ReasoningContent, ToolCall, ToolFunction, UserContent,
+    DocumentSourceKind, Image, ImageDetail, ImageMediaType, ReasoningContent, ToolCall,
+    ToolFunction, UserContent,
 };
 use std::io::Cursor;
 use std::ops::Deref;
@@ -150,7 +150,7 @@ impl dingtalk_stream::CallbackHandler for DingTalkCallbackHandler {
                     ctx.workspace.path.join("downloads")
                 };
                 match content.fetch(dingtalk_client, downloads_dir).await {
-                    Ok((_, file)) => (None, None, None, Some(vec![(content, file)])),
+                    Ok((filepath, _)) => (None, None, None, Some(vec![filepath])),
                     Err(e) => (
                         None,
                         Some(format!("下载文件 {} 失败, {}", content.file_name, e)),
@@ -243,35 +243,18 @@ impl dingtalk_stream::CallbackHandler for DingTalkCallbackHandler {
             }
         }
         if let Some(files) = files {
-            for (CallbackMessagePayloadFile { file_name, .. }, bytes) in files {
-                const PLAIN_TXT_TYPES: &[(&str, DocumentMediaType)] = &[
-                    ("txt", DocumentMediaType::TXT),
-                    ("json", DocumentMediaType::TXT),
-                    ("rtf", DocumentMediaType::RTF),
-                    ("html", DocumentMediaType::HTML),
-                    ("htm", DocumentMediaType::HTML),
-                    ("xhtml", DocumentMediaType::HTML),
-                    ("css", DocumentMediaType::CSS),
-                    ("md", DocumentMediaType::MARKDOWN),
-                    ("markdown", DocumentMediaType::MARKDOWN),
-                    ("csv", DocumentMediaType::CSV),
-                    ("xml", DocumentMediaType::XML),
-                    ("js", DocumentMediaType::Javascript),
-                    ("ts", DocumentMediaType::Javascript),
-                    ("python", DocumentMediaType::Python),
-                ];
-                let file_ext = file_name.split('.').last().unwrap_or_default();
-                user_content.push(UserContent::Document(Document {
-                    data: DocumentSourceKind::Base64(
-                        base64::engine::general_purpose::STANDARD.encode(bytes),
-                    ),
-                    media_type: PLAIN_TXT_TYPES
-                        .iter()
-                        .filter(|(it, _)| it.eq_ignore_ascii_case(file_ext))
-                        .map(|(_, it)| it.clone())
-                        .next(),
-                    additional_params: None,
-                }));
+            let ctx = self.ctx.read().await;
+            let workspace_path = &ctx.workspace.path;
+            for filepath in files.iter().flat_map(|it| it.strip_prefix(workspace_path)) {
+                user_content.push(UserContent::Text(
+                    format!(
+                        r#"
+解读文件 filepath: {}
+                "#,
+                        filepath.display()
+                    )
+                    .into(),
+                ));
             }
         }
         if line.is_some() || user_content.len() > 0 {
