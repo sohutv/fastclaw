@@ -21,6 +21,7 @@ use rig::message::{
     Document, DocumentMediaType, DocumentSourceKind, Image, ImageDetail, ImageMediaType,
     ReasoningContent, ToolCall, ToolFunction, UserContent,
 };
+use std::io::Cursor;
 use std::ops::Deref;
 use std::sync::Arc;
 use std::thread::JoinHandle;
@@ -226,9 +227,14 @@ impl dingtalk_stream::CallbackHandler for DingTalkCallbackHandler {
         let mut user_contents = Vec::<UserContent>::new();
         if let Some(images) = images {
             for image in images {
+                let mut buf = vec![];
+                let cursor = Cursor::new(&mut buf);
+                let Ok(_) = image.write_to(cursor, image::ImageFormat::Png) else {
+                    continue;
+                };
                 user_contents.push(UserContent::Image(Image {
                     data: DocumentSourceKind::Base64(
-                        base64::engine::general_purpose::STANDARD.encode(image.into_bytes()),
+                        base64::engine::general_purpose::STANDARD.encode(&buf),
                     ),
                     media_type: Some(ImageMediaType::PNG),
                     detail: Some(ImageDetail::Auto),
@@ -240,6 +246,7 @@ impl dingtalk_stream::CallbackHandler for DingTalkCallbackHandler {
             for (CallbackMessagePayloadFile { file_name, .. }, bytes) in files {
                 const PLAIN_TXT_TYPES: &[(&str, DocumentMediaType)] = &[
                     ("txt", DocumentMediaType::TXT),
+                    ("json", DocumentMediaType::TXT),
                     ("rtf", DocumentMediaType::RTF),
                     ("html", DocumentMediaType::HTML),
                     ("htm", DocumentMediaType::HTML),
