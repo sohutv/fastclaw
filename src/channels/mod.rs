@@ -9,10 +9,12 @@ use std::thread::JoinHandle;
 use tokio::sync::mpsc::Receiver;
 
 #[cfg(feature = "channel_cli_channel")]
-pub(crate) mod cli_channel;
+pub mod cli_channel;
 mod console_cmd;
 #[cfg(feature = "channel_dingtalk_channel")]
-pub(crate) mod dingtalk_channel;
+pub mod dingtalk_channel;
+
+pub mod a2a_channel;
 
 #[async_trait]
 pub trait Channel {

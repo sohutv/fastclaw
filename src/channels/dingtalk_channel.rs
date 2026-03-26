@@ -29,7 +29,7 @@ pub struct DingtalkChannel {
 }
 
 impl DingtalkChannel {
-    pub(crate) fn new(
+    pub fn new(
         config: &'static Config,
         agent_message_sender: Sender<AgentRequest>,
     ) -> crate::Result<Self> {
