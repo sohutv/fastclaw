@@ -3,17 +3,18 @@ use async_trait::async_trait;
 use derive_more::{Deref, Display, Into};
 use rig::completion::Usage;
 use rig::message::{Message, Reasoning, ToolCall};
+use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use tokio::sync::RwLock;
 use tokio::sync::mpsc::Sender;
 use tokio::task::JoinHandle;
 
-mod jsonl_history_manager;
-pub use jsonl_history_manager::JsonlHistoryManager;
-
 mod llm_agent;
 mod prompt;
+
+mod session_history;
+pub use session_history::{HistoryManager, JsonlHistoryManager};
 
 use crate::config::Config;
 use crate::model_provider::ModelName;
@@ -23,22 +24,6 @@ pub trait Agent: Send + Sync {
         self: Self,
         channel_message_sender: Sender<ChannelMessage>,
     ) -> crate::Result<(JoinHandle<()>, Sender<AgentRequest>)>;
-}
-
-#[async_trait]
-pub trait HistoryManager: Send + Sync {
-    async fn store(
-        &mut self,
-        session_id: &SessionId,
-        agent: &AgentName,
-        usage: &Usage,
-        message: &[Message],
-    ) -> crate::Result<()>;
-
-    async fn load(&self, session_id: &SessionId, agent: &AgentName) -> crate::Result<Vec<Message>>;
-
-    #[allow(unused)]
-    async fn usage(&self, session_id: &SessionId, agent: &AgentName) -> crate::Result<Usage>;
 }
 
 #[allow(unused)]
@@ -62,7 +47,7 @@ impl<P: AsRef<Path>> From<P> for Workspace {
     }
 }
 
-#[derive(Debug, Clone, Deref, Eq, PartialEq, Ord, PartialOrd, Display)]
+#[derive(Debug, Clone, Deref, Eq, PartialEq, Ord, PartialOrd, Display, Serialize, Deserialize)]
 pub struct AgentName(String);
 
 impl<S: Into<String>> From<S> for AgentName {

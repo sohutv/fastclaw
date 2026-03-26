@@ -70,6 +70,7 @@ pub struct ModelSettings {
     pub tool: bool,
     pub reranker: bool,
     pub embedding: bool,
+    pub context: ModelContext,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, From, Deref, PartialEq)]
@@ -80,5 +81,23 @@ impl Eq for Temperature {}
 impl Default for Temperature {
     fn default() -> Self {
         Self(1.0)
+    }
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+#[serde(default)]
+pub struct ModelContext {
+    pub window_size: usize,
+    pub max_tokens: usize,
+    pub compact_threshold: f32,
+}
+
+impl Default for ModelContext {
+    fn default() -> Self {
+        ModelContext {
+            window_size: 16,
+            max_tokens: 65536,
+            compact_threshold: 0.8,
+        }
     }
 }

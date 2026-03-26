@@ -7,6 +7,8 @@ mod shell_tool;
 mod time_tool;
 mod task_tool;
 
+mod history_backup_tool;
+
 #[derive(Debug, Copy, Clone, serde::Deserialize)]
 pub enum RiskLevel {
     Low,
@@ -33,6 +35,7 @@ impl FunctionTool {
         Ok(vec![
             Box::new(shell_tool::ShellTool::new(Arc::clone(&ctx))?),
             Box::new(time_tool::CurrentTimeTool),
+            Box::new(history_backup_tool::SessionHistoryBackupTool::new(Arc::clone(&ctx))?),
         ])
     }
 }

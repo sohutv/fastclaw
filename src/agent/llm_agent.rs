@@ -2,18 +2,19 @@ use crate::agent::{
     AgentContext, AgentName, AgentRequest, AgentResponse, HistoryManager, LlmAgentSupplier,
     Workspace,
 };
-use crate::channels::ChannelMessage;
+use crate::channels::{ChannelMessage, SessionId};
 use crate::config::Config;
-use crate::model_provider::{ModelName, ModelProvider, ModelSettings};
+use crate::model_provider::{ModelContext, ModelName, ModelProvider, ModelSettings};
 use async_trait::async_trait;
 use itertools::Itertools;
 use log::warn;
 use rig::OneOrMany;
 use rig::agent::{Agent, MultiTurnStreamItem};
 use rig::client::CompletionClient;
-use rig::completion::Message;
+use rig::completion::{Chat, Message, Usage};
 use rig::message::UserContent;
 use rig::streaming::{StreamedAssistantContent, StreamingChat};
+use std::ops::DerefMut;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 use tokio::sync::mpsc::Sender;
@@ -102,9 +103,7 @@ where
         P: ModelProvider<Client = C>,
     {
         let model_client = provider.completion_client()?;
-        let ModelSettings {
-            temperature, ..
-        } = model_settings;
+        let ModelSettings { temperature, .. } = model_settings;
         let agent = model_client
             .agent(model.as_str())
             .preamble(&*super::prompt::PromptSection::Identity.build(&ctx).await?)
@@ -162,7 +161,11 @@ where
         let history = if let Some(mgr) = &self.ctx.history_manager {
             mgr.read()
                 .await
-                .load(session_id, &self.name)
+                .load(
+                    session_id,
+                    &self.name,
+                    self.model_settings.context.window_size,
+                )
                 .await
                 .unwrap_or_default()
         } else {
@@ -190,20 +193,14 @@ where
                     let usage = final_resp.usage();
                     let history = final_resp.history().expect("unexpected empty history!!!");
                     if let Some(mgr) = &self.ctx.history_manager {
-                        match mgr
-                            .write()
-                            .await
-                            .store(&request.session_id, &self.name, &usage, history)
-                            .await
-                        {
-                            Ok(_) => {}
-                            Err(err) => {
-                                warn!(
-                                        "Store history failed, session_id: {}, agent: {}, err: {}",
-                                        session_id, self.name, err
-                                    );
-                            }
-                        }
+                        self.history_compact(
+                            mgr,
+                            &request.session_id,
+                            &self.model_settings.context,
+                            &usage,
+                            history,
+                        )
+                        .await;
                     }
                     Some(AgentResponse::Final(usage))
                 }
@@ -248,6 +245,70 @@ where
             }
         } else {
             Some(request)
+        }
+    }
+
+    async fn history_compact(
+        &self,
+        history_manager: &Arc<RwLock<dyn HistoryManager>>,
+        session_id: &SessionId,
+        ModelContext {
+            max_tokens,
+            compact_threshold,
+            ..
+        }: &ModelContext,
+        usage: &Usage,
+        history: &[Message],
+    ) {
+        {
+            match history_manager
+                .write()
+                .await
+                .store(session_id, &self.name, &usage, history)
+                .await
+            {
+                Ok(_) => {}
+                Err(err) => {
+                    warn!(
+                        "Store history failed, session_id: {}, agent: {}, err: {}",
+                        session_id, self.name, err
+                    );
+                }
+            }
+        }
+        if usage.total_tokens < ((*max_tokens as f32 * compact_threshold) as u64) {
+            return;
+        }
+        // compact history
+        match self
+            .agent
+            .chat(
+                format!(
+                    r#"
+立即按要求执行会话历史的“瘦身”维护任务: 备份会话历史并生成精炼的上下文总结
+当前AgentName: {}
+当前会话 session_id: {}
+{}
+                            "#,
+                    self.name,
+                    session_id,
+                    include_str!("./prompt/history_compact_prompt.md")
+                ),
+                history.to_vec(),
+            )
+            .await
+        {
+            Ok(text) => {
+                let message = Message::assistant(text);
+                let _ = history_manager
+                    .write()
+                    .await
+                    .store(session_id, &self.name, &usage, &[message])
+                    .await;
+            }
+            Err(err) => {
+                warn!("history compact failed: {}", err);
+            }
         }
     }
 }
