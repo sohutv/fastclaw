@@ -1,4 +1,4 @@
-use crate::agent::AgentResponse;
+use crate::agent::{Agent, AgentResponse};
 use crate::config::Config;
 use async_trait::async_trait;
 use derive_more::{Deref, Display};
@@ -6,7 +6,6 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::ops::Deref;
 use std::thread::JoinHandle;
-use tokio::sync::mpsc::Receiver;
 
 #[cfg(feature = "channel_cli_channel")]
 pub mod cli_channel;
@@ -20,7 +19,7 @@ pub mod a2a_channel;
 pub trait Channel {
     async fn start(
         self,
-        message_receiver: Receiver<ChannelMessage>,
+        agent: Box<dyn Agent>,
     ) -> crate::Result<JoinHandle<()>>;
 }
 

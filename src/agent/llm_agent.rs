@@ -1,35 +1,34 @@
 use crate::agent::{
-    AgentContext, AgentName, AgentRequest, AgentResponse, HistoryManager, LlmAgentSupplier,
-    Workspace,
+    AgentContext, AgentId, AgentRequest, AgentResponse, HistoryManager, LlmAgentSupplier, Workspace,
 };
 use crate::channels::{ChannelMessage, SessionId};
 use crate::config::Config;
 use crate::model_provider::{ModelContext, ModelName, ModelProvider, ModelSettings};
 use async_trait::async_trait;
 use itertools::Itertools;
-use log::warn;
+use log::{info, warn};
 use rig::OneOrMany;
 use rig::agent::{Agent, MultiTurnStreamItem};
 use rig::client::CompletionClient;
-use rig::completion::{Chat, Message, Usage};
+use rig::completion::{Completion, CompletionResponse, Message, Usage};
 use rig::message::UserContent;
 use rig::streaming::{StreamedAssistantContent, StreamingChat};
-use std::ops::DerefMut;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 use tokio::sync::mpsc::Sender;
-use tokio::task::JoinHandle;
 use tokio_stream::StreamExt;
 
 #[derive(Clone)]
-pub struct LlmAgent<C>
+pub struct LlmAgent<C, P>
 where
     C: CompletionClient,
+    P: ModelProvider<Client = C>,
 {
-    name: AgentName,
+    id: AgentId,
     ctx: Arc<AgentContext>,
+    model_provider: P,
+    model_name: ModelName,
     model_settings: ModelSettings,
-    agent: Agent<C::CompletionModel>,
 }
 
 #[async_trait]
@@ -38,18 +37,18 @@ where
     C: CompletionClient + 'static + Send + Sync,
     P: ModelProvider<Client = C> + 'static + Send + Sync,
 {
-    type A = LlmAgent<C>;
+    type A = LlmAgent<C, P>;
 
-    async fn create_agent<N: Into<AgentName> + Send>(
+    async fn create_agent<ID: Into<AgentId> + Send>(
         &self,
-        name: N,
+        agent_id: ID,
         config: &'static Config,
         model: ModelName,
         history_manager: Option<Arc<RwLock<dyn HistoryManager>>>,
         workspace: &'static Workspace,
     ) -> crate::Result<Self::A> {
         Ok(LlmAgent::new(
-            name.into(),
+            agent_id.into(),
             config,
             self.clone(),
             model,
@@ -60,55 +59,58 @@ where
     }
 }
 
-impl<C> LlmAgent<C>
+impl<C, P> LlmAgent<C, P>
 where
     C: CompletionClient,
+    P: ModelProvider<Client = C>,
 {
-    async fn new<P>(
-        name: AgentName,
+    async fn new(
+        agent_id: AgentId,
         config: &'static Config,
         model_provider: P,
-        model: ModelName,
+        model_name: ModelName,
         history_manager: Option<Arc<RwLock<dyn HistoryManager>>>,
         workspace: &'static Workspace,
-    ) -> crate::Result<Self>
-    where
-        P: ModelProvider<Client = C>,
-    {
+    ) -> crate::Result<Self> {
         let ctx = Arc::new(AgentContext {
             config,
             workspace,
             history_manager,
         });
         let model_settings = *model_provider
-            .model_settings(&model)
+            .model_settings(&model_name)
             .expect("model settings not found");
-        let agent =
-            Self::create_agent(&model_provider, &model, &model_settings, Arc::clone(&ctx)).await?;
         Ok(Self {
-            name: name.into(),
+            id: agent_id.into(),
             ctx,
+            model_provider,
+            model_name,
             model_settings,
-            agent,
         })
     }
 
-    async fn create_agent<P>(
-        provider: &P,
-        model: &ModelName,
-        model_settings: &ModelSettings,
-        ctx: Arc<AgentContext>,
-    ) -> crate::Result<Agent<C::CompletionModel>>
+    async fn create_agent(&self) -> crate::Result<Agent<C::CompletionModel>>
     where
         P: ModelProvider<Client = C>,
     {
-        let model_client = provider.completion_client()?;
-        let ModelSettings { temperature, .. } = model_settings;
+        let model_client = &self.model_provider.completion_client()?;
+        let ModelSettings { temperature, .. } = &self.model_settings;
         let agent = model_client
-            .agent(model.as_str())
-            .preamble(&*super::prompt::PromptSection::Identity.build(&ctx).await?)
+            .agent(&*self.model_name)
+            .preamble(
+                &*super::prompt::PromptSection::Identity
+                    .build(&self.ctx)
+                    .await?,
+            )
+            .append_preamble(&format!(
+                r#"
+# MetaData
+- **Your AgentId**: {}
+            "#,
+                &self.id
+            ))
             .tools(crate::tools::FunctionTool::required_tools(Arc::clone(
-                &ctx,
+                &self.ctx,
             ))?)
             .temperature(**temperature)
             .default_max_turns(256)
@@ -116,32 +118,37 @@ where
         Ok(agent)
     }
 }
-impl<C> super::Agent for LlmAgent<C>
+
+#[async_trait]
+impl<C, P> super::Agent for LlmAgent<C, P>
 where
     C: CompletionClient + 'static + Send + Sync,
+    P: ModelProvider<Client = C> + 'static + Send + Sync,
 {
-    fn run(
-        self: Self,
+    async fn run(
+        &self,
+        request: AgentRequest,
         channel_message_sender: Sender<ChannelMessage>,
-    ) -> crate::Result<(JoinHandle<()>, Sender<AgentRequest>)> {
-        let (request_sender, mut request_receiver) = {
-            let (tx, rx) = tokio::sync::mpsc::channel(1);
-            (tx, rx)
-        };
-        let handle = tokio::task::spawn(async move {
-            let channel_message_sender = channel_message_sender;
-            while let Some(message) = request_receiver.recv().await {
-                self.handle_message(message, channel_message_sender.clone())
-                    .await;
-            }
-        });
-        Ok((handle, request_sender))
+    ) -> crate::Result<()> {
+        self.handle_message(request, channel_message_sender.clone())
+            .await;
+        Ok(())
+    }
+
+    async fn session_compact(
+        &self,
+        channel_message_sender: Sender<ChannelMessage>,
+        session_id: &SessionId,
+    ) -> crate::Result<Option<Usage>> {
+        self.session_history_compact(channel_message_sender, session_id, None)
+            .await
     }
 }
 
-impl<C> LlmAgent<C>
+impl<C, P> LlmAgent<C, P>
 where
     C: CompletionClient + 'static + Send + Sync,
+    P: ModelProvider<Client = C> + 'static + Send + Sync,
 {
     async fn handle_message(
         &self,
@@ -163,7 +170,7 @@ where
                 .await
                 .load(
                     session_id,
-                    &self.name,
+                    &self.id,
                     self.model_settings.context.window_size,
                 )
                 .await
@@ -171,7 +178,9 @@ where
         } else {
             vec![]
         };
-        let mut stream = self.agent.stream_chat(request.clone(), history).await;
+
+        let agent = self.create_agent().await.unwrap();
+        let mut stream = agent.stream_chat(request.clone(), history).await;
         while let Some(result) = stream.next().await {
             let response = match result {
                 Ok(MultiTurnStreamItem::StreamAssistantItem(content)) => match content {
@@ -193,7 +202,8 @@ where
                     let usage = final_resp.usage();
                     let history = final_resp.history().expect("unexpected empty history!!!");
                     if let Some(mgr) = &self.ctx.history_manager {
-                        self.history_compact(
+                        self.handle_session_history(
+                            channel_message_sender.clone(),
                             mgr,
                             &request.session_id,
                             &self.model_settings.context,
@@ -248,8 +258,9 @@ where
         }
     }
 
-    async fn history_compact(
+    async fn handle_session_history(
         &self,
+        channel_message_sender: Sender<ChannelMessage>,
         history_manager: &Arc<RwLock<dyn HistoryManager>>,
         session_id: &SessionId,
         ModelContext {
@@ -264,51 +275,101 @@ where
             match history_manager
                 .write()
                 .await
-                .store(session_id, &self.name, &usage, history)
+                .store(session_id, &self.id, &usage, history)
                 .await
             {
                 Ok(_) => {}
                 Err(err) => {
                     warn!(
                         "Store history failed, session_id: {}, agent: {}, err: {}",
-                        session_id, self.name, err
+                        session_id, self.id, err
                     );
                 }
             }
         }
-        if usage.total_tokens < ((*max_tokens as f32 * compact_threshold) as u64) {
-            return;
+        if usage.total_tokens >= ((*max_tokens as f32 * compact_threshold) as u64) {
+            match self
+                .session_history_compact(channel_message_sender, session_id, Some((history, usage)))
+                .await
+            {
+                Ok(Some(usage_after_compact)) => info!(
+                    "Compact session{session_id} history ok, total usage {} -> {}, compression ratio: {:.2}%",
+                    usage.total_tokens,
+                    usage_after_compact.total_tokens,
+                    (usage_after_compact.total_tokens as f32 / usage.total_tokens as f32) * 100.
+                ),
+                Ok(None) => {
+                    info!("Compact session{session_id} ignore, no history to compact");
+                }
+                Err(err) => {
+                    warn!(
+                        "Compact session history failed, session_id: {}, agent: {}, err: {}",
+                        session_id, self.id, err
+                    );
+                }
+            }
         }
-        // compact history
-        match self
-            .agent
-            .chat(
+    }
+
+    async fn session_history_compact(
+        &self,
+        channel_message_sender: Sender<ChannelMessage>,
+        session_id: &SessionId,
+        history: Option<(&[Message], &Usage)>,
+    ) -> crate::Result<Option<Usage>> {
+        let Some(history_manager) = self.ctx.history_manager.as_ref() else {
+            return Ok(history.map(|(_, it)| *it));
+        };
+        let (history, current_usage) = if let Some((history, usage)) = history {
+            (history.to_vec(), *usage)
+        } else {
+            let mgr = history_manager.read().await;
+            mgr.load_with_offset(session_id, &self.id, None, None)
+                .await?
+        };
+        let CompletionResponse {
+            choice,
+            usage: usage_after_compact,
+            message_id,
+            ..
+        } = self
+            .create_agent()
+            .await
+            .unwrap()
+            .completion(
                 format!(
                     r#"
-立即按要求执行会话历史的“瘦身”维护任务: 备份会话历史并生成精炼的上下文总结
-当前AgentName: {}
 当前会话 session_id: {}
+立即按要求执行会话历史的“瘦身”维护任务: 备份会话历史并生成精炼的上下文总结
 {}
                             "#,
-                    self.name,
                     session_id,
                     include_str!("./prompt/history_compact_prompt.md")
                 ),
-                history.to_vec(),
+                history,
             )
+            .await?
+            .send()
+            .await?;
+        let message = Message::Assistant {
+            id: message_id,
+            content: choice,
+        };
+        let _ = history_manager
+            .write()
             .await
-        {
-            Ok(text) => {
-                let message = Message::assistant(text);
-                let _ = history_manager
-                    .write()
-                    .await
-                    .store(session_id, &self.name, &usage, &[message])
-                    .await;
-            }
-            Err(err) => {
-                warn!("history compact failed: {}", err);
-            }
-        }
+            .store(session_id, &self.id, &usage_after_compact, &[message])
+            .await;
+        // compact history
+        let _ = channel_message_sender
+            .send(ChannelMessage {
+                session_id: session_id.clone(),
+                message: AgentResponse::HistoryCompact {
+                    before: current_usage,
+                    after: usage_after_compact,
+                },
+            })
+            .await;
+        Ok(Some(usage_after_compact))
     }
 }

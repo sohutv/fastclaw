@@ -8,7 +8,6 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use tokio::sync::RwLock;
 use tokio::sync::mpsc::Sender;
-use tokio::task::JoinHandle;
 
 mod llm_agent;
 mod prompt;
@@ -19,11 +18,19 @@ pub use session_history::{HistoryManager, JsonlHistoryManager};
 use crate::config::Config;
 use crate::model_provider::ModelName;
 
+#[async_trait]
 pub trait Agent: Send + Sync {
-    fn run(
-        self: Self,
+    async fn run(
+        &self,
+        request: AgentRequest,
         channel_message_sender: Sender<ChannelMessage>,
-    ) -> crate::Result<(JoinHandle<()>, Sender<AgentRequest>)>;
+    ) -> crate::Result<()>;
+
+    async fn session_compact(
+        &self,
+        channel_message_sender: Sender<ChannelMessage>,
+        session_id: &SessionId,
+    ) -> crate::Result<Option<Usage>>;
 }
 
 #[allow(unused)]
@@ -48,9 +55,9 @@ impl<P: AsRef<Path>> From<P> for Workspace {
 }
 
 #[derive(Debug, Clone, Deref, Eq, PartialEq, Ord, PartialOrd, Display, Serialize, Deserialize)]
-pub struct AgentName(String);
+pub struct AgentId(String);
 
-impl<S: Into<String>> From<S> for AgentName {
+impl<S: Into<String>> From<S> for AgentId {
     fn from(value: S) -> Self {
         Self(value.into())
     }
@@ -59,7 +66,7 @@ impl<S: Into<String>> From<S> for AgentName {
 #[async_trait]
 pub trait LlmAgentSupplier {
     type A: Agent;
-    async fn create_agent<N: Into<AgentName> + Send>(
+    async fn create_agent<N: Into<AgentId> + Send>(
         &self,
         name: N,
         config: &'static Config,
@@ -85,4 +92,5 @@ pub enum AgentResponse {
     MessageStream(Message),
     Final(Usage),
     Error(String),
+    HistoryCompact { before: Usage, after: Usage },
 }

@@ -1,5 +1,5 @@
 use crate::agent::session_history::BackupTimestamp;
-use crate::agent::{AgentName, HistoryManager, Workspace};
+use crate::agent::{AgentId, HistoryManager, Workspace};
 use crate::channels::SessionId;
 use async_trait::async_trait;
 use itertools::Itertools;
@@ -27,7 +27,7 @@ impl HistoryManager for JsonlHistoryManager {
     async fn store(
         &mut self,
         session_id: &SessionId,
-        agent: &AgentName,
+        agent: &AgentId,
         usage: &Usage,
         messages: &[Message],
     ) -> crate::Result<()> {
@@ -51,14 +51,14 @@ impl HistoryManager for JsonlHistoryManager {
     async fn load_with_offset(
         &self,
         session_id: &SessionId,
-        agent: &AgentName,
+        agent: &AgentId,
         offset: Option<usize>,
         limit: Option<usize>,
-    ) -> crate::Result<Vec<Message>> {
+    ) -> crate::Result<(Vec<Message>, Usage)> {
         let dir = self.history_dir(session_id, agent).await?;
         let filepath = dir.join("history.jsonl");
         if !filepath.exists() {
-            return Ok(Vec::new());
+            return Ok((Default::default(), Default::default()));
         }
         let file = fs::File::open(&filepath).await?;
         let reader = BufReader::new(file);
@@ -78,10 +78,18 @@ impl HistoryManager for JsonlHistoryManager {
                 break;
             }
         }
-        Ok(messages.into_iter().rev().collect())
+        let usage_filepath = dir.join("usage.json");
+        let usage: Usage = if !usage_filepath.exists() {
+            None
+        } else {
+            let json = fs::read_to_string(&usage_filepath).await?;
+            serde_json::from_str::<Usage>(&json).ok()
+        }
+        .unwrap_or_default();
+        Ok((messages.into_iter().rev().collect(), usage))
     }
 
-    async fn usage(&self, session_id: &SessionId, agent: &AgentName) -> crate::Result<Usage> {
+    async fn usage(&self, session_id: &SessionId, agent: &AgentId) -> crate::Result<Usage> {
         let dir = self.history_dir(session_id, agent).await?;
         let usage_filepath = dir.join("usage.json");
         if !usage_filepath.exists() {
@@ -94,7 +102,7 @@ impl HistoryManager for JsonlHistoryManager {
     async fn backup(
         &mut self,
         session_id: &SessionId,
-        agent: &AgentName,
+        agent: &AgentId,
     ) -> crate::Result<(PathBuf, BackupTimestamp)> {
         let dir = self.history_dir(session_id, agent).await?;
         let timestamp = chrono::Local::now().format("%Y%m%d%H%M%S");
@@ -103,7 +111,7 @@ impl HistoryManager for JsonlHistoryManager {
             dir.join(format!("history_{timestamp}.jsonl")),
         );
         if src.exists() {
-            let messages = self.load_with_offset(session_id, agent, None, None).await?;
+            let (messages, _) = self.load_with_offset(session_id, agent, None, None).await?;
             let lines = messages
                 .iter()
                 .flat_map(|it| serde_json::to_string(&it).ok())
@@ -121,11 +129,7 @@ impl HistoryManager for JsonlHistoryManager {
 }
 
 impl JsonlHistoryManager {
-    async fn history_dir(
-        &self,
-        session_id: &SessionId,
-        agent: &AgentName,
-    ) -> crate::Result<PathBuf> {
+    async fn history_dir(&self, session_id: &SessionId, agent: &AgentId) -> crate::Result<PathBuf> {
         let dir = self
             .workspace
             .path

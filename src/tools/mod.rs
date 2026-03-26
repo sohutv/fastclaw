@@ -6,8 +6,8 @@ use std::sync::Arc;
 mod shell_tool;
 mod time_tool;
 mod task_tool;
-
-mod history_backup_tool;
+mod session_history_tool;
+mod memory_tool;
 
 #[derive(Debug, Copy, Clone, serde::Deserialize)]
 pub enum RiskLevel {
@@ -35,7 +35,7 @@ impl FunctionTool {
         Ok(vec![
             Box::new(shell_tool::ShellTool::new(Arc::clone(&ctx))?),
             Box::new(time_tool::CurrentTimeTool),
-            Box::new(history_backup_tool::SessionHistoryBackupTool::new(Arc::clone(&ctx))?),
+            Box::new(session_history_tool::SessionHistoryBackupTool::new(Arc::clone(&ctx))?),
         ])
     }
 }

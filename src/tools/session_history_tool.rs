@@ -1,4 +1,4 @@
-use crate::agent::{AgentContext, AgentName};
+use crate::agent::{AgentContext, AgentId};
 use crate::channels::SessionId;
 use crate::tools::{ToolCallError, ToolCallRsult};
 use log::info;
@@ -19,8 +19,8 @@ impl SessionHistoryBackupTool {
 }
 
 #[derive(Debug, Clone, serde::Deserialize)]
-pub struct Args {
-    agent_name: AgentName,
+pub struct BackupArgs {
+    agent_id: AgentId,
     session_id: SessionId,
 }
 
@@ -28,25 +28,29 @@ pub struct Args {
 impl Tool for SessionHistoryBackupTool {
     const NAME: &'static str = "session-history-backup";
     type Error = ToolCallError;
-    type Args = Args;
+    type Args = BackupArgs;
     type Output = ToolCallRsult;
 
     async fn definition(&self, _prompt: String) -> ToolDefinition {
         ToolDefinition {
             name: Self::NAME.to_string(),
-            description: "Backup the history of a session for a given agent".to_string(),
+            description: r#"
+Archives the session history and resets the session state.
+It automatically triggers a clear operation on the active session only after the backup is confirmed successfully
+            "#.to_string(),
             parameters: json!({
                 "type": "object",
                 "properties": {
-                    "agent_name": {
+                    "agent_id": {
                         "type": "string",
-                        "description": "The name of the agent whose session history should be backed up",
+                        "description": "The id of the agent whose session history should be backed up",
                     },
                     "session_id": {
                         "type": "string",
                         "description": "The ID of the session whose history should be backed up",
                     },
                 },
+                "required": ["agent_id", "session_id"],
             }),
         }
     }
@@ -61,7 +65,7 @@ impl Tool for SessionHistoryBackupTool {
             .write()
             .await;
         match history_manager
-            .backup(&args.session_id, &args.agent_name)
+            .backup(&args.session_id, &args.agent_id)
             .await
         {
             Ok((path, timestamp)) => Ok(ToolCallRsult {

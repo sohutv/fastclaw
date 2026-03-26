@@ -21,11 +21,11 @@ impl IdentityPrompt {
         &self,
         AgentContext { workspace, .. }: &AgentContext,
     ) -> crate::Result<Prompt> {
-        Ok(self.build_actual(&workspace.path).await?)
+        let prompt = self.build_actual(&workspace.path).await?;
+        Ok(prompt.into())
     }
 
-    async fn build_actual<P: AsRef<Path>>(&self, workspace_dir: P) -> crate::Result<Prompt> {
-        let workspace_dir = workspace_dir.as_ref();
+    async fn build_actual(&self, workspace_dir: &Path) -> crate::Result<String> {
         let mut vec = Vec::with_capacity(IDENTITY_MD_FILES.len());
         for &filename in IDENTITY_MD_FILES {
             let filepath = workspace_dir.join(filename);
@@ -44,6 +44,6 @@ impl IdentityPrompt {
                 )
             })
             .join("\n");
-        Ok(Prompt::from(prompt))
+        Ok(prompt)
     }
 }

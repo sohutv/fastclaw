@@ -1,4 +1,4 @@
-use crate::agent::AgentName;
+use crate::agent::AgentId;
 use crate::channels::SessionId;
 use async_trait::async_trait;
 use derive_more::Deref;
@@ -15,7 +15,7 @@ pub trait HistoryManager: Send + Sync {
     async fn store(
         &mut self,
         session_id: &SessionId,
-        agent: &AgentName,
+        agent: &AgentId,
         usage: &Usage,
         message: &[Message],
     ) -> crate::Result<()>;
@@ -23,28 +23,29 @@ pub trait HistoryManager: Send + Sync {
     async fn load_with_offset(
         &self,
         session_id: &SessionId,
-        agent: &AgentName,
+        agent: &AgentId,
         offset: Option<usize>,
         limit: Option<usize>,
-    ) -> crate::Result<Vec<Message>>;
+    ) -> crate::Result<(Vec<Message>, Usage)>;
 
     async fn load(
         &self,
         session_id: &SessionId,
-        agent: &AgentName,
+        agent: &AgentId,
         limit: usize,
     ) -> crate::Result<Vec<Message>> {
         self.load_with_offset(session_id, agent, Some(0), Some(limit))
             .await
+            .map(|(it, _)| it)
     }
 
     #[allow(unused)]
-    async fn usage(&self, session_id: &SessionId, agent: &AgentName) -> crate::Result<Usage>;
+    async fn usage(&self, session_id: &SessionId, agent: &AgentId) -> crate::Result<Usage>;
 
     async fn backup(
         &mut self,
         session_id: &SessionId,
-        agent: &AgentName,
+        agent: &AgentId,
     ) -> crate::Result<(PathBuf, BackupTimestamp)>;
 }
 

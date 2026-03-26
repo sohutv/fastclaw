@@ -1,4 +1,4 @@
-use crate::agent::{AgentRequest, AgentResponse};
+use crate::agent::{Agent, AgentRequest, AgentResponse};
 use crate::channels::console_cmd::Console;
 use crate::channels::{Channel, ChannelContext, ChannelMessage, Session, SessionId};
 use crate::config::Config;
@@ -13,18 +13,14 @@ use std::io::{Write, stdout};
 use std::sync::Arc;
 use std::thread::JoinHandle;
 use tokio::sync::RwLock;
-use tokio::sync::mpsc::{Receiver, Sender};
+use tokio::sync::mpsc::Receiver;
 
 pub struct CliChannel {
     ctx: Arc<RwLock<ChannelContext>>,
-    agent_message_sender: Sender<AgentRequest>,
 }
 
 impl CliChannel {
-    pub fn new(
-        config: &'static Config,
-        agent_message_sender: Sender<AgentRequest>,
-    ) -> crate::Result<Self> {
+    pub fn new(config: &'static Config) -> crate::Result<Self> {
         Ok(CliChannel {
             ctx: Arc::new(RwLock::new(ChannelContext {
                 config: config.clone(),
@@ -33,21 +29,14 @@ impl CliChannel {
                     hash_map!(session_id.clone() => Session::Private{session_id})
                 },
             })),
-            agent_message_sender,
         })
     }
 }
 
 #[async_trait]
 impl Channel for CliChannel {
-    async fn start(
-        self,
-        mut message_receiver: Receiver<ChannelMessage>,
-    ) -> crate::Result<JoinHandle<()>> {
-        let Self {
-            ctx,
-            agent_message_sender,
-        } = self;
+    async fn start(self, agent: Box<dyn Agent>) -> crate::Result<JoinHandle<()>> {
+        let Self { ctx } = self;
         let ctx = Arc::clone(&ctx);
         let join_handle = std::thread::spawn(move || {
             let rt = tokio::runtime::Builder::new_current_thread()
@@ -56,25 +45,45 @@ impl Channel for CliChannel {
                 .expect("unexpected err");
             let mut rl = DefaultEditor::new().expect("unexpected err");
             let _ = rt.block_on(async move {
+                let (message_sender, mut message_receiver) = tokio::sync::mpsc::channel(32);
                 loop {
                     let readline = rl.readline(">> ");
                     match readline {
                         Ok(line) => {
                             let line = line.trim();
                             if !line.is_empty() {
+                                let session_id = {
+                                    let session_id = ctx
+                                        .read()
+                                        .await
+                                        .sessions
+                                        .keys()
+                                        .next()
+                                        .expect("unexpected sessions")
+                                        .clone();
+                                    session_id
+                                };
                                 if line.starts_with('/') {
-                                    Console::handle_console_cmd(Arc::clone(&ctx), &line).await;
+                                    Console::handle_console_cmd(
+                                        Arc::clone(&ctx),
+                                        &line,
+                                        &agent,
+                                        message_sender.clone(),
+                                        &session_id,
+                                    )
+                                    .await;
                                     continue;
                                 }
-                                let ctx = ctx.read().await;
-                                let session_id =
-                                    ctx.sessions.keys().next().expect("unexpected sessions");
+
                                 let message = Message::user(line);
-                                let _ = agent_message_sender
-                                    .send(AgentRequest {
-                                        session_id: session_id.clone(),
-                                        message,
-                                    })
+                                let _ = agent
+                                    .run(
+                                        AgentRequest {
+                                            session_id: session_id.clone(),
+                                            message,
+                                        },
+                                        message_sender.clone(),
+                                    )
                                     .await;
                                 let _ = Self::poll_agent_message(&ctx, &mut message_receiver).await;
                             }
@@ -96,7 +105,7 @@ impl Channel for CliChannel {
 
 impl CliChannel {
     async fn poll_agent_message(
-        ctx: &ChannelContext,
+        ctx: &Arc<RwLock<ChannelContext>>,
         receiver: &mut Receiver<ChannelMessage>,
     ) -> crate::Result<()> {
         let mut state = AgentRespState::Init;
@@ -105,7 +114,8 @@ impl CliChannel {
             tokio::select! {
                 message = receiver.recv() => {
                     if let Some(message) = message {
-                        match  Self::handle_agent_message(ctx, &message, state).await{
+                        let ctx = ctx.read().await;
+                        match  Self::handle_agent_message(&ctx, &message, state).await{
                             Ok(AgentRespState::Final) | Err( _)=> {
                                 return Ok(());
                             },
@@ -232,6 +242,7 @@ Reasoning >> ////////
                 eprintln!("{}", error);
                 Err(anyhow!("Agent error: {}", error))
             }
+            AgentResponse::HistoryCompact { .. } => Ok(curr_state),
         }
     }
 }

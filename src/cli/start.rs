@@ -1,6 +1,6 @@
-use crate::agent::{Agent, HistoryManager, JsonlHistoryManager, LlmAgentSupplier, Workspace};
+use crate::agent::{HistoryManager, JsonlHistoryManager, LlmAgentSupplier, Workspace};
 use crate::channels;
-use crate::channels::{Channel, ChannelMessage};
+use crate::channels::Channel;
 use crate::cli::CmdRunner;
 use crate::config::Config;
 use crate::model_provider::ModelProviders;
@@ -51,23 +51,18 @@ impl CmdRunner for Start {
             let mgr = JsonlHistoryManager::new(workspace).await?;
             Arc::new(RwLock::new(mgr))
         };
-        let (channel_message_sender, channel_message_receiver) =
-            tokio::sync::mpsc::channel::<ChannelMessage>(1024);
-        let (main_agent_handle, main_agent_message_sender) = {
-            let agent = match config.default_model_provider()? {
-                ModelProviders::OpenaiCompatible(model_provider) => {
-                    model_provider
-                        .create_agent(
-                            "main",
-                            config,
-                            config.default_model().clone(),
-                            Some(Arc::clone(&history_manager)),
-                            workspace,
-                        )
-                        .await?
-                }
-            };
-            agent.run(channel_message_sender.clone())?
+        let main_agent = match config.default_model_provider()? {
+            ModelProviders::OpenaiCompatible(model_provider) => {
+                model_provider
+                    .create_agent(
+                        "main",
+                        config,
+                        config.default_model().clone(),
+                        Some(Arc::clone(&history_manager)),
+                        workspace,
+                    )
+                    .await?
+            }
         };
 
         /* todo
@@ -81,21 +76,16 @@ impl CmdRunner for Start {
             #[cfg(feature = "channel_cli_channel")]
             ChannelType::Cli => {
                 info!("Starting CLI channel");
-                let cli_channel =
-                    channels::cli_channel::CliChannel::new(config, main_agent_message_sender)?;
-                cli_channel.start(channel_message_receiver).await?
+                let cli_channel = channels::cli_channel::CliChannel::new(config)?;
+                cli_channel.start(Box::new(main_agent)).await?
             }
             #[cfg(feature = "channel_dingtalk_channel")]
             ChannelType::Dingtalk => {
                 info!("Starting Dingtalk channel");
-                let dingtalk_channel = channels::dingtalk_channel::DingtalkChannel::new(
-                    config,
-                    main_agent_message_sender,
-                )?;
-                dingtalk_channel.start(channel_message_receiver).await?
+                let dingtalk_channel = channels::dingtalk_channel::DingtalkChannel::new(config)?;
+                dingtalk_channel.start(Box::new(main_agent)).await?
             }
         };
-        let _ = main_agent_handle.await;
         //todo let _ = heartbeat_handle.await;
         let _ = channel_handle.join();
         Ok(())
