@@ -1,4 +1,4 @@
-use crate::agent::{Agent, AgentResponse};
+use crate::agent::{Agent, AgentResponse, Workspace};
 use crate::config::Config;
 use async_trait::async_trait;
 use derive_more::{Deref, Display};
@@ -27,6 +27,7 @@ pub trait Channel {
 #[derive(Clone)]
 pub struct ChannelContext {
     pub config: Config,
+    pub workspace: &'static Workspace,
     pub sessions: HashMap<SessionId, Session>,
 }
 

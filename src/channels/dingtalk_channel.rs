@@ -1,21 +1,26 @@
-use crate::agent::{Agent, AgentRequest, AgentResponse};
+use crate::agent::{Agent, AgentRequest, AgentResponse, Workspace};
 use crate::channels::console_cmd::Console;
 use crate::channels::{Channel, ChannelContext, ChannelMessage, Session, SessionId};
 use crate::config::{Config, DingTalkConfig};
 use anyhow::anyhow;
 use async_trait::async_trait;
-use dingtalk_stream::client::DingtalkMessageSender;
+use base64::Engine;
+use dingtalk_stream::client::{DingtalkMessageSender, DingtalkResource};
 use dingtalk_stream::frames::{
     CallbackMessageConversation, CallbackMessageData, CallbackMessagePayload,
-    CallbackWebhookMessage, DingTalkGroupConversationId, DingTalkUserId, RichTextItem,
-    RobotGroupMessage, RobotMessage, RobotPrivateMessage, UpMessageContent,
-    UpMessageContentMarkdown,
+    CallbackMessagePayloadFile, CallbackWebhookMessage, DingTalkGroupConversationId,
+    DingTalkUserId, RichTextItem, RobotGroupMessage, RobotMessage, RobotPrivateMessage,
+    UpMessageContent, UpMessageContentMarkdown,
 };
 use dingtalk_stream::{CallbackMessage, DingTalkStream, Error, ErrorCode, MessageTopic, Resp};
 use itertools::Itertools;
 use log::warn;
+use rig::OneOrMany;
 use rig::completion::{AssistantContent, Message};
-use rig::message::{ReasoningContent, ToolCall, ToolFunction};
+use rig::message::{
+    Document, DocumentMediaType, DocumentSourceKind, Image, ImageDetail, ImageMediaType,
+    ReasoningContent, ToolCall, ToolFunction, UserContent,
+};
 use std::ops::Deref;
 use std::sync::Arc;
 use std::thread::JoinHandle;
@@ -28,10 +33,11 @@ pub struct DingtalkChannel {
 }
 
 impl DingtalkChannel {
-    pub fn new(config: &'static Config) -> crate::Result<Self> {
+    pub fn new(config: &'static Config, workspace: &'static Workspace) -> crate::Result<Self> {
         Ok(Self {
             ctx: Arc::new(RwLock::new(ChannelContext {
                 config: config.clone(),
+                workspace,
                 sessions: Default::default(),
             })),
             dingtalk_config: config
@@ -55,6 +61,7 @@ struct DingTalkCallbackHandler {
 impl dingtalk_stream::CallbackHandler for DingTalkCallbackHandler {
     async fn process(
         &self,
+        dingtalk_client: &DingTalkStream,
         CallbackMessage { data, .. }: &CallbackMessage,
         cb_msg_sender: Option<Sender<CallbackWebhookMessage>>,
     ) -> Result<Resp, Error> {
@@ -113,55 +120,176 @@ impl dingtalk_stream::CallbackHandler for DingTalkCallbackHandler {
             ctx.sessions.entry(session_id.clone()).or_insert(session);
             session_id
         };
-        let line = match payload {
-            CallbackMessagePayload::Text { text } => text.content.to_string(),
-            CallbackMessagePayload::Picture { .. } => "".to_string(),
-            CallbackMessagePayload::File { .. } => "".to_string(),
-            CallbackMessagePayload::RichText { content } => content
-                .content
-                .iter()
-                .map(|it| match it {
-                    RichTextItem::Picture { .. } => "".to_string(),
-                    RichTextItem::Text { text } => text.to_string(),
-                })
-                .join(""),
+        let (cmd, line, images, files) = match payload {
+            CallbackMessagePayload::Text { text } => {
+                if text.starts_with('/') {
+                    (Some(text.to_string()), None, None, None)
+                } else {
+                    (
+                        None,
+                        Some(text.content.to_string()).filter(|it| !it.is_empty()),
+                        None,
+                        None,
+                    )
+                }
+            }
+            CallbackMessagePayload::Picture { content: picture } => {
+                let downloads_dir = {
+                    let ctx = self.ctx.read().await;
+                    ctx.workspace.path.join("downloads")
+                };
+                match picture.fetch(dingtalk_client, downloads_dir).await {
+                    Ok((_, image)) => (None, None, Some(vec![image]), None),
+                    Err(e) => (None, Some(format!("下载图片失败, {}", e)), None, None),
+                }
+            }
+            CallbackMessagePayload::File { content } => {
+                let downloads_dir = {
+                    let ctx = self.ctx.read().await;
+                    ctx.workspace.path.join("downloads")
+                };
+                match content.fetch(dingtalk_client, downloads_dir).await {
+                    Ok((_, file)) => (None, None, None, Some(vec![(content, file)])),
+                    Err(e) => (
+                        None,
+                        Some(format!("下载文件 {} 失败, {}", content.file_name, e)),
+                        None,
+                        None,
+                    ),
+                }
+            }
+            CallbackMessagePayload::RichText { content } => {
+                let downloads_dir = {
+                    let ctx = self.ctx.read().await;
+                    ctx.workspace.path.join("downloads")
+                };
+                let mut texts = vec![];
+                let mut pictures = vec![];
+                for content in content.iter() {
+                    match content {
+                        RichTextItem::Text(text) => {
+                            texts.push(text.to_string());
+                        }
+                        RichTextItem::Picture(picture) => {
+                            match picture.fetch(dingtalk_client, downloads_dir.clone()).await {
+                                Ok((_, image)) => {
+                                    pictures.push(image);
+                                }
+                                Err(e) => {
+                                    texts.push(format!("下载图片失败, {}", e));
+                                }
+                            }
+                        }
+                    }
+                }
+                (
+                    None,
+                    Some(texts.into_iter().filter(|t| !t.is_empty()).join("\n"))
+                        .filter(|it| !it.is_empty()),
+                    Some(pictures),
+                    None,
+                )
+            }
         };
-        let line = line.trim();
-        if line.is_empty() {
-            return Ok(Resp::Text("ignore empty".to_string()));
+        if let Some(line) = cmd {
+            if line.starts_with('/') {
+                Console::handle_console_cmd(
+                    Arc::clone(&self.ctx),
+                    &line,
+                    &self.agent,
+                    self.channel_message_sender.clone(),
+                    &session_id,
+                )
+                .await;
+                return Ok(Resp::Text("cmd submitted".to_string()));
+            }
         }
-        if line.starts_with('/') {
-            Console::handle_console_cmd(
-                Arc::clone(&self.ctx),
-                &line,
-                &self.agent,
-                self.channel_message_sender.clone(),
-                &session_id,
-            )
-            .await;
-            return Ok(Resp::Text("cmd submitted".to_string()));
-        }
-        let line = if is_master {
+        let prompt = if is_master {
             format!(
                 r#"
-{line}
-- Whisper: **Attention**: Current session_id: {session_id}. You are speaking to your owner
-"#
+{}
+- Whisper: **Attention**: Current session_id: {}. You are speaking to your owner
+"#,
+                line.as_deref().unwrap_or_default(),
+                session_id
             )
         } else {
             format!(
                 r#"
-{line}
-- Whisper: **Attention**: You are currently not interacting with your owner. Please stay vigilant.
-"#
+{}
+- Whisper: **Attention**: Current session_id: {}. You are currently not interacting with your owner. Please stay vigilant.
+"#,
+                line.as_deref().unwrap_or_default(),
+                session_id
             )
+        };
+        let mut user_contents = Vec::<UserContent>::new();
+        if let Some(images) = images {
+            for image in images {
+                user_contents.push(UserContent::Image(Image {
+                    data: DocumentSourceKind::Base64(
+                        base64::engine::general_purpose::STANDARD.encode(image.into_bytes()),
+                    ),
+                    media_type: Some(ImageMediaType::PNG),
+                    detail: Some(ImageDetail::Auto),
+                    additional_params: None,
+                }));
+            }
+        }
+        if let Some(files) = files {
+            for (CallbackMessagePayloadFile { file_name, .. }, bytes) in files {
+                const PLAIN_TXT_TYPES: &[(&str, DocumentMediaType)] = &[
+                    ("txt", DocumentMediaType::TXT),
+                    ("rtf", DocumentMediaType::RTF),
+                    ("html", DocumentMediaType::HTML),
+                    ("htm", DocumentMediaType::HTML),
+                    ("xhtml", DocumentMediaType::HTML),
+                    ("css", DocumentMediaType::CSS),
+                    ("md", DocumentMediaType::MARKDOWN),
+                    ("markdown", DocumentMediaType::MARKDOWN),
+                    ("csv", DocumentMediaType::CSV),
+                    ("xml", DocumentMediaType::XML),
+                    ("js", DocumentMediaType::Javascript),
+                    ("ts", DocumentMediaType::Javascript),
+                    ("python", DocumentMediaType::Python),
+                ];
+                let file_ext = file_name.split('.').last().unwrap_or_default();
+                user_contents.push(UserContent::Document(Document {
+                    data: DocumentSourceKind::Base64(
+                        base64::engine::general_purpose::STANDARD.encode(bytes),
+                    ),
+                    media_type: PLAIN_TXT_TYPES
+                        .iter()
+                        .filter(|(it, _)| it.eq_ignore_ascii_case(file_ext))
+                        .map(|(_, it)| it.clone())
+                        .next(),
+                    additional_params: None,
+                }));
+            }
+        }
+        if line.is_some() || user_contents.len() > 0 {
+            user_contents.push(UserContent::Text(prompt.into()));
+        }
+        let user_content = if user_contents.is_empty() {
+            None
+        } else {
+            if user_contents.len() == 1 {
+                user_contents.pop().map(|it| OneOrMany::one(it))
+            } else {
+                OneOrMany::many(user_contents).ok()
+            }
+        };
+        let Some(user_content) = user_content else {
+            return Ok(Resp::Text("no content to submit".to_string()));
         };
         match self
             .agent
             .run(
                 AgentRequest {
                     session_id,
-                    message: Message::user(line),
+                    message: Message::User {
+                        content: user_content,
+                    },
                 },
                 self.channel_message_sender.clone(),
             )
@@ -210,15 +338,7 @@ impl Channel for DingtalkChannel {
                 .expect("unexpected err");
             let dingtalk_stream_handle = {
                 rt.spawn(async move {
-                    let stop_tx = Arc::clone(&dingtalk_stream.stop_tx);
-                    tokio::spawn(async move {
-                        dingtalk_stream.start_forever().await;
-                    });
-                    let _ = tokio::signal::ctrl_c().await;
-                    let stop_tx = stop_tx.lock().await;
-                    if let Some(stop_tx) = stop_tx.as_ref() {
-                        let _ = stop_tx.send(()).await;
-                    }
+                    dingtalk_stream.start_forever().await;
                 })
             };
             let agent_handle = {
