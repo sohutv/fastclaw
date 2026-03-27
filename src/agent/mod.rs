@@ -7,8 +7,8 @@ use serde::{Deserialize, Serialize};
 use std::fmt::Display;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use tokio::sync::mpsc::Sender;
 use tokio::sync::RwLock;
+use tokio::sync::mpsc::Sender;
 
 mod llm_agent;
 mod prompt;
@@ -122,7 +122,7 @@ impl HistoryCompactVal {
                 ..after
             },
             before,
-            compact_ratio: (after.output_tokens as f64 / before.total_tokens as f64) * 100.,
+            compact_ratio: (1. - (after.output_tokens as f64 / before.total_tokens as f64)) * 100.,
         }
     }
 
