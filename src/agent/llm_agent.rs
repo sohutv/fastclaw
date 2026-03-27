@@ -1,6 +1,6 @@
 use crate::agent::{
     AgentContext, AgentId, AgentRequest, AgentResponse, HistoryCompactResult, HistoryCompactVal,
-    HistoryManager, LlmAgentSupplier, Workspace,
+    HistoryManager, LlmAgentSupplier, Notify, Workspace,
 };
 use crate::channels::{ChannelMessage, SessionId};
 use crate::config::Config;
@@ -298,6 +298,15 @@ where
             }
         }
         if usage.total_tokens >= ((*max_tokens as f32 * compact_threshold) as u64) {
+            let _ = channel_message_sender
+                .send(ChannelMessage {
+                    session_id: session_id.clone(),
+                    message: AgentResponse::Notify(Notify {
+                        title: "History compact".to_string(),
+                        content: "Trigger history compact...".to_string(),
+                    }),
+                })
+                .await;
             match self
                 .session_history_compact(session_id, Some((history, usage)))
                 .await

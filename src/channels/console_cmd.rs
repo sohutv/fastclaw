@@ -1,4 +1,4 @@
-use crate::agent::Agent;
+use crate::agent::{Agent, AgentResponse, Notify};
 use crate::channels::{ChannelContext, ChannelMessage, SessionId};
 use clap::Parser;
 use derive_more::FromStr;
@@ -49,6 +49,15 @@ impl Console {
                     }
                 }
                 Console::Compact => {
+                    let _ = channel_message_sender
+                        .send(ChannelMessage {
+                            session_id: session_id.clone(),
+                            message: AgentResponse::Notify(Notify {
+                                title: "会话压缩".to_string(),
+                                content: "开始执行会话历史压缩任务...".to_string(),
+                            }),
+                        })
+                        .await;
                     let _ = agent
                         .session_compact(channel_message_sender, session_id)
                         .await;

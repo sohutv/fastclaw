@@ -1,4 +1,4 @@
-use crate::agent::{Agent, AgentRequest, AgentResponse, HistoryCompactResult, Workspace};
+use crate::agent::{Agent, AgentRequest, AgentResponse, HistoryCompactResult, Notify, Workspace};
 use crate::channels::console_cmd::Console;
 use crate::channels::{Channel, ChannelContext, ChannelMessage, Session, SessionId};
 use crate::config::{Config, DingTalkConfig};
@@ -519,6 +519,16 @@ impl DingtalkChannel {
                 Ok(AgentRespState::Final)
             }
             AgentResponse::Error(error) => Err(anyhow!("Agent error: {}", error)),
+            AgentResponse::Notify(Notify { title, content }) => {
+                if let Some(robot_message) = Self::create_robot_messages(
+                    session_id,
+                    ctx,
+                    UpMessageContentMarkdown::from((title, &format!("{content}",))),
+                ) {
+                    let _ = dingtalk_msg_sender.send(robot_message).await;
+                }
+                Ok(curr_state)
+            }
             AgentResponse::HistoryCompact(result) => {
                 match result {
                     HistoryCompactResult::Ok(val) => {

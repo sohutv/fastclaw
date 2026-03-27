@@ -7,8 +7,8 @@ use serde::{Deserialize, Serialize};
 use std::fmt::Display;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use tokio::sync::RwLock;
 use tokio::sync::mpsc::Sender;
+use tokio::sync::RwLock;
 
 mod llm_agent;
 mod prompt;
@@ -93,7 +93,13 @@ pub enum AgentResponse {
     MessageStream(Message),
     Final(Usage),
     Error(String),
+    Notify(Notify),
     HistoryCompact(HistoryCompactResult),
+}
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Notify {
+    pub title: String,
+    pub content: String,
 }
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum HistoryCompactResult {
