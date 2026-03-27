@@ -305,13 +305,7 @@ where
                 Ok(result) => {
                     match &result {
                         HistoryCompactResult::Ok(val) => {
-                            info!(
-                                "Compact session{session_id} history ok, total usage {} -> {}, compression ratio: {:.2}%",
-                                val.before.total_tokens,
-                                val.after.total_tokens,
-                                (val.after.total_tokens as f32 / val.before.total_tokens as f32)
-                                    * 100.
-                            );
+                            info!("Compact session{session_id} history ok, {val}");
                         }
                         HistoryCompactResult::Ignore(msg) => {
                             info!(
@@ -394,10 +388,10 @@ where
                             .store(session_id, &self.id, &compacted_usage, &compacted_history)
                             .await;
                     }
-                    return Ok(HistoryCompactResult::Ok(HistoryCompactVal {
-                        before: current_usage,
-                        after: compacted_usage,
-                    }));
+                    return Ok(HistoryCompactResult::Ok(HistoryCompactVal::new(
+                        current_usage,
+                        compacted_usage,
+                    )));
                 }
                 Ok(_) => continue,
                 Err(err) => {

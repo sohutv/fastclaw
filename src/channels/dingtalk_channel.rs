@@ -1,6 +1,4 @@
-use crate::agent::{
-    Agent, AgentRequest, AgentResponse, HistoryCompactResult, HistoryCompactVal, Workspace,
-};
+use crate::agent::{Agent, AgentRequest, AgentResponse, HistoryCompactResult, Workspace};
 use crate::channels::console_cmd::Console;
 use crate::channels::{Channel, ChannelContext, ChannelMessage, Session, SessionId};
 use crate::config::{Config, DingTalkConfig};
@@ -523,7 +521,7 @@ impl DingtalkChannel {
             AgentResponse::Error(error) => Err(anyhow!("Agent error: {}", error)),
             AgentResponse::HistoryCompact(result) => {
                 match result {
-                    HistoryCompactResult::Ok(HistoryCompactVal { before, after }) => {
+                    HistoryCompactResult::Ok(val) => {
                         if let Some(robot_message) = Self::create_robot_messages(
                             session_id,
                             ctx,
@@ -536,9 +534,9 @@ impl DingtalkChannel {
 - 压缩后 **{}** Tokens
 - 压缩率 **{:.2}%**
                     "#,
-                                    before.total_tokens,
-                                    after.total_tokens,
-                                    (after.total_tokens as f32 / before.total_tokens as f32) * 100.
+                                    val.before().total_tokens,
+                                    val.current().total_tokens,
+                                    val.compact_ratio(),
                                 ),
                             )),
                         ) {

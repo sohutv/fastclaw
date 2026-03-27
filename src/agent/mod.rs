@@ -4,6 +4,7 @@ use derive_more::{Deref, Display, Into};
 use rig::completion::Usage;
 use rig::message::{Message, Reasoning, ToolCall};
 use serde::{Deserialize, Serialize};
+use std::fmt::Display;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use tokio::sync::RwLock;
@@ -102,6 +103,42 @@ pub enum HistoryCompactResult {
 }
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 pub struct HistoryCompactVal {
-    pub before: Usage,
-    pub after: Usage,
+    current: Usage,
+    before: Usage,
+    compact_ratio: f64,
+}
+
+impl HistoryCompactVal {
+    pub fn new(before: Usage, after: Usage) -> Self {
+        Self {
+            current: Usage {
+                total_tokens: after.output_tokens,
+                ..after
+            },
+            before: Usage::default(),
+            compact_ratio: (after.output_tokens as f64 / before.total_tokens as f64) * 100.,
+        }
+    }
+
+    pub fn current(&self) -> &Usage {
+        &self.current
+    }
+
+    pub fn before(&self) -> &Usage {
+        &self.before
+    }
+
+    pub fn compact_ratio(&self) -> f64 {
+        self.compact_ratio
+    }
+}
+
+impl Display for HistoryCompactVal {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "total usage {} -> {}, compression ratio: {:.2}%",
+            self.before.total_tokens, self.current.total_tokens, self.compact_ratio
+        )
+    }
 }
