@@ -6,8 +6,8 @@ use rig::message::{Message, Reasoning, ToolCall};
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use tokio::sync::mpsc::Sender;
 use tokio::sync::RwLock;
+use tokio::sync::mpsc::Sender;
 
 mod llm_agent;
 mod prompt;
@@ -30,7 +30,7 @@ pub trait Agent: Send + Sync {
         &self,
         channel_message_sender: Sender<ChannelMessage>,
         session_id: &SessionId,
-    ) -> crate::Result<Option<Usage>>;
+    ) -> HistoryCompactResult;
 }
 
 #[allow(unused)]
@@ -84,7 +84,7 @@ pub struct AgentRequest {
     pub message: Message,
 }
 
-#[derive(Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum AgentResponse {
     Start,
     ToolCall(ToolCall),
@@ -92,10 +92,16 @@ pub enum AgentResponse {
     MessageStream(Message),
     Final(Usage),
     Error(String),
-    HistoryCompact(HistoryCompact),
+    HistoryCompact(HistoryCompactResult),
 }
-#[derive(Clone, Serialize, Deserialize)]
-pub enum HistoryCompact {
-    Ok { before: Usage, after: Usage },
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum HistoryCompactResult {
+    Ok(HistoryCompactVal),
     Err(String),
+    Ignore(String),
+}
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+pub struct HistoryCompactVal {
+    pub before: Usage,
+    pub after: Usage,
 }

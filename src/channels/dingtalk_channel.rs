@@ -1,4 +1,6 @@
-use crate::agent::{Agent, AgentRequest, AgentResponse, HistoryCompact, Workspace};
+use crate::agent::{
+    Agent, AgentRequest, AgentResponse, HistoryCompactResult, HistoryCompactVal, Workspace,
+};
 use crate::channels::console_cmd::Console;
 use crate::channels::{Channel, ChannelContext, ChannelMessage, Session, SessionId};
 use crate::config::{Config, DingTalkConfig};
@@ -6,7 +8,12 @@ use anyhow::anyhow;
 use async_trait::async_trait;
 use base64::Engine;
 use dingtalk_stream::client::{DingtalkMessageSender, DingtalkResource};
-use dingtalk_stream::frames::{CallbackMessageConversation, CallbackMessageData, CallbackMessagePayload, CallbackWebhookMessage, DingTalkGroupConversationId, DingTalkUserId, RichTextItem, RobotGroupMessage, RobotMessage, RobotPrivateMessage, UpMessageContent, UpMessageContentMarkdown, UpMessageContentText};
+use dingtalk_stream::frames::{
+    CallbackMessageConversation, CallbackMessageData, CallbackMessagePayload,
+    CallbackWebhookMessage, DingTalkGroupConversationId, DingTalkUserId, RichTextItem,
+    RobotGroupMessage, RobotMessage, RobotPrivateMessage, UpMessageContent,
+    UpMessageContentMarkdown, UpMessageContentText,
+};
 use dingtalk_stream::{CallbackMessage, DingTalkStream, Error, ErrorCode, MessageTopic, Resp};
 use itertools::Itertools;
 use log::warn;
@@ -513,12 +520,10 @@ impl DingtalkChannel {
                 }
                 Ok(AgentRespState::Final)
             }
-            AgentResponse::Error(error) => {
-                Err(anyhow!("Agent error: {}", error))
-            }
+            AgentResponse::Error(error) => Err(anyhow!("Agent error: {}", error)),
             AgentResponse::HistoryCompact(result) => {
                 match result {
-                    HistoryCompact::Ok { before, after } => {
+                    HistoryCompactResult::Ok(HistoryCompactVal { before, after }) => {
                         if let Some(robot_message) = Self::create_robot_messages(
                             session_id,
                             ctx,
@@ -533,18 +538,35 @@ impl DingtalkChannel {
                     "#,
                                     before.total_tokens,
                                     after.total_tokens,
-                                    (before.total_tokens as f32 / after.total_tokens as f32) * 100.
+                                    (after.total_tokens as f32 / before.total_tokens as f32) * 100.
                                 ),
                             )),
                         ) {
                             let _ = dingtalk_msg_sender.send(robot_message).await;
                         }
                     }
-                    HistoryCompact::Err(err_msg) => {
+                    HistoryCompactResult::Err(err_msg) => {
                         if let Some(robot_message) = Self::create_robot_messages(
                             session_id,
                             ctx,
                             UpMessageContentText::from(err_msg),
+                        ) {
+                            let _ = dingtalk_msg_sender.send(robot_message).await;
+                        }
+                    }
+                    HistoryCompactResult::Ignore(msg) => {
+                        if let Some(robot_message) = Self::create_robot_messages(
+                            session_id,
+                            ctx,
+                            UpMessageContentMarkdown::from((
+                                "压缩请求被忽略",
+                                format!(
+                                    r#"
+### 压缩请求被忽略
+{msg}
+                            "#
+                                ),
+                            )),
                         ) {
                             let _ = dingtalk_msg_sender.send(robot_message).await;
                         }

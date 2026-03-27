@@ -1,11 +1,10 @@
 use crate::agent::{
-    AgentContext, AgentId, AgentRequest, AgentResponse, HistoryCompact, HistoryManager,
-    LlmAgentSupplier, Workspace,
+    AgentContext, AgentId, AgentRequest, AgentResponse, HistoryCompactResult, HistoryCompactVal,
+    HistoryManager, LlmAgentSupplier, Workspace,
 };
 use crate::channels::{ChannelMessage, SessionId};
 use crate::config::Config;
 use crate::model_provider::{ModelContext, ModelName, ModelProvider, ModelSettings};
-use anyhow::anyhow;
 use async_trait::async_trait;
 use itertools::Itertools;
 use log::{info, warn};
@@ -141,9 +140,18 @@ where
         &self,
         channel_message_sender: Sender<ChannelMessage>,
         session_id: &SessionId,
-    ) -> crate::Result<Option<Usage>> {
-        self.session_history_compact(channel_message_sender, session_id, None)
-            .await
+    ) -> HistoryCompactResult {
+        let result = match self.session_history_compact(session_id, None).await {
+            Ok(result) => result,
+            Err(result) => result,
+        };
+        let _ = channel_message_sender
+            .send(ChannelMessage {
+                session_id: session_id.clone(),
+                message: AgentResponse::HistoryCompact(result.clone()),
+            })
+            .await;
+        result
     }
 }
 
@@ -291,23 +299,45 @@ where
         }
         if usage.total_tokens >= ((*max_tokens as f32 * compact_threshold) as u64) {
             match self
-                .session_history_compact(channel_message_sender, session_id, Some((history, usage)))
+                .session_history_compact(session_id, Some((history, usage)))
                 .await
             {
-                Ok(Some(usage_after_compact)) => info!(
-                    "Compact session{session_id} history ok, total usage {} -> {}, compression ratio: {:.2}%",
-                    usage.total_tokens,
-                    usage_after_compact.total_tokens,
-                    (usage_after_compact.total_tokens as f32 / usage.total_tokens as f32) * 100.
-                ),
-                Ok(None) => {
-                    info!("Compact session{session_id} ignore, no history to compact");
+                Ok(result) => {
+                    match &result {
+                        HistoryCompactResult::Ok(val) => {
+                            info!(
+                                "Compact session{session_id} history ok, total usage {} -> {}, compression ratio: {:.2}%",
+                                val.before.total_tokens,
+                                val.after.total_tokens,
+                                (val.after.total_tokens as f32 / val.before.total_tokens as f32)
+                                    * 100.
+                            );
+                        }
+                        HistoryCompactResult::Ignore(msg) => {
+                            info!(
+                                "Compact session{session_id} ignore with {msg}, no history to compact"
+                            );
+                        }
+                        _ => unreachable!(),
+                    }
+                    let _ = channel_message_sender
+                        .send(ChannelMessage {
+                            session_id: session_id.clone(),
+                            message: AgentResponse::HistoryCompact(result),
+                        })
+                        .await;
                 }
-                Err(err) => {
-                    warn!(
-                        "Compact session history failed, session_id: {}, agent: {}, err: {}",
-                        session_id, self.id, err
-                    );
+                Err(result) => {
+                    let HistoryCompactResult::Err(err) = &result else {
+                        unreachable!()
+                    };
+                    info!("Compact session{session_id} failed, err: {err}");
+                    let _ = channel_message_sender
+                        .send(ChannelMessage {
+                            session_id: session_id.clone(),
+                            message: AgentResponse::HistoryCompact(result),
+                        })
+                        .await;
                 }
             }
         }
@@ -315,25 +345,26 @@ where
 
     async fn session_history_compact(
         &self,
-        channel_message_sender: Sender<ChannelMessage>,
         session_id: &SessionId,
         history: Option<(&[Message], &Usage)>,
-    ) -> crate::Result<Option<Usage>> {
+    ) -> crate::Result<HistoryCompactResult, HistoryCompactResult> {
         let Some(history_manager) = self.ctx.history_manager.as_ref() else {
-            return Ok(history.map(|(_, it)| *it));
+            return Ok(HistoryCompactResult::Ignore(
+                "history_manager not found!!!".into(),
+            ));
         };
         let (history, current_usage) = if let Some((history, usage)) = history {
             (history.to_vec(), *usage)
         } else {
             let mgr = history_manager.read().await;
-            let tuples = mgr
-                .load_with_offset(session_id, &self.id, None, None)
-                .await?;
-            tuples
+            mgr.load_with_offset(session_id, &self.id, None, None)
+                .await
+                .map_err(|err| HistoryCompactResult::Err(format!("会话历史压缩失败, err: {err}")))?
         };
         let mut stream = self
             .create_agent()
-            .await?
+            .await
+            .map_err(|err| HistoryCompactResult::Err(format!("创建agent失败, err: {err}")))?
             .stream_chat(
                 format!(
                     r#"
@@ -363,29 +394,16 @@ where
                             .store(session_id, &self.id, &compacted_usage, &compacted_history)
                             .await;
                     }
-                    // compact history
-                    let _ = channel_message_sender
-                        .send(ChannelMessage {
-                            session_id: session_id.clone(),
-                            message: AgentResponse::HistoryCompact(HistoryCompact::Ok {
-                                before: current_usage,
-                                after: compacted_usage,
-                            }),
-                        })
-                        .await;
-                    return Ok(Some(compacted_usage));
+                    return Ok(HistoryCompactResult::Ok(HistoryCompactVal {
+                        before: current_usage,
+                        after: compacted_usage,
+                    }));
                 }
                 Ok(_) => continue,
                 Err(err) => {
-                    let _ = channel_message_sender
-                        .send(ChannelMessage {
-                            session_id: session_id.clone(),
-                            message: AgentResponse::HistoryCompact(HistoryCompact::Err(format!(
-                                "会话历史压缩失败, err: {err}"
-                            ))),
-                        })
-                        .await;
-                    return Err(anyhow!(err));
+                    return Err(HistoryCompactResult::Err(format!(
+                        "会话历史压缩失败, err: {err}"
+                    )));
                 }
             }
         }
