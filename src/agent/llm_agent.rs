@@ -1,16 +1,18 @@
 use crate::agent::{
-    AgentContext, AgentId, AgentRequest, AgentResponse, HistoryManager, LlmAgentSupplier, Workspace,
+    AgentContext, AgentId, AgentRequest, AgentResponse, HistoryCompact, HistoryManager,
+    LlmAgentSupplier, Workspace,
 };
 use crate::channels::{ChannelMessage, SessionId};
 use crate::config::Config;
 use crate::model_provider::{ModelContext, ModelName, ModelProvider, ModelSettings};
+use anyhow::anyhow;
 use async_trait::async_trait;
 use itertools::Itertools;
 use log::{info, warn};
 use rig::OneOrMany;
 use rig::agent::{Agent, MultiTurnStreamItem};
 use rig::client::CompletionClient;
-use rig::completion::{Completion, CompletionResponse, Message, Usage};
+use rig::completion::{Message, Usage};
 use rig::message::UserContent;
 use rig::streaming::{StreamedAssistantContent, StreamingChat};
 use std::sync::Arc;
@@ -324,19 +326,15 @@ where
             (history.to_vec(), *usage)
         } else {
             let mgr = history_manager.read().await;
-            mgr.load_with_offset(session_id, &self.id, None, None)
-                .await?
+            let tuples = mgr
+                .load_with_offset(session_id, &self.id, None, None)
+                .await?;
+            tuples
         };
-        let CompletionResponse {
-            choice,
-            usage: usage_after_compact,
-            message_id,
-            ..
-        } = self
+        let mut stream = self
             .create_agent()
-            .await
-            .unwrap()
-            .completion(
+            .await?
+            .stream_chat(
                 format!(
                     r#"
 当前会话 session_id: {}
@@ -348,28 +346,49 @@ where
                 ),
                 history,
             )
-            .await?
-            .send()
-            .await?;
-        let message = Message::Assistant {
-            id: message_id,
-            content: choice,
-        };
-        let _ = history_manager
-            .write()
-            .await
-            .store(session_id, &self.id, &usage_after_compact, &[message])
             .await;
-        // compact history
-        let _ = channel_message_sender
-            .send(ChannelMessage {
-                session_id: session_id.clone(),
-                message: AgentResponse::HistoryCompact {
-                    before: current_usage,
-                    after: usage_after_compact,
-                },
-            })
-            .await;
-        Ok(Some(usage_after_compact))
+        while let Some(item) = stream.next().await {
+            match item {
+                Ok(MultiTurnStreamItem::FinalResponse(final_resp)) => {
+                    let compacted_usage = final_resp.usage();
+                    let compacted_history = final_resp
+                        .history()
+                        .filter(|&it| it.len() > 0)
+                        .map(|it| &it[it.len() - 1..])
+                        .expect("unexpected empty history!!!");
+                    {
+                        let _ = history_manager
+                            .write()
+                            .await
+                            .store(session_id, &self.id, &compacted_usage, &compacted_history)
+                            .await;
+                    }
+                    // compact history
+                    let _ = channel_message_sender
+                        .send(ChannelMessage {
+                            session_id: session_id.clone(),
+                            message: AgentResponse::HistoryCompact(HistoryCompact::Ok {
+                                before: current_usage,
+                                after: compacted_usage,
+                            }),
+                        })
+                        .await;
+                    return Ok(Some(compacted_usage));
+                }
+                Ok(_) => continue,
+                Err(err) => {
+                    let _ = channel_message_sender
+                        .send(ChannelMessage {
+                            session_id: session_id.clone(),
+                            message: AgentResponse::HistoryCompact(HistoryCompact::Err(format!(
+                                "会话历史压缩失败, err: {err}"
+                            ))),
+                        })
+                        .await;
+                    return Err(anyhow!(err));
+                }
+            }
+        }
+        unreachable!("unexpected error, unreachable code")
     }
 }

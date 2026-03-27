@@ -6,8 +6,8 @@ use rig::message::{Message, Reasoning, ToolCall};
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use tokio::sync::RwLock;
 use tokio::sync::mpsc::Sender;
+use tokio::sync::RwLock;
 
 mod llm_agent;
 mod prompt;
@@ -84,7 +84,7 @@ pub struct AgentRequest {
     pub message: Message,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Serialize, Deserialize)]
 pub enum AgentResponse {
     Start,
     ToolCall(ToolCall),
@@ -92,5 +92,10 @@ pub enum AgentResponse {
     MessageStream(Message),
     Final(Usage),
     Error(String),
-    HistoryCompact { before: Usage, after: Usage },
+    HistoryCompact(HistoryCompact),
+}
+#[derive(Clone, Serialize, Deserialize)]
+pub enum HistoryCompact {
+    Ok { before: Usage, after: Usage },
+    Err(String),
 }
