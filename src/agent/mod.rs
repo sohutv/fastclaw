@@ -115,7 +115,7 @@ impl HistoryCompactVal {
                 total_tokens: after.output_tokens,
                 ..after
             },
-            before: Usage::default(),
+            before,
             compact_ratio: (after.output_tokens as f64 / before.total_tokens as f64) * 100.,
         }
     }
