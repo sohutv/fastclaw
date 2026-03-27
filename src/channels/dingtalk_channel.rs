@@ -12,7 +12,7 @@ use dingtalk_stream::frames::{
     RobotGroupMessage, RobotMessage, RobotPrivateMessage, UpMessageContent,
     UpMessageContentMarkdown, UpMessageContentText,
 };
-use dingtalk_stream::{CallbackMessage, DingTalkStream, Error, ErrorCode, MessageTopic, Resp};
+use dingtalk_stream::{CallbackMessage, DingTalkStream, HandlerError, ErrorCode, MessageTopic, Resp};
 use itertools::Itertools;
 use log::warn;
 use rig::OneOrMany;
@@ -64,7 +64,7 @@ impl dingtalk_stream::CallbackHandler for DingTalkCallbackHandler {
         dingtalk_client: &DingTalkStream,
         CallbackMessage { data, .. }: &CallbackMessage,
         cb_msg_sender: Option<Sender<CallbackWebhookMessage>>,
-    ) -> Result<Resp, Error> {
+    ) -> Result<Resp, HandlerError> {
         let Some(CallbackMessageData {
             msg_id: _,
             payload: Some(payload),
@@ -73,13 +73,13 @@ impl dingtalk_stream::CallbackHandler for DingTalkCallbackHandler {
             ..
         }) = data
         else {
-            return Err(Error {
+            return Err(HandlerError {
                 code: ErrorCode::BadRequest,
                 msg: "unexpected data".to_string(),
             });
         };
         let Some(dingtalk_user_id) = &sender.sender_staff_id else {
-            return Err(Error {
+            return Err(HandlerError {
                 code: ErrorCode::BadRequest,
                 msg: "sender_staff_id is required".to_string(),
             });
