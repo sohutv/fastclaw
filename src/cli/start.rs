@@ -76,7 +76,7 @@ impl CmdRunner for Start {
             #[cfg(feature = "channel_cli_channel")]
             ChannelType::Cli => {
                 info!("Starting CLI channel");
-                let cli_channel = channels::cli_channel::CliChannel::new(config)?;
+                let cli_channel = channels::cli_channel::CliChannel::new(config, workspace)?;
                 cli_channel.start(Box::new(main_agent)).await?
             }
             #[cfg(feature = "channel_dingtalk_channel")]

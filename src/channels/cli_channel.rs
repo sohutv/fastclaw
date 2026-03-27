@@ -1,4 +1,4 @@
-use crate::agent::{Agent, AgentRequest, AgentResponse};
+use crate::agent::{Agent, AgentRequest, AgentResponse, Workspace};
 use crate::channels::console_cmd::Console;
 use crate::channels::{Channel, ChannelContext, ChannelMessage, Session, SessionId};
 use crate::config::Config;
@@ -16,19 +16,22 @@ use tokio::sync::RwLock;
 use tokio::sync::mpsc::Receiver;
 
 pub struct CliChannel {
-    ctx: Arc<RwLock<ChannelContext>>,
+    ctx: Arc<ChannelContext>,
 }
 
 impl CliChannel {
-    pub fn new(config: &'static Config) -> crate::Result<Self> {
+    pub fn new(config: &'static Config, workspace: &'static Workspace) -> crate::Result<Self> {
         Ok(CliChannel {
-            ctx: Arc::new(RwLock::new(ChannelContext {
+            ctx: Arc::new(ChannelContext {
                 config: config.clone(),
+                workspace,
                 sessions: {
                     let session_id = SessionId::from("cli-session-channel".to_string());
-                    hash_map!(session_id.clone() => Session::Private{session_id})
+                    Arc::new(RwLock::new(
+                        hash_map!(session_id.clone() => Session::Private{session_id}),
+                    ))
                 },
-            })),
+            }),
         })
     }
 }
@@ -54,9 +57,7 @@ impl Channel for CliChannel {
                             if !line.is_empty() {
                                 let session_id = {
                                     let session_id = ctx
-                                        .read()
-                                        .await
-                                        .sessions
+                                        .sessions.read().await
                                         .keys()
                                         .next()
                                         .expect("unexpected sessions")
@@ -65,7 +66,7 @@ impl Channel for CliChannel {
                                 };
                                 if line.starts_with('/') {
                                     Console::handle_console_cmd(
-                                        Arc::clone(&ctx),
+                                        &ctx,
                                         &line,
                                         &agent,
                                         message_sender.clone(),
@@ -105,7 +106,7 @@ impl Channel for CliChannel {
 
 impl CliChannel {
     async fn poll_agent_message(
-        ctx: &Arc<RwLock<ChannelContext>>,
+        ctx: &Arc<ChannelContext>,
         receiver: &mut Receiver<ChannelMessage>,
     ) -> crate::Result<()> {
         let mut state = AgentRespState::Init;
@@ -114,7 +115,6 @@ impl CliChannel {
             tokio::select! {
                 message = receiver.recv() => {
                     if let Some(message) = message {
-                        let ctx = ctx.read().await;
                         match  Self::handle_agent_message(&ctx, &message, state).await{
                             Ok(AgentRespState::Final) | Err( _)=> {
                                 return Ok(());
@@ -146,10 +146,10 @@ impl CliChannel {
 
     async fn handle_agent_message(
         ctx: &ChannelContext,
-        signal: &AgentResponse,
+        agent_response: &AgentResponse,
         curr_state: AgentRespState,
     ) -> crate::Result<AgentRespState> {
-        match signal {
+        match agent_response {
             AgentResponse::Start => {
                 if let AgentRespState::Init = curr_state {
                     Ok(AgentRespState::Start)
@@ -243,6 +243,18 @@ Reasoning >> ////////
                 Err(anyhow!("Agent error: {}", error))
             }
             AgentResponse::HistoryCompact { .. } => Ok(curr_state),
+            AgentResponse::Notify(notify) => {
+                println!(
+                    r#"
+Notify >> ////////
+Title: {}
+{}
+//////// << Notify
+                "#,
+                    notify.title, notify.content
+                );
+                Ok(curr_state)
+            }
         }
     }
 }

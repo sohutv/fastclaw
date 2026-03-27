@@ -2,9 +2,7 @@ use crate::agent::{Agent, AgentResponse, Notify};
 use crate::channels::{ChannelContext, ChannelMessage, SessionId};
 use clap::Parser;
 use derive_more::FromStr;
-use std::sync::Arc;
 use strum::Display;
-use tokio::sync::RwLock;
 use tokio::sync::mpsc::Sender;
 
 #[derive(Debug, clap::Parser)]
@@ -28,7 +26,7 @@ pub enum ShowReasoning {
 
 impl Console {
     pub async fn handle_console_cmd(
-        ctx: Arc<RwLock<ChannelContext>>,
+        _: &ChannelContext,
         line: &str,
         agent: &Box<dyn Agent>,
         channel_message_sender: Sender<ChannelMessage>,
@@ -37,17 +35,14 @@ impl Console {
         let line = format!("/ {}", &line[1..]);
         match Console::try_parse_from(line.split(" ")) {
             Ok(command) => match command {
-                Console::ShowReasoning { state } => {
-                    let mut ctx = ctx.write().await;
-                    match state {
-                        ShowReasoning::On => {
-                            ctx.config.show_reasoning = true;
-                        }
-                        ShowReasoning::Off => {
-                            ctx.config.show_reasoning = false;
-                        }
+                Console::ShowReasoning { state } => match state {
+                    ShowReasoning::On => {
+                        unimplemented!()
                     }
-                }
+                    ShowReasoning::Off => {
+                        unimplemented!()
+                    }
+                },
                 Console::Compact => {
                     let _ = channel_message_sender
                         .send(ChannelMessage {

@@ -25,22 +25,21 @@ use std::io::Cursor;
 use std::ops::Deref;
 use std::sync::Arc;
 use std::thread::JoinHandle;
-use tokio::sync::RwLock;
 use tokio::sync::mpsc::{Receiver, Sender};
 
 pub struct DingtalkChannel {
-    ctx: Arc<RwLock<ChannelContext>>,
+    ctx: Arc<ChannelContext>,
     dingtalk_config: DingTalkConfig,
 }
 
 impl DingtalkChannel {
     pub fn new(config: &'static Config, workspace: &'static Workspace) -> crate::Result<Self> {
         Ok(Self {
-            ctx: Arc::new(RwLock::new(ChannelContext {
+            ctx: Arc::new(ChannelContext {
                 config: config.clone(),
                 workspace,
                 sessions: Default::default(),
-            })),
+            }),
             dingtalk_config: config
                 .dingtalk_config
                 .clone()
@@ -51,7 +50,7 @@ impl DingtalkChannel {
 
 #[allow(unused)]
 struct DingTalkCallbackHandler {
-    ctx: Arc<RwLock<ChannelContext>>,
+    ctx: Arc<ChannelContext>,
     dingtalk_config: DingTalkConfig,
     dingtalk_bot_topic: MessageTopic,
     agent: Box<dyn Agent>,
@@ -108,7 +107,6 @@ impl dingtalk_stream::CallbackHandler for DingTalkCallbackHandler {
                 .await;
         }
         let session_id = {
-            let mut ctx = self.ctx.write().await;
             let session = match conversation {
                 CallbackMessageConversation::Private { .. } => Session::Private {
                     session_id: SessionId::from(dingtalk_user_id.deref().to_string()),
@@ -118,7 +116,10 @@ impl dingtalk_stream::CallbackHandler for DingTalkCallbackHandler {
                 },
             };
             let session_id = session.deref().clone();
-            ctx.sessions.entry(session_id.clone()).or_insert(session);
+            {
+                let mut sessions = self.ctx.sessions.write().await;
+                sessions.entry(session_id.clone()).or_insert(session);
+            }
             session_id
         };
         let (cmd, line, images, files) = match payload {
@@ -135,20 +136,14 @@ impl dingtalk_stream::CallbackHandler for DingTalkCallbackHandler {
                 }
             }
             CallbackMessagePayload::Picture { content: picture } => {
-                let downloads_dir = {
-                    let ctx = self.ctx.read().await;
-                    ctx.workspace.path.join("downloads")
-                };
+                let downloads_dir = self.ctx.workspace.path.join("downloads");
                 match picture.fetch(dingtalk_client, downloads_dir).await {
                     Ok((_, image)) => (None, None, Some(vec![image]), None),
                     Err(e) => (None, Some(format!("下载图片失败, {}", e)), None, None),
                 }
             }
             CallbackMessagePayload::File { content } => {
-                let downloads_dir = {
-                    let ctx = self.ctx.read().await;
-                    ctx.workspace.path.join("downloads")
-                };
+                let downloads_dir = self.ctx.workspace.path.join("downloads");
                 match content.fetch(dingtalk_client, downloads_dir).await {
                     Ok((filepath, _)) => (None, None, None, Some(vec![filepath])),
                     Err(e) => (
@@ -160,10 +155,7 @@ impl dingtalk_stream::CallbackHandler for DingTalkCallbackHandler {
                 }
             }
             CallbackMessagePayload::RichText { content } => {
-                let downloads_dir = {
-                    let ctx = self.ctx.read().await;
-                    ctx.workspace.path.join("downloads")
-                };
+                let downloads_dir = self.ctx.workspace.path.join("downloads");
                 let mut texts = vec![];
                 let mut pictures = vec![];
                 for content in content.iter() {
@@ -195,7 +187,7 @@ impl dingtalk_stream::CallbackHandler for DingTalkCallbackHandler {
         if let Some(line) = cmd {
             if line.starts_with('/') {
                 Console::handle_console_cmd(
-                    Arc::clone(&self.ctx),
+                    &self.ctx,
                     &line,
                     &self.agent,
                     self.channel_message_sender.clone(),
@@ -243,8 +235,7 @@ impl dingtalk_stream::CallbackHandler for DingTalkCallbackHandler {
             }
         }
         if let Some(files) = files {
-            let ctx = self.ctx.read().await;
-            let workspace_path = &ctx.workspace.path;
+            let workspace_path = &self.ctx.workspace.path;
             for filepath in files.iter().flat_map(|it| it.strip_prefix(workspace_path)) {
                 user_content.push(UserContent::Text(
                     format!(
@@ -353,14 +344,13 @@ impl Channel for DingtalkChannel {
 
 impl DingtalkChannel {
     async fn poll_agent_message(
-        ctx: &Arc<RwLock<ChannelContext>>,
+        ctx: &ChannelContext,
         receiver: &mut Receiver<ChannelMessage>,
         dingtalk_msg_sender: &DingtalkMessageSender,
     ) -> crate::Result<()> {
         let mut state = AgentRespState::Wait;
         let mut buff = Vec::<String>::new();
         while let Some(message) = receiver.recv().await {
-            let ctx = ctx.read().await;
             match Self::handle_agent_message(
                 &*ctx,
                 &message,
@@ -400,7 +390,9 @@ impl DingtalkChannel {
                         session_id,
                         ctx,
                         UpMessageContentMarkdown::from(("思考中...", "正在思考...")),
-                    ) {
+                    )
+                    .await
+                    {
                         let _ = dingtalk_msg_sender.send(robot_message).await;
                     }
                     Ok(AgentRespState::Start)
@@ -430,7 +422,9 @@ impl DingtalkChannel {
                             ))
                         ),
                     )),
-                ) {
+                )
+                .await
+                {
                     let _ = dingtalk_msg_sender.send(robot_message).await;
                 }
                 Ok(curr_state)
@@ -468,7 +462,7 @@ impl DingtalkChannel {
                                 ))
                             };
                             if let Some(robot_message) =
-                                Self::create_robot_messages(session_id, ctx, content)
+                                Self::create_robot_messages(session_id, ctx, content).await
                             {
                                 let _ = dingtalk_msg_sender.send(robot_message).await;
                             }
@@ -513,7 +507,9 @@ impl DingtalkChannel {
                     buff.clear();
                     content
                 };
-                if let Some(robot_message) = Self::create_robot_messages(session_id, ctx, content) {
+                if let Some(robot_message) =
+                    Self::create_robot_messages(session_id, ctx, content).await
+                {
                     let _ = dingtalk_msg_sender.send(robot_message).await;
                 }
                 Ok(AgentRespState::Final)
@@ -524,7 +520,9 @@ impl DingtalkChannel {
                     session_id,
                     ctx,
                     UpMessageContentMarkdown::from((title, &format!("{content}",))),
-                ) {
+                )
+                .await
+                {
                     let _ = dingtalk_msg_sender.send(robot_message).await;
                 }
                 Ok(curr_state)
@@ -549,7 +547,9 @@ impl DingtalkChannel {
                                     val.compact_ratio(),
                                 ),
                             )),
-                        ) {
+                        )
+                        .await
+                        {
                             let _ = dingtalk_msg_sender.send(robot_message).await;
                         }
                     }
@@ -558,7 +558,9 @@ impl DingtalkChannel {
                             session_id,
                             ctx,
                             UpMessageContentText::from(err_msg),
-                        ) {
+                        )
+                        .await
+                        {
                             let _ = dingtalk_msg_sender.send(robot_message).await;
                         }
                     }
@@ -575,7 +577,9 @@ impl DingtalkChannel {
                             "#
                                 ),
                             )),
-                        ) {
+                        )
+                        .await
+                        {
                             let _ = dingtalk_msg_sender.send(robot_message).await;
                         }
                     }
@@ -586,14 +590,18 @@ impl DingtalkChannel {
         }
     }
 
-    fn create_robot_messages<Content: Into<UpMessageContent>>(
+    async fn create_robot_messages<Content: Into<UpMessageContent>>(
         session_id: &SessionId,
         ctx: &ChannelContext,
         content: Content,
     ) -> Option<RobotMessage> {
-        let Some(session) = ctx.sessions.get(session_id) else {
-            warn!("Session not found for ID: {}", session_id);
-            return None;
+        let session = {
+            let sessions = ctx.sessions.read().await;
+            let Some(session) = sessions.get(session_id) else {
+                warn!("Session not found for ID: {}", session_id);
+                return None;
+            };
+            session.clone()
         };
         let content = content.into();
         match session {

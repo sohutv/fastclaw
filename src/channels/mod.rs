@@ -5,7 +5,9 @@ use derive_more::{Deref, Display};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::ops::Deref;
+use std::sync::{Arc};
 use std::thread::JoinHandle;
+use tokio::sync::RwLock;
 
 #[cfg(feature = "channel_cli_channel")]
 pub mod cli_channel;
@@ -28,7 +30,7 @@ pub trait Channel {
 pub struct ChannelContext {
     pub config: Config,
     pub workspace: &'static Workspace,
-    pub sessions: HashMap<SessionId, Session>,
+    pub sessions: Arc<RwLock<HashMap<SessionId, Session>>>,
 }
 
 #[derive(Clone, Deref)]
