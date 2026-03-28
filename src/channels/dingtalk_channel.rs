@@ -5,14 +5,16 @@ use crate::config::{Config, DingTalkConfig};
 use anyhow::anyhow;
 use async_trait::async_trait;
 use base64::Engine;
-use dingtalk_stream::client::{DingtalkMessageSender, DingtalkResource};
+use dingtalk_stream::client::DingtalkResource;
 use dingtalk_stream::frames::{
     CallbackMessageConversation, CallbackMessageData, CallbackMessagePayload,
     CallbackWebhookMessage, DingTalkGroupConversationId, DingTalkUserId, RichTextItem,
     RobotGroupMessage, RobotMessage, RobotPrivateMessage, UpMessageContent,
     UpMessageContentMarkdown, UpMessageContentText,
 };
-use dingtalk_stream::{CallbackMessage, DingTalkStream, HandlerError, ErrorCode, MessageTopic, Resp};
+use dingtalk_stream::{
+    CallbackMessage, DingTalkStream, ErrorCode, HandlerError, MessageTopic, Resp,
+};
 use itertools::Itertools;
 use log::warn;
 use rig::OneOrMany;
@@ -51,7 +53,7 @@ impl DingtalkChannel {
 #[allow(unused)]
 struct DingTalkCallbackHandler {
     ctx: Arc<ChannelContext>,
-    dingtalk_config: DingTalkConfig,
+    config: DingTalkConfig,
     dingtalk_bot_topic: MessageTopic,
     agent: Box<dyn Agent>,
     channel_message_sender: Sender<ChannelMessage>,
@@ -88,7 +90,7 @@ impl dingtalk_stream::CallbackHandler for DingTalkCallbackHandler {
             master_user_id,
             allow_user_ids,
             ..
-        } = &self.dingtalk_config;
+        } = &self.config;
         let is_master = master_user_id.eq(dingtalk_user_id.deref());
         if let (0, false, Some(cb_msg_sender)) = (
             allow_user_ids
@@ -298,7 +300,7 @@ impl Channel for DingtalkChannel {
             let ctx = Arc::clone(&ctx);
             DingTalkCallbackHandler {
                 ctx,
-                dingtalk_config: dingtalk_config.clone(),
+                config: dingtalk_config.clone(),
                 dingtalk_bot_topic: MessageTopic::Callback(
                     dingtalk_stream::TOPIC_ROBOT.to_string(),
                 ),
@@ -306,29 +308,25 @@ impl Channel for DingtalkChannel {
                 channel_message_sender,
             }
         };
-        let (mut dingtalk_stream, dingtalk_msg_sender) =
-            DingTalkStream::new(dingtalk_config.credential)
-                .register_callback_handler(cb_handler)
-                .create_message_sender()
-                .await;
-
+        let (dingtalk, dingtalk_stream_handle) = Arc::new(
+            DingTalkStream::new(dingtalk_config.credential).register_callback_handler(cb_handler),
+        )
+        .start()
+        .await?;
         let join_handle = std::thread::spawn(move || {
             let rt = tokio::runtime::Builder::new_current_thread()
                 .enable_all()
                 .build()
                 .expect("unexpected err");
-            let dingtalk_stream_handle = {
-                rt.spawn(async move {
-                    dingtalk_stream.start_forever().await;
-                })
-            };
+
             let agent_handle = {
                 let ctx = Arc::clone(&ctx);
+                let dingtalk = Arc::clone(&dingtalk);
                 rt.spawn(async move {
                     let _ = DingtalkChannel::poll_agent_message(
+                        &dingtalk,
                         &ctx,
                         &mut channel_message_receiver,
-                        &dingtalk_msg_sender,
                     )
                     .await;
                 })
@@ -344,22 +342,14 @@ impl Channel for DingtalkChannel {
 
 impl DingtalkChannel {
     async fn poll_agent_message(
+        dingtalk: &DingTalkStream,
         ctx: &ChannelContext,
         receiver: &mut Receiver<ChannelMessage>,
-        dingtalk_msg_sender: &DingtalkMessageSender,
     ) -> crate::Result<()> {
         let mut state = AgentRespState::Wait;
         let mut buff = Vec::<String>::new();
         while let Some(message) = receiver.recv().await {
-            match Self::handle_agent_message(
-                &*ctx,
-                &message,
-                state,
-                &mut buff,
-                &dingtalk_msg_sender,
-            )
-            .await
-            {
+            match Self::handle_agent_message(dingtalk, &*ctx, &message, state, &mut buff).await {
                 Ok(AgentRespState::Final) | Err(_) => {
                     state = AgentRespState::Wait;
                     buff.clear();
@@ -373,6 +363,7 @@ impl DingtalkChannel {
     }
 
     async fn handle_agent_message(
+        dingtalk: &DingTalkStream,
         ctx: &ChannelContext,
         ChannelMessage {
             session_id,
@@ -380,7 +371,6 @@ impl DingtalkChannel {
         }: &ChannelMessage,
         curr_state: AgentRespState,
         buff: &mut Vec<String>,
-        dingtalk_msg_sender: &DingtalkMessageSender,
     ) -> crate::Result<AgentRespState> {
         match message {
             AgentResponse::Start => {
@@ -393,7 +383,7 @@ impl DingtalkChannel {
                     )
                     .await
                     {
-                        let _ = dingtalk_msg_sender.send(robot_message).await;
+                        let _ = dingtalk.send_message(robot_message).await;
                     }
                     Ok(AgentRespState::Start)
                 } else {
@@ -425,7 +415,7 @@ impl DingtalkChannel {
                 )
                 .await
                 {
-                    let _ = dingtalk_msg_sender.send(robot_message).await;
+                    let _ = dingtalk.send_message(robot_message).await;
                 }
                 Ok(curr_state)
             }
@@ -464,7 +454,7 @@ impl DingtalkChannel {
                             if let Some(robot_message) =
                                 Self::create_robot_messages(session_id, ctx, content).await
                             {
-                                let _ = dingtalk_msg_sender.send(robot_message).await;
+                                let _ = dingtalk.send_message(robot_message).await;
                             }
                         }
                     }
@@ -510,7 +500,7 @@ impl DingtalkChannel {
                 if let Some(robot_message) =
                     Self::create_robot_messages(session_id, ctx, content).await
                 {
-                    let _ = dingtalk_msg_sender.send(robot_message).await;
+                    let _ = dingtalk.send_message(robot_message).await;
                 }
                 Ok(AgentRespState::Final)
             }
@@ -523,7 +513,7 @@ impl DingtalkChannel {
                 )
                 .await
                 {
-                    let _ = dingtalk_msg_sender.send(robot_message).await;
+                    let _ = dingtalk.send_message(robot_message).await;
                 }
                 Ok(curr_state)
             }
@@ -550,7 +540,7 @@ impl DingtalkChannel {
                         )
                         .await
                         {
-                            let _ = dingtalk_msg_sender.send(robot_message).await;
+                            let _ = dingtalk.send_message(robot_message).await;
                         }
                     }
                     HistoryCompactResult::Err(err_msg) => {
@@ -561,7 +551,7 @@ impl DingtalkChannel {
                         )
                         .await
                         {
-                            let _ = dingtalk_msg_sender.send(robot_message).await;
+                            let _ = dingtalk.send_message(robot_message).await;
                         }
                     }
                     HistoryCompactResult::Ignore(msg) => {
@@ -580,7 +570,7 @@ impl DingtalkChannel {
                         )
                         .await
                         {
-                            let _ = dingtalk_msg_sender.send(robot_message).await;
+                            let _ = dingtalk.send_message(robot_message).await;
                         }
                     }
                 }
