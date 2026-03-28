@@ -379,7 +379,7 @@ impl DingtalkChannel {
                     if let Some(robot_message) = Self::create_robot_messages(
                         session_id,
                         ctx,
-                        UpMessageContentMarkdown::from(("思考中...", "正在思考...")),
+                        UpMessageContentMarkdown::from(("正在思考...", "正在思考...")),
                     )
                     .await
                     {
@@ -398,10 +398,10 @@ impl DingtalkChannel {
                     session_id,
                     ctx,
                     UpMessageContentMarkdown::from((
-                        format!("思考中...(工具调用: {name})"),
+                        format!("工具调用: {name}..."),
                         format!(
                             r#"
-### 工具调用: {name}
+### 工具调用: {name}...
 ```
 {}
 ```json
@@ -442,10 +442,10 @@ impl DingtalkChannel {
                                 let content = buff.join("");
                                 buff.clear();
                                 UpMessageContentMarkdown::from((
-                                    "思考完成...",
+                                    "正在思考...",
                                     format!(
                                         r#"
-### 正在思考...
+### 我的想法..
 {content}
                                     "#
                                     ),
@@ -524,7 +524,7 @@ impl DingtalkChannel {
                             session_id,
                             ctx,
                             UpMessageContentMarkdown::from((
-                                "压缩上下文",
+                                "压缩上下文完成",
                                 &format!(
                                     r#"
 ### 压缩上下文完成
