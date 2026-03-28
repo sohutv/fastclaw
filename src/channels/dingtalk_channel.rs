@@ -5,23 +5,34 @@ use crate::config::{Config, DingTalkConfig};
 use anyhow::anyhow;
 use async_trait::async_trait;
 use base64::Engine;
-use dingtalk_stream::client::DingtalkResource;
-use dingtalk_stream::frames::{
-    CallbackMessageConversation, CallbackMessageData, CallbackMessagePayload,
-    CallbackWebhookMessage, DingTalkGroupConversationId, DingTalkUserId, RichTextItem,
-    RobotGroupMessage, RobotMessage, RobotPrivateMessage, UpMessageContent,
-    UpMessageContentMarkdown, UpMessageContentText,
-};
 use dingtalk_stream::{
-    CallbackMessage, DingTalkStream, ErrorCode, HandlerError, MessageTopic, Resp,
+    DingTalkStream,
+    client::DingtalkResource,
+    frames::{
+        DingTalkGroupConversationId, DingTalkUserId,
+        down_message::{
+            MessageTopic,
+            callback_message::{
+                CallbackMessage, Conversation, MessageData, MessagePayload, RichTextItem,
+            },
+        },
+        up_message::{
+            MessageContent, MessageContentMarkdown, MessageContentText,
+            callback_message::WebhookMessage,
+            robot_message::{RobotGroupMessage, RobotMessage, RobotPrivateMessage},
+        },
+    },
+    handlers::{Error as HandlerError, ErrorCode, Resp as HandlerResp},
 };
 use itertools::Itertools;
 use log::warn;
-use rig::OneOrMany;
-use rig::completion::{AssistantContent, Message};
-use rig::message::{
-    DocumentSourceKind, Image, ImageDetail, ImageMediaType, ReasoningContent, ToolCall,
-    ToolFunction, UserContent,
+use rig::{
+    OneOrMany,
+    completion::{AssistantContent, Message},
+    message::{
+        DocumentSourceKind, Image, ImageDetail, ImageMediaType, ReasoningContent, ToolCall,
+        ToolFunction, UserContent,
+    },
 };
 use std::io::Cursor;
 use std::ops::Deref;
@@ -60,14 +71,14 @@ struct DingTalkCallbackHandler {
 }
 
 #[async_trait]
-impl dingtalk_stream::CallbackHandler for DingTalkCallbackHandler {
+impl dingtalk_stream::handlers::CallbackHandler for DingTalkCallbackHandler {
     async fn process(
         &self,
         dingtalk_client: &DingTalkStream,
         CallbackMessage { data, .. }: &CallbackMessage,
-        cb_msg_sender: Option<Sender<CallbackWebhookMessage>>,
-    ) -> Result<Resp, HandlerError> {
-        let Some(CallbackMessageData {
+        cb_msg_sender: Option<Sender<WebhookMessage>>,
+    ) -> Result<HandlerResp, HandlerError> {
+        let Some(MessageData {
             msg_id: _,
             payload: Some(payload),
             sender,
@@ -101,8 +112,8 @@ impl dingtalk_stream::CallbackHandler for DingTalkCallbackHandler {
             cb_msg_sender,
         ) {
             let _ = cb_msg_sender
-                .send(CallbackWebhookMessage {
-                    content: UpMessageContent::from("forbidden, not allowed"),
+                .send(WebhookMessage {
+                    content: MessageContent::from("forbidden, not allowed"),
                     at: dingtalk_user_id.into(),
                     send_result_cb: None,
                 })
@@ -110,10 +121,10 @@ impl dingtalk_stream::CallbackHandler for DingTalkCallbackHandler {
         }
         let session_id = {
             let session = match conversation {
-                CallbackMessageConversation::Private { .. } => Session::Private {
+                Conversation::Private { .. } => Session::Private {
                     session_id: SessionId::from(dingtalk_user_id.deref().to_string()),
                 },
-                CallbackMessageConversation::Group { id, .. } => Session::Group {
+                Conversation::Group { id, .. } => Session::Group {
                     session_id: SessionId::from(id.deref().to_string()),
                 },
             };
@@ -125,7 +136,7 @@ impl dingtalk_stream::CallbackHandler for DingTalkCallbackHandler {
             session_id
         };
         let (cmd, line, images, files) = match payload {
-            CallbackMessagePayload::Text { text } => {
+            MessagePayload::Text { text } => {
                 if text.starts_with('/') {
                     (Some(text.to_string()), None, None, None)
                 } else {
@@ -137,14 +148,14 @@ impl dingtalk_stream::CallbackHandler for DingTalkCallbackHandler {
                     )
                 }
             }
-            CallbackMessagePayload::Picture { content: picture } => {
+            MessagePayload::Picture { content: picture } => {
                 let downloads_dir = self.ctx.workspace.path.join("downloads");
                 match picture.fetch(dingtalk_client, downloads_dir).await {
                     Ok((_, image)) => (None, None, Some(vec![image]), None),
                     Err(e) => (None, Some(format!("下载图片失败, {}", e)), None, None),
                 }
             }
-            CallbackMessagePayload::File { content } => {
+            MessagePayload::File { content } => {
                 let downloads_dir = self.ctx.workspace.path.join("downloads");
                 match content.fetch(dingtalk_client, downloads_dir).await {
                     Ok((filepath, _)) => (None, None, None, Some(vec![filepath])),
@@ -156,7 +167,7 @@ impl dingtalk_stream::CallbackHandler for DingTalkCallbackHandler {
                     ),
                 }
             }
-            CallbackMessagePayload::RichText { content } => {
+            MessagePayload::RichText { content } => {
                 let downloads_dir = self.ctx.workspace.path.join("downloads");
                 let mut texts = vec![];
                 let mut pictures = vec![];
@@ -196,7 +207,7 @@ impl dingtalk_stream::CallbackHandler for DingTalkCallbackHandler {
                     &session_id,
                 )
                 .await;
-                return Ok(Resp::Text("cmd submitted".to_string()));
+                return Ok(HandlerResp::Text("cmd submitted".to_string()));
             }
         }
         let prompt = if is_master {
@@ -263,7 +274,7 @@ impl dingtalk_stream::CallbackHandler for DingTalkCallbackHandler {
             }
         };
         let Some(user_content) = user_content else {
-            return Ok(Resp::Text("no content to submit".to_string()));
+            return Ok(HandlerResp::Text("no content to submit".to_string()));
         };
         match self
             .agent
@@ -278,8 +289,8 @@ impl dingtalk_stream::CallbackHandler for DingTalkCallbackHandler {
             )
             .await
         {
-            Ok(()) => Ok(Resp::Text("task submitted".to_string())),
-            Err(err) => Ok(Resp::Text(format!("submit task failed: {err}"))),
+            Ok(()) => Ok(HandlerResp::Text("task submitted".to_string())),
+            Err(err) => Ok(HandlerResp::Text(format!("submit task failed: {err}"))),
         }
     }
 
@@ -379,7 +390,7 @@ impl DingtalkChannel {
                     if let Some(robot_message) = Self::create_robot_messages(
                         session_id,
                         ctx,
-                        UpMessageContentMarkdown::from(("正在思考...", "正在思考...")),
+                        MessageContentText::from("正在思考..."),
                     )
                     .await
                     {
@@ -397,7 +408,7 @@ impl DingtalkChannel {
                 if let Some(robot_message) = Self::create_robot_messages(
                     session_id,
                     ctx,
-                    UpMessageContentMarkdown::from((
+                    MessageContentMarkdown::from((
                         format!("工具调用: {name}..."),
                         format!(
                             r#"
@@ -441,7 +452,7 @@ impl DingtalkChannel {
                             let content = {
                                 let content = buff.join("");
                                 buff.clear();
-                                UpMessageContentMarkdown::from((
+                                MessageContentMarkdown::from((
                                     "正在思考...",
                                     format!(
                                         r#"
@@ -480,7 +491,7 @@ impl DingtalkChannel {
             }
             AgentResponse::Final(usage) => {
                 let content = {
-                    let content = UpMessageContentMarkdown::from((
+                    let content = MessageContentMarkdown::from((
                         "回复中...",
                         format!(
                             r#"
@@ -509,7 +520,7 @@ impl DingtalkChannel {
                 if let Some(robot_message) = Self::create_robot_messages(
                     session_id,
                     ctx,
-                    UpMessageContentMarkdown::from((title, &format!("{content}",))),
+                    MessageContentMarkdown::from((title, &format!("{content}",))),
                 )
                 .await
                 {
@@ -523,7 +534,7 @@ impl DingtalkChannel {
                         if let Some(robot_message) = Self::create_robot_messages(
                             session_id,
                             ctx,
-                            UpMessageContentMarkdown::from((
+                            MessageContentMarkdown::from((
                                 "压缩上下文完成",
                                 &format!(
                                     r#"
@@ -547,7 +558,7 @@ impl DingtalkChannel {
                         if let Some(robot_message) = Self::create_robot_messages(
                             session_id,
                             ctx,
-                            UpMessageContentText::from(err_msg),
+                            MessageContentText::from(err_msg),
                         )
                         .await
                         {
@@ -558,7 +569,7 @@ impl DingtalkChannel {
                         if let Some(robot_message) = Self::create_robot_messages(
                             session_id,
                             ctx,
-                            UpMessageContentMarkdown::from((
+                            MessageContentMarkdown::from((
                                 "压缩请求被忽略",
                                 format!(
                                     r#"
@@ -580,7 +591,7 @@ impl DingtalkChannel {
         }
     }
 
-    async fn create_robot_messages<Content: Into<UpMessageContent>>(
+    async fn create_robot_messages<Content: Into<MessageContent>>(
         session_id: &SessionId,
         ctx: &ChannelContext,
         content: Content,
