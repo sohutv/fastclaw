@@ -25,7 +25,7 @@ use dingtalk_stream::{
     handlers::{Error as HandlerError, ErrorCode, Resp as HandlerResp},
 };
 use itertools::Itertools;
-use log::warn;
+use log::{error, info, warn};
 use rig::{
     OneOrMany,
     completion::{AssistantContent, Message},
@@ -66,7 +66,7 @@ struct DingTalkCallbackHandler {
     ctx: Arc<ChannelContext>,
     config: DingTalkConfig,
     dingtalk_bot_topic: MessageTopic,
-    agent: Box<dyn Agent>,
+    agent: Arc<dyn Agent>,
     channel_message_sender: Sender<ChannelMessage>,
 }
 
@@ -79,7 +79,7 @@ impl dingtalk_stream::handlers::CallbackHandler for DingTalkCallbackHandler {
         cb_msg_sender: Option<Sender<WebhookMessage>>,
     ) -> Result<HandlerResp, HandlerError> {
         let Some(MessageData {
-            msg_id: _,
+            msg_id,
             payload: Some(payload),
             sender,
             conversation,
@@ -151,7 +151,9 @@ impl dingtalk_stream::handlers::CallbackHandler for DingTalkCallbackHandler {
             MessagePayload::Picture { content: picture } => {
                 let downloads_dir = self.ctx.workspace.path.join("downloads");
                 match picture.fetch(dingtalk_client, downloads_dir).await {
-                    Ok((_, image)) => (None, None, Some(vec![image]), None),
+                    Ok((filepath, image)) => {
+                        (None, None, Some(vec![(1usize, filepath, image)]), None)
+                    }
                     Err(e) => (None, Some(format!("下载图片失败, {}", e)), None, None),
                 }
             }
@@ -171,6 +173,7 @@ impl dingtalk_stream::handlers::CallbackHandler for DingTalkCallbackHandler {
                 let downloads_dir = self.ctx.workspace.path.join("downloads");
                 let mut texts = vec![];
                 let mut pictures = vec![];
+                let mut img_idx = 0;
                 for content in content.iter() {
                     match content {
                         RichTextItem::Text(text) => {
@@ -178,8 +181,9 @@ impl dingtalk_stream::handlers::CallbackHandler for DingTalkCallbackHandler {
                         }
                         RichTextItem::Picture(picture) => {
                             match picture.fetch(dingtalk_client, downloads_dir.clone()).await {
-                                Ok((_, image)) => {
-                                    pictures.push(image);
+                                Ok((filepath, image)) => {
+                                    img_idx += 1;
+                                    pictures.push((img_idx, filepath, image));
                                 }
                                 Err(e) => {
                                     texts.push(format!("下载图片失败, {}", e));
@@ -231,7 +235,7 @@ impl dingtalk_stream::handlers::CallbackHandler for DingTalkCallbackHandler {
         };
         let mut user_content = Vec::<UserContent>::new();
         if let Some(images) = images {
-            for image in images {
+            for (img_idx, filepath, image) in images {
                 let mut buf = vec![];
                 let cursor = Cursor::new(&mut buf);
                 let Ok(_) = image.write_to(cursor, image::ImageFormat::Png) else {
@@ -245,6 +249,16 @@ impl dingtalk_stream::handlers::CallbackHandler for DingTalkCallbackHandler {
                     detail: Some(ImageDetail::Auto),
                     additional_params: None,
                 }));
+                user_content.push(UserContent::Text(
+                    format!(
+                        r#"
+- Whisper: The filepath of the {}-th image is {}
+                "#,
+                        img_idx,
+                        filepath.display()
+                    )
+                    .into(),
+                ))
             }
         }
         if let Some(files) = files {
@@ -276,22 +290,34 @@ impl dingtalk_stream::handlers::CallbackHandler for DingTalkCallbackHandler {
         let Some(user_content) = user_content else {
             return Ok(HandlerResp::Text("no content to submit".to_string()));
         };
-        match self
-            .agent
-            .run(
-                AgentRequest {
-                    session_id,
-                    message: Message::User {
-                        content: user_content,
-                    },
-                },
-                self.channel_message_sender.clone(),
-            )
-            .await
         {
-            Ok(()) => Ok(HandlerResp::Text("task submitted".to_string())),
-            Err(err) => Ok(HandlerResp::Text(format!("submit task failed: {err}"))),
+            let msg_id =msg_id.clone();
+            info!("Submit task to agent, msg_id: {}", msg_id);
+            let agent = Arc::clone(&self.agent);
+            let channel_message_sender = self.channel_message_sender.clone();
+            tokio::spawn(async move {
+                match agent
+                    .run(
+                        AgentRequest {
+                            session_id,
+                            message: Message::User {
+                                content: user_content,
+                            },
+                        },
+                        channel_message_sender.clone(),
+                    )
+                    .await
+                {
+                    Ok(_) => {
+                        info!("Agent run completed, task_id: {}", msg_id);
+                    }
+                    Err(err) => {
+                        error!("Agent run failed, task_id: {}, error: {}", msg_id, err);
+                    }
+                }
+            });
         }
+        Ok(HandlerResp::Text(format!("task submitted: {}", msg_id)))
     }
 
     fn topic(&self) -> &MessageTopic {
@@ -301,7 +327,7 @@ impl dingtalk_stream::handlers::CallbackHandler for DingTalkCallbackHandler {
 
 #[async_trait]
 impl Channel for DingtalkChannel {
-    async fn start(self, agent: Box<dyn Agent>) -> crate::Result<JoinHandle<()>> {
+    async fn start(self, agent: Arc<dyn Agent>) -> crate::Result<JoinHandle<()>> {
         let Self {
             ctx,
             dingtalk_config,

@@ -21,7 +21,7 @@ pub mod a2a_channel;
 pub trait Channel {
     async fn start(
         self,
-        agent: Box<dyn Agent>,
+        agent: Arc<dyn Agent>,
     ) -> crate::Result<JoinHandle<()>>;
 }
 

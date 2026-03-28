@@ -77,14 +77,14 @@ impl CmdRunner for Start {
             ChannelType::Cli => {
                 info!("Starting CLI channel");
                 let cli_channel = channels::cli_channel::CliChannel::new(config, workspace)?;
-                cli_channel.start(Box::new(main_agent)).await?
+                cli_channel.start(Arc::new(main_agent)).await?
             }
             #[cfg(feature = "channel_dingtalk_channel")]
             ChannelType::Dingtalk => {
                 info!("Starting Dingtalk channel");
                 let dingtalk_channel =
                     channels::dingtalk_channel::DingtalkChannel::new(config, workspace)?;
-                dingtalk_channel.start(Box::new(main_agent)).await?
+                dingtalk_channel.start(Arc::new(main_agent)).await?
             }
         };
         //todo let _ = heartbeat_handle.await;

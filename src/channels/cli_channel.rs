@@ -38,7 +38,7 @@ impl CliChannel {
 
 #[async_trait]
 impl Channel for CliChannel {
-    async fn start(self, agent: Box<dyn Agent>) -> crate::Result<JoinHandle<()>> {
+    async fn start(self, agent: Arc<dyn Agent>) -> crate::Result<JoinHandle<()>> {
         let Self { ctx } = self;
         let ctx = Arc::clone(&ctx);
         let join_handle = std::thread::spawn(move || {

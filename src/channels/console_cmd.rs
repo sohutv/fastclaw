@@ -1,3 +1,4 @@
+use std::sync::Arc;
 use crate::agent::{Agent, AgentResponse, Notify};
 use crate::channels::{ChannelContext, ChannelMessage, SessionId};
 use clap::Parser;
@@ -28,7 +29,7 @@ impl Console {
     pub async fn handle_console_cmd(
         _: &ChannelContext,
         line: &str,
-        agent: &Box<dyn Agent>,
+        agent: &Arc<dyn Agent>,
         channel_message_sender: Sender<ChannelMessage>,
         session_id: &SessionId,
     ) {
