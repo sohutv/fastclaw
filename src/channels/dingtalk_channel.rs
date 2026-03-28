@@ -599,7 +599,6 @@ impl DingtalkChannel {
                 RobotPrivateMessage {
                     user_ids: vec![DingTalkUserId::from(session_id.deref())],
                     content: content.clone(),
-                    send_result_cb: None,
                 }
                 .into(),
             ),
@@ -607,7 +606,6 @@ impl DingtalkChannel {
                 RobotGroupMessage {
                     group_id: DingTalkGroupConversationId::from(session_id.deref()),
                     content: content.clone(),
-                    send_result_cb: None,
                 }
                 .into(),
             ),
