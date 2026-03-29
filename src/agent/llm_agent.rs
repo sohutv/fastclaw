@@ -302,13 +302,10 @@ where
             let _ = channel_message_sender
                 .send(ChannelMessage {
                     session_id: session_id.clone(),
-                    message: AgentResponse::Notify(Notify::Markdown {
-                        title: "History compact".to_string(),
-                        content: "Trigger history compact...".to_string(),
-                    }),
+                    message: AgentResponse::Notify("Trigger history compact...".into()),
                 })
                 .await;
-            match self
+            match selfa
                 .session_history_compact(session_id, *compact_threshold)
                 .await
             {
