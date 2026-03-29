@@ -1,6 +1,9 @@
 use crate::agent::{Agent, AgentRequest, AgentResponse, HistoryCompactResult, Notify, Workspace};
 use crate::channels::console_cmd::Console;
-use crate::channels::{Channel, ChannelContext, ChannelMessage, Session, SessionId};
+use crate::channels::{
+    Channel, ChannelContext, ChannelMessage, GroupSessionId, MasterSessionId, Session, SessionId,
+    UserSessionId,
+};
 use crate::config::{Config, DingTalkConfig};
 use anyhow::anyhow;
 use async_trait::async_trait;
@@ -103,13 +106,42 @@ impl dingtalk_stream::handlers::CallbackHandler for DingTalkCallbackHandler {
             allow_user_ids,
             ..
         } = &self.config;
-        let is_master = master_user_id.eq(dingtalk_user_id.deref());
-        if let (0, false, Some(cb_msg_sender)) = (
+
+        let session_id = {
+            let user_id = if master_user_id.eq(dingtalk_user_id.deref()) {
+                SessionId::Master(dingtalk_user_id.to_string().into())
+            } else {
+                SessionId::User(dingtalk_user_id.to_string().into())
+            };
+            let session = match conversation {
+                Conversation::Private { .. } => Session::Private {
+                    session_id: user_id,
+                },
+                Conversation::Group {
+                    id: group_id,
+                    title,
+                    ..
+                } => Session::Group {
+                    session_id: SessionId::Group(GroupSessionId {
+                        group_id: SessionId::User(group_id.to_string().into()).into(),
+                        user_id: user_id.into(),
+                        group_name: title.clone(),
+                    }),
+                    group_name: title.clone(),
+                },
+            };
+            let session_id = session.deref().clone();
+            {
+                let mut sessions = self.ctx.sessions.write().await;
+                sessions.entry(session_id.clone()).or_insert(session);
+            }
+            session_id
+        };
+        if let (Some(_), SessionId::User(_), Some(cb_msg_sender)) = (
             allow_user_ids
                 .iter()
-                .filter(|&it| it.eq(dingtalk_user_id.deref()))
-                .count(),
-            is_master,
+                .find(|&it| it.eq(dingtalk_user_id.deref())),
+            session_id.as_user_id(),
             cb_msg_sender,
         ) {
             let _ = cb_msg_sender
@@ -120,22 +152,7 @@ impl dingtalk_stream::handlers::CallbackHandler for DingTalkCallbackHandler {
                 })
                 .await;
         }
-        let session_id = {
-            let session = match conversation {
-                Conversation::Private { .. } => Session::Private {
-                    session_id: SessionId::from(dingtalk_user_id.deref().to_string()),
-                },
-                Conversation::Group { id, .. } => Session::Group {
-                    session_id: SessionId::from(id.deref().to_string()),
-                },
-            };
-            let session_id = session.deref().clone();
-            {
-                let mut sessions = self.ctx.sessions.write().await;
-                sessions.entry(session_id.clone()).or_insert(session);
-            }
-            session_id
-        };
+
         let (cmd, line, images, files) = match payload {
             MessagePayload::Text { text } => {
                 if text.starts_with('/') {
@@ -215,25 +232,40 @@ impl dingtalk_stream::handlers::CallbackHandler for DingTalkCallbackHandler {
                 return Ok(HandlerResp::Text("cmd submitted".to_string()));
             }
         }
-        let prompt = if is_master {
-            format!(
-                r#"
-{}
-- Whisper: **Attention**: Current session_id: {}. You are speaking to your owner
-"#,
-                line.as_deref().unwrap_or_default(),
-                session_id
-            )
-        } else {
-            format!(
-                r#"
-{}
-- Whisper: **Attention**: Current session_id: {}. You are currently not interacting with your owner. Please stay vigilant.
-"#,
-                line.as_deref().unwrap_or_default(),
-                session_id
-            )
-        };
+        let prompts = vec![
+            UserContent::text(line.as_deref().unwrap_or_default()),
+            match &session_id {
+                SessionId::Master(MasterSessionId(session_id)) => UserContent::text(format!(
+                    "- Whisper: **Attention**: Current session_id: {}. You are speaking to your owner",
+                    session_id
+                )),
+                SessionId::User(UserSessionId(session_id)) => UserContent::text(format!(
+                    "- Whisper: **Attention**: Current session_id: {}. You are currently not interacting with your owner. Please stay vigilant.",
+                    session_id
+                )),
+                SessionId::Group(GroupSessionId {
+                    group_id: session_id,
+                    group_name,
+                    user_id,
+                }) => match user_id.deref() {
+                    SessionId::Master(MasterSessionId(_)) => UserContent::text(format!(
+                        "- Whisper: **Attention**: Current session_id: {}. This session is a group session, group_id: {}, group_name: {}. You are speaking to your owner",
+                        session_id,
+                        session_id,
+                        group_name.as_deref().unwrap_or("..no provided.."),
+                    )),
+                    SessionId::User(UserSessionId(_)) => UserContent::text(format!(
+                        "- Whisper: **Attention**: Current session_id: {}. This session is a group session, group_id: {}, group_name: {}. You are currently not interacting with your owner. Please stay vigilant.",
+                        session_id,
+                        session_id,
+                        group_name.as_deref().unwrap_or("..no provided.."),
+                    )),
+                    SessionId::Group(_) => {
+                        unreachable!()
+                    }
+                },
+            },
+        ];
         let mut user_content = Vec::<UserContent>::new();
         if let Some(images) = images {
             for (img_idx, filepath, image) in images {
@@ -277,7 +309,9 @@ impl dingtalk_stream::handlers::CallbackHandler for DingTalkCallbackHandler {
             }
         }
         if line.is_some() || user_content.len() > 0 {
-            user_content.push(UserContent::Text(prompt.into()));
+            for prompt in prompts {
+                user_content.push(prompt);
+            }
         }
         let user_content = if user_content.is_empty() {
             None
@@ -329,7 +363,7 @@ impl dingtalk_stream::handlers::CallbackHandler for DingTalkCallbackHandler {
 #[async_trait]
 impl LifecycleListener for DingTalkCallbackHandler {
     async fn on_connected(&self, client: &DingTalkStream, websocket_url: &str) {
-        let session_id = SessionId(self.config.master_user_id.clone());
+        let session_id = SessionId::Master(MasterSessionId::from(&self.config.master_user_id));
         let Some(message) = create_robot_messages(
             &session_id,
             &self.ctx,
@@ -352,7 +386,7 @@ Connected to dingtalk websocket
     }
 
     async fn on_disconnected(&self, client: &DingTalkStream, result: &dingtalk_stream::Result<()>) {
-        let session_id = SessionId(self.config.master_user_id.clone());
+        let session_id = SessionId::Master(MasterSessionId::from(&self.config.master_user_id));
         match result {
             Ok(_) => {
                 let Some(message) = create_robot_messages(
@@ -698,12 +732,19 @@ async fn create_robot_messages<Content: Into<MessageContent>>(
     content: Content,
 ) -> Option<RobotMessage> {
     let session = {
-        let sessions = ctx.sessions.read().await;
-        let Some(session) = sessions.get(session_id) else {
-            warn!("Session not found for ID: {}", session_id);
-            return None;
-        };
-        session.clone()
+        match session_id {
+            SessionId::Master(_) => Session::Private {
+                session_id: session_id.clone(),
+            },
+            SessionId::User(_) | SessionId::Group(_) => {
+                let sessions = ctx.sessions.read().await;
+                let Some(session) = sessions.get(session_id) else {
+                    warn!("Session not found for ID: {}", session_id);
+                    return None;
+                };
+                session.clone()
+            }
+        }
     };
     let content = content.into();
     match session {
@@ -714,7 +755,7 @@ async fn create_robot_messages<Content: Into<MessageContent>>(
             }
             .into(),
         ),
-        Session::Group { session_id } => Some(
+        Session::Group { session_id, .. } => Some(
             RobotGroupMessage {
                 group_id: DingTalkGroupConversationId::from(session_id.deref()),
                 content: content.clone(),
