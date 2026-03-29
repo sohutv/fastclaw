@@ -140,11 +140,12 @@ where
         &self,
         channel_message_sender: Sender<ChannelMessage>,
         session_id: &SessionId,
+        compact_ratio: f32,
     ) -> HistoryCompactResult {
-        let result = match self.session_history_compact(session_id, None).await {
-            Ok(result) => result,
-            Err(result) => result,
-        };
+        let result = self
+            .session_history_compact(session_id, compact_ratio)
+            .await
+            .unwrap_or_else(|result| result);
         let _ = channel_message_sender
             .send(ChannelMessage {
                 session_id: session_id.clone(),
@@ -301,14 +302,14 @@ where
             let _ = channel_message_sender
                 .send(ChannelMessage {
                     session_id: session_id.clone(),
-                    message: AgentResponse::Notify(Notify {
+                    message: AgentResponse::Notify(Notify::Markdown {
                         title: "History compact".to_string(),
                         content: "Trigger history compact...".to_string(),
                     }),
                 })
                 .await;
             match self
-                .session_history_compact(session_id, Some((history, usage)))
+                .session_history_compact(session_id, *compact_threshold)
                 .await
             {
                 Ok(result) => {
@@ -349,20 +350,34 @@ where
     async fn session_history_compact(
         &self,
         session_id: &SessionId,
-        history: Option<(&[Message], &Usage)>,
+        compact_ratio: f32,
     ) -> crate::Result<HistoryCompactResult, HistoryCompactResult> {
         let Some(history_manager) = self.ctx.history_manager.as_ref() else {
             return Ok(HistoryCompactResult::Ignore(
                 "history_manager not found!!!".into(),
             ));
         };
-        let (history, current_usage) = if let Some((history, usage)) = history {
-            (history.to_vec(), *usage)
-        } else {
+        let (original_history, original_usage) = {
             let mgr = history_manager.read().await;
             mgr.load_with_offset(session_id, &self.id, None, None)
                 .await
-                .map_err(|err| HistoryCompactResult::Err(format!("会话历史压缩失败, err: {err}")))?
+                .map_err(|err| {
+                    HistoryCompactResult::Err(format!("history compact failed, err: {err}"))
+                })?
+        };
+        let ((head, _), (tail, tail_tokens)) = {
+            let len = original_history.len();
+            let ratio = 0.2f32.max(compact_ratio.min(1.));
+            let size = (len as f32 * ratio) as usize;
+            let (head, tail) = (&original_history[0..size], &original_history[size..]);
+            if head.is_empty() {
+                return Ok(HistoryCompactResult::Ignore(format!(
+                    "the length of original history is {len}, compact-ratio: {ratio}, no history need to be compact..."
+                )));
+            }
+            let head_tokens = (original_usage.total_tokens as f32 * ratio) as u64;
+            let tail_tokens = original_usage.total_tokens - head_tokens;
+            ((head.to_vec(), head_tokens), (tail.to_vec(), tail_tokens))
         };
         let mut stream = self
             .create_agent()
@@ -371,41 +386,51 @@ where
             .stream_chat(
                 format!(
                     r#"
-当前会话 session_id: {}
-立即按要求执行会话历史的“瘦身”维护任务: 备份会话历史并生成精炼的上下文总结
+**current session_id**: {}
+Execute the 'slimming' maintenance of the conversation history immediately: back up the history and generate a refined summary of the context.
 {}
                             "#,
                     session_id,
                     include_str!("./prompt/history_compact_prompt.md")
                 ),
-                history,
+                head,
             )
             .await;
         while let Some(item) = stream.next().await {
             match item {
                 Ok(MultiTurnStreamItem::FinalResponse(final_resp)) => {
-                    let compacted_usage = final_resp.usage();
-                    let compacted_history = final_resp
+                    let usage = final_resp.usage();
+                    let compacted = final_resp
                         .history()
                         .filter(|&it| it.len() > 0)
                         .map(|it| &it[it.len() - 1..])
                         .expect("unexpected empty history!!!");
-                    {
+                    let compacted_usage = {
+                        let compacted_usage = Usage {
+                            total_tokens: usage.total_tokens + tail_tokens,
+                            ..Default::default()
+                        };
                         let _ = history_manager
                             .write()
                             .await
-                            .store(session_id, &self.id, &compacted_usage, &compacted_history)
+                            .store(
+                                session_id,
+                                &self.id,
+                                &compacted_usage,
+                                &[compacted, tail.as_slice()].concat(),
+                            )
                             .await;
-                    }
+                        compacted_usage
+                    };
                     return Ok(HistoryCompactResult::Ok(HistoryCompactVal::new(
-                        current_usage,
+                        original_usage,
                         compacted_usage,
                     )));
                 }
                 Ok(_) => continue,
                 Err(err) => {
                     return Err(HistoryCompactResult::Err(format!(
-                        "会话历史压缩失败, err: {err}"
+                        "history compact failed , err: {err}"
                     )));
                 }
             }

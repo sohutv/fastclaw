@@ -31,6 +31,7 @@ pub trait Agent: Send + Sync {
         &self,
         channel_message_sender: Sender<ChannelMessage>,
         session_id: &SessionId,
+        compact_ratio: f32,
     ) -> HistoryCompactResult;
 }
 
@@ -96,11 +97,19 @@ pub enum AgentResponse {
     Notify(Notify),
     HistoryCompact(HistoryCompactResult),
 }
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct Notify {
-    pub title: String,
-    pub content: String,
+pub enum Notify {
+    Text(String),
+    Markdown { title: String, content: String },
 }
+
+impl<S: Into<String>> From<S> for Notify {
+    fn from(value: S) -> Self {
+        Notify::Text(value.into())
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum HistoryCompactResult {
     Ok(HistoryCompactVal),
@@ -117,12 +126,9 @@ pub struct HistoryCompactVal {
 impl HistoryCompactVal {
     pub fn new(before: Usage, after: Usage) -> Self {
         Self {
-            current: Usage {
-                total_tokens: after.output_tokens,
-                ..after
-            },
+            current: after,
             before,
-            compact_ratio: (1. - (after.output_tokens as f64 / before.total_tokens as f64)) * 100.,
+            compact_ratio: (1. - (after.total_tokens as f64 / before.total_tokens as f64)) * 100.,
         }
     }
 

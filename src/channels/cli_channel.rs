@@ -1,4 +1,4 @@
-use crate::agent::{Agent, AgentRequest, AgentResponse, Workspace};
+use crate::agent::{Agent, AgentRequest, AgentResponse, Notify, Workspace};
 use crate::channels::console_cmd::Console;
 use crate::channels::{Channel, ChannelContext, ChannelMessage, Session, SessionId};
 use crate::config::Config;
@@ -57,7 +57,9 @@ impl Channel for CliChannel {
                             if !line.is_empty() {
                                 let session_id = {
                                     let session_id = ctx
-                                        .sessions.read().await
+                                        .sessions
+                                        .read()
+                                        .await
                                         .keys()
                                         .next()
                                         .expect("unexpected sessions")
@@ -244,15 +246,29 @@ Reasoning >> ////////
             }
             AgentResponse::HistoryCompact { .. } => Ok(curr_state),
             AgentResponse::Notify(notify) => {
-                println!(
-                    r#"
+                match notify {
+                    Notify::Text(text) => {
+                        println!(
+                            r#"
+Notify >> ////////
+{}
+//////// << Notify
+                "#,
+                            text
+                        );
+                    }
+                    Notify::Markdown { title, content } => {
+                        println!(
+                            r#"
 Notify >> ////////
 Title: {}
 {}
 //////// << Notify
                 "#,
-                    notify.title, notify.content
-                );
+                            title, content
+                        );
+                    }
+                }
                 Ok(curr_state)
             }
         }

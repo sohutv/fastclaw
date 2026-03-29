@@ -1,8 +1,8 @@
-use std::sync::Arc;
-use crate::agent::{Agent, AgentResponse, Notify};
+use crate::agent::{Agent, AgentResponse};
 use crate::channels::{ChannelContext, ChannelMessage, SessionId};
 use clap::Parser;
 use derive_more::FromStr;
+use std::sync::Arc;
 use strum::Display;
 use tokio::sync::mpsc::Sender;
 
@@ -16,7 +16,10 @@ pub enum Console {
     },
     /// 压缩 session history: /compact
     #[command(name = "compact")]
-    Compact,
+    Compact {
+        #[arg(long, default_value_t = 0.8)]
+        ratio: f32,
+    },
 }
 
 #[derive(Debug, Clone, Copy, FromStr, Display)]
@@ -44,18 +47,17 @@ impl Console {
                         unimplemented!()
                     }
                 },
-                Console::Compact => {
+                Console::Compact { ratio } => {
                     let _ = channel_message_sender
                         .send(ChannelMessage {
                             session_id: session_id.clone(),
-                            message: AgentResponse::Notify(Notify {
-                                title: "会话压缩".to_string(),
-                                content: "开始执行会话历史压缩任务...".to_string(),
-                            }),
+                            message: AgentResponse::Notify(
+                                "正在执行会话压缩...".to_string().into(),
+                            ),
                         })
                         .await;
                     let _ = agent
-                        .session_compact(channel_message_sender, session_id)
+                        .session_compact(channel_message_sender, session_id, ratio)
                         .await;
                 }
             },

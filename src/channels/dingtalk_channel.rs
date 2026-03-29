@@ -291,7 +291,7 @@ impl dingtalk_stream::handlers::CallbackHandler for DingTalkCallbackHandler {
             return Ok(HandlerResp::Text("no content to submit".to_string()));
         };
         {
-            let msg_id =msg_id.clone();
+            let msg_id = msg_id.clone();
             info!("Submit task to agent, msg_id: {}", msg_id);
             let agent = Arc::clone(&self.agent);
             let channel_message_sender = self.channel_message_sender.clone();
@@ -542,15 +542,30 @@ impl DingtalkChannel {
                 Ok(AgentRespState::Final)
             }
             AgentResponse::Error(error) => Err(anyhow!("Agent error: {}", error)),
-            AgentResponse::Notify(Notify { title, content }) => {
-                if let Some(robot_message) = Self::create_robot_messages(
-                    session_id,
-                    ctx,
-                    MessageContentMarkdown::from((title, &format!("{content}",))),
-                )
-                .await
-                {
-                    let _ = dingtalk.send_message(robot_message).await;
+            AgentResponse::Notify(notify) => {
+                match notify {
+                    Notify::Text(text) => {
+                        if let Some(robot_message) = Self::create_robot_messages(
+                            session_id,
+                            ctx,
+                            MessageContentText::from(text),
+                        )
+                        .await
+                        {
+                            let _ = dingtalk.send_message(robot_message).await;
+                        }
+                    }
+                    Notify::Markdown { title, content } => {
+                        if let Some(robot_message) = Self::create_robot_messages(
+                            session_id,
+                            ctx,
+                            MessageContentMarkdown::from((title, &format!("{content}",))),
+                        )
+                        .await
+                        {
+                            let _ = dingtalk.send_message(robot_message).await;
+                        }
+                    }
                 }
                 Ok(curr_state)
             }
