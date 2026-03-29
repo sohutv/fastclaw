@@ -1,6 +1,6 @@
 use crate::agent::{
     AgentContext, AgentId, AgentRequest, AgentResponse, HistoryCompactResult, HistoryCompactVal,
-    HistoryManager, LlmAgentSupplier, Notify, Workspace,
+    HistoryManager, LlmAgentSupplier, Workspace,
 };
 use crate::channels::{ChannelMessage, SessionId};
 use crate::config::Config;
@@ -305,7 +305,7 @@ where
                     message: AgentResponse::Notify("Trigger history compact...".into()),
                 })
                 .await;
-            match selfa
+            match self
                 .session_history_compact(session_id, *compact_threshold)
                 .await
             {

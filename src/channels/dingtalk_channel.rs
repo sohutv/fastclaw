@@ -5,6 +5,7 @@ use crate::config::{Config, DingTalkConfig};
 use anyhow::anyhow;
 use async_trait::async_trait;
 use base64::Engine;
+use dingtalk_stream::handlers::LifecycleListener;
 use dingtalk_stream::{
     DingTalkStream,
     client::DingtalkResource,
@@ -326,6 +327,70 @@ impl dingtalk_stream::handlers::CallbackHandler for DingTalkCallbackHandler {
 }
 
 #[async_trait]
+impl LifecycleListener for DingTalkCallbackHandler {
+    async fn on_connected(&self, client: &DingTalkStream, websocket_url: &str) {
+        let session_id = SessionId(self.config.master_user_id.clone());
+        let Some(message) = create_robot_messages(
+            &session_id,
+            &self.ctx,
+            MessageContentMarkdown::from((
+                "Connected",
+                format!(
+                    r#"
+Connected to dingtalk websocket
+- ws-url:
+`{websocket_url}`
+        "#
+                ),
+            )),
+        )
+        .await
+        else {
+            return;
+        };
+        let _ = client.send_message(message).await;
+    }
+
+    async fn on_disconnected(&self, client: &DingTalkStream, result: &dingtalk_stream::Result<()>) {
+        let session_id = SessionId(self.config.master_user_id.clone());
+        match result {
+            Ok(_) => {
+                let Some(message) = create_robot_messages(
+                    &session_id,
+                    &self.ctx,
+                    MessageContentText::from("disconnected from dingtalk websocket"),
+                )
+                .await
+                else {
+                    return;
+                };
+                let _ = client.send_message(message).await;
+            }
+            Err(err) => {
+                let Some(message) = create_robot_messages(
+                    &session_id,
+                    &self.ctx,
+                    MessageContentMarkdown::from((
+                        "Disconnected",
+                        format!(
+                            r#"
+Disconnected from dingtalk websocket
+- Error:
+`{err}`
+                "#
+                        ),
+                    )),
+                )
+                .await
+                else {
+                    return;
+                };
+                let _ = client.send_message(message).await;
+            }
+        }
+    }
+}
+#[async_trait]
 impl Channel for DingtalkChannel {
     async fn start(self, agent: Arc<dyn Agent>) -> crate::Result<JoinHandle<()>> {
         let Self {
@@ -333,20 +398,19 @@ impl Channel for DingtalkChannel {
             dingtalk_config,
         } = self;
         let (channel_message_sender, mut channel_message_receiver) = tokio::sync::mpsc::channel(32);
-        let cb_handler = {
-            let ctx = Arc::clone(&ctx);
-            DingTalkCallbackHandler {
-                ctx,
-                config: dingtalk_config.clone(),
-                dingtalk_bot_topic: MessageTopic::Callback(
-                    dingtalk_stream::TOPIC_ROBOT.to_string(),
-                ),
-                agent,
-                channel_message_sender,
-            }
-        };
+        let cb_handler = Arc::new(DingTalkCallbackHandler {
+            ctx: Arc::clone(&ctx),
+            config: dingtalk_config.clone(),
+            dingtalk_bot_topic: MessageTopic::Callback(dingtalk_stream::TOPIC_ROBOT.to_string()),
+            agent,
+            channel_message_sender,
+        });
         let (dingtalk, dingtalk_stream_handle) = Arc::new(
-            DingTalkStream::new(dingtalk_config.credential).register_callback_handler(cb_handler),
+            DingTalkStream::new(dingtalk_config.credential)
+                .register_lifecycle_listener(Arc::clone(&cb_handler))
+                .await
+                .register_callback_handler(Arc::clone(&cb_handler))
+                .await,
         )
         .start()
         .await?;
@@ -413,7 +477,7 @@ impl DingtalkChannel {
             AgentResponse::Start => {
                 if let AgentRespState::Wait = curr_state {
                     buff.clear();
-                    if let Some(robot_message) = Self::create_robot_messages(
+                    if let Some(robot_message) = create_robot_messages(
                         session_id,
                         ctx,
                         MessageContentText::from("正在思考..."),
@@ -431,7 +495,7 @@ impl DingtalkChannel {
                 function: ToolFunction { name, arguments },
                 ..
             }) => {
-                if let Some(robot_message) = Self::create_robot_messages(
+                if let Some(robot_message) = create_robot_messages(
                     session_id,
                     ctx,
                     MessageContentMarkdown::from((
@@ -489,7 +553,7 @@ impl DingtalkChannel {
                                 ))
                             };
                             if let Some(robot_message) =
-                                Self::create_robot_messages(session_id, ctx, content).await
+                                create_robot_messages(session_id, ctx, content).await
                             {
                                 let _ = dingtalk.send_message(robot_message).await;
                             }
@@ -534,9 +598,7 @@ impl DingtalkChannel {
                     buff.clear();
                     content
                 };
-                if let Some(robot_message) =
-                    Self::create_robot_messages(session_id, ctx, content).await
-                {
+                if let Some(robot_message) = create_robot_messages(session_id, ctx, content).await {
                     let _ = dingtalk.send_message(robot_message).await;
                 }
                 Ok(AgentRespState::Final)
@@ -545,18 +607,15 @@ impl DingtalkChannel {
             AgentResponse::Notify(notify) => {
                 match notify {
                     Notify::Text(text) => {
-                        if let Some(robot_message) = Self::create_robot_messages(
-                            session_id,
-                            ctx,
-                            MessageContentText::from(text),
-                        )
-                        .await
+                        if let Some(robot_message) =
+                            create_robot_messages(session_id, ctx, MessageContentText::from(text))
+                                .await
                         {
                             let _ = dingtalk.send_message(robot_message).await;
                         }
                     }
                     Notify::Markdown { title, content } => {
-                        if let Some(robot_message) = Self::create_robot_messages(
+                        if let Some(robot_message) = create_robot_messages(
                             session_id,
                             ctx,
                             MessageContentMarkdown::from((title, &format!("{content}",))),
@@ -572,7 +631,7 @@ impl DingtalkChannel {
             AgentResponse::HistoryCompact(result) => {
                 match result {
                     HistoryCompactResult::Ok(val) => {
-                        if let Some(robot_message) = Self::create_robot_messages(
+                        if let Some(robot_message) = create_robot_messages(
                             session_id,
                             ctx,
                             MessageContentMarkdown::from((
@@ -596,7 +655,7 @@ impl DingtalkChannel {
                         }
                     }
                     HistoryCompactResult::Err(err_msg) => {
-                        if let Some(robot_message) = Self::create_robot_messages(
+                        if let Some(robot_message) = create_robot_messages(
                             session_id,
                             ctx,
                             MessageContentText::from(err_msg),
@@ -607,7 +666,7 @@ impl DingtalkChannel {
                         }
                     }
                     HistoryCompactResult::Ignore(msg) => {
-                        if let Some(robot_message) = Self::create_robot_messages(
+                        if let Some(robot_message) = create_robot_messages(
                             session_id,
                             ctx,
                             MessageContentMarkdown::from((
@@ -631,37 +690,37 @@ impl DingtalkChannel {
             }
         }
     }
+}
 
-    async fn create_robot_messages<Content: Into<MessageContent>>(
-        session_id: &SessionId,
-        ctx: &ChannelContext,
-        content: Content,
-    ) -> Option<RobotMessage> {
-        let session = {
-            let sessions = ctx.sessions.read().await;
-            let Some(session) = sessions.get(session_id) else {
-                warn!("Session not found for ID: {}", session_id);
-                return None;
-            };
-            session.clone()
+async fn create_robot_messages<Content: Into<MessageContent>>(
+    session_id: &SessionId,
+    ctx: &ChannelContext,
+    content: Content,
+) -> Option<RobotMessage> {
+    let session = {
+        let sessions = ctx.sessions.read().await;
+        let Some(session) = sessions.get(session_id) else {
+            warn!("Session not found for ID: {}", session_id);
+            return None;
         };
-        let content = content.into();
-        match session {
-            Session::Private { session_id } => Some(
-                RobotPrivateMessage {
-                    user_ids: vec![DingTalkUserId::from(session_id.deref())],
-                    content: content.clone(),
-                }
-                .into(),
-            ),
-            Session::Group { session_id } => Some(
-                RobotGroupMessage {
-                    group_id: DingTalkGroupConversationId::from(session_id.deref()),
-                    content: content.clone(),
-                }
-                .into(),
-            ),
-        }
+        session.clone()
+    };
+    let content = content.into();
+    match session {
+        Session::Private { session_id } => Some(
+            RobotPrivateMessage {
+                user_ids: vec![DingTalkUserId::from(session_id.deref())],
+                content: content.clone(),
+            }
+            .into(),
+        ),
+        Session::Group { session_id } => Some(
+            RobotGroupMessage {
+                group_id: DingTalkGroupConversationId::from(session_id.deref()),
+                content: content.clone(),
+            }
+            .into(),
+        ),
     }
 }
 
