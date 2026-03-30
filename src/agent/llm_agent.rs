@@ -405,7 +405,7 @@ Execute the 'slimming' maintenance of the conversation history immediately: back
                     };
                     let compacted_usage = {
                         let compacted_usage = Usage {
-                            total_tokens: usage.total_tokens + tail_tokens,
+                            total_tokens: usage.output_tokens + tail_tokens,
                             ..Default::default()
                         };
                         {
