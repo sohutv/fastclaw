@@ -56,8 +56,14 @@ impl Console {
                             ),
                         })
                         .await;
-                    let _ = agent
-                        .session_compact(channel_message_sender, session_id, ratio)
+                    let result = agent
+                        .session_compact(session_id, ratio)
+                        .await;
+                    let _ = channel_message_sender
+                        .send(ChannelMessage {
+                            session_id: session_id.clone(),
+                            message: AgentResponse::HistoryCompact(result),
+                        })
                         .await;
                 }
             },

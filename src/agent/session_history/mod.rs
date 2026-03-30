@@ -1,10 +1,9 @@
 use crate::agent::AgentId;
 use crate::channels::SessionId;
 use async_trait::async_trait;
-use derive_more::Deref;
+use derive_more::{Deref, Display};
 use rig::completion::{Message, Usage};
 use serde::{Deserialize, Serialize};
-use std::fmt::Display;
 use std::path::PathBuf;
 
 mod jsonl_history_manager;
@@ -20,24 +19,11 @@ pub trait HistoryManager: Send + Sync {
         message: &[Message],
     ) -> crate::Result<()>;
 
-    async fn load_with_offset(
-        &self,
-        session_id: &SessionId,
-        agent: &AgentId,
-        offset: Option<usize>,
-        limit: Option<usize>,
-    ) -> crate::Result<(Vec<Message>, Usage)>;
-
     async fn load(
         &self,
         session_id: &SessionId,
         agent: &AgentId,
-        limit: usize,
-    ) -> crate::Result<Vec<Message>> {
-        self.load_with_offset(session_id, agent, Some(0), Some(limit))
-            .await
-            .map(|(it, _)| it)
-    }
+    ) -> crate::Result<(Vec<Message>, Usage)>;
 
     #[allow(unused)]
     async fn usage(&self, session_id: &SessionId, agent: &AgentId) -> crate::Result<Usage>;
@@ -49,11 +35,5 @@ pub trait HistoryManager: Send + Sync {
     ) -> crate::Result<(PathBuf, BackupTimestamp)>;
 }
 
-#[derive(Debug, Clone, Deref, Serialize, Deserialize)]
+#[derive(Debug, Clone, Deref, Serialize, Deserialize, Display)]
 pub struct BackupTimestamp(String);
-
-impl<S: Display> From<S> for BackupTimestamp {
-    fn from(value: S) -> Self {
-        Self(value.to_string())
-    }
-}

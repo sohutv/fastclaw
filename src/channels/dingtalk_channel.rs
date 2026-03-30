@@ -4,45 +4,53 @@ use crate::channels::{
     Channel, ChannelContext, ChannelMessage, GroupSessionId, MasterSessionId, Session, SessionId,
     UserSessionId,
 };
-use crate::config::{Config, DingTalkConfig};
+use crate::config::Config;
 use anyhow::anyhow;
 use async_trait::async_trait;
 use base64::Engine;
 use dingtalk_stream::handlers::LifecycleListener;
 use dingtalk_stream::{
-    DingTalkStream,
     client::DingtalkResource,
     frames::{
-        DingTalkGroupConversationId, DingTalkUserId,
         down_message::{
-            MessageTopic,
             callback_message::{
                 CallbackMessage, Conversation, MessageData, MessagePayload, RichTextItem,
             },
+            MessageTopic,
+        }, up_message::{
+            callback_message::WebhookMessage, robot_message::{RobotGroupMessage, RobotMessage, RobotPrivateMessage}, MessageContent,
+            MessageContentMarkdown,
+            MessageContentText,
         },
-        up_message::{
-            MessageContent, MessageContentMarkdown, MessageContentText,
-            callback_message::WebhookMessage,
-            robot_message::{RobotGroupMessage, RobotMessage, RobotPrivateMessage},
-        },
+        DingTalkGroupConversationId,
+        DingTalkUserId,
     },
     handlers::{Error as HandlerError, ErrorCode, Resp as HandlerResp},
+    DingTalkStream,
 };
 use itertools::Itertools;
 use log::{error, info, warn};
 use rig::{
-    OneOrMany,
     completion::{AssistantContent, Message},
     message::{
         DocumentSourceKind, Image, ImageDetail, ImageMediaType, ReasoningContent, ToolCall,
         ToolFunction, UserContent,
     },
+    OneOrMany,
 };
+use serde::{Deserialize, Serialize};
 use std::io::Cursor;
 use std::ops::Deref;
 use std::sync::Arc;
 use std::thread::JoinHandle;
 use tokio::sync::mpsc::{Receiver, Sender};
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DingTalkConfig {
+    pub credential: dingtalk_stream::Credential,
+    pub master_user_id: String,
+    pub allow_user_ids: Vec<String>,
+}
 
 pub struct DingtalkChannel {
     ctx: Arc<ChannelContext>,
@@ -556,7 +564,7 @@ impl DingtalkChannel {
             }
             AgentResponse::ReasoningStream(reasoning) => {
                 match curr_state {
-                    AgentRespState::Start => if ctx.config.show_reasoning {},
+                    AgentRespState::Start => if ctx.config.default_show_reasoning {},
                     _ => {}
                 }
                 for content in reasoning.content.iter() {
@@ -572,7 +580,7 @@ impl DingtalkChannel {
                 match curr_state {
                     AgentRespState::Start => {}
                     AgentRespState::Reasoning => {
-                        if ctx.config.show_reasoning {
+                        if ctx.config.default_show_reasoning {
                             let content = {
                                 let content = buff.join("");
                                 buff.clear();

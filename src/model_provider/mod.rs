@@ -57,10 +57,9 @@ pub struct ModelProviderName(String);
     Default,
 )]
 pub struct ModelName(String);
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 #[serde(default)]
 pub struct ModelSettings {
-    pub temperature: Temperature,
     pub vision: bool,
     pub audio: bool,
     pub video: bool,
@@ -70,34 +69,22 @@ pub struct ModelSettings {
     pub tool: bool,
     pub reranker: bool,
     pub embedding: bool,
-    pub context: ModelContext,
+    pub max_tokens: u64,
 }
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, From, Deref, PartialEq)]
-pub struct Temperature(f64);
-
-impl Eq for Temperature {}
-
-impl Default for Temperature {
+impl Default for ModelSettings {
     fn default() -> Self {
-        Self(1.0)
-    }
-}
-
-#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
-#[serde(default)]
-pub struct ModelContext {
-    pub window_size: usize,
-    pub max_tokens: usize,
-    pub compact_threshold: f32,
-}
-
-impl Default for ModelContext {
-    fn default() -> Self {
-        ModelContext {
-            window_size: 16,
+        Self {
+            vision: true,
+            audio: false,
+            video: false,
+            document: false,
+            websearch: false,
+            reasoning: true,
+            tool: true,
+            reranker: false,
+            embedding: false,
             max_tokens: 65536,
-            compact_threshold: 0.8,
         }
     }
 }

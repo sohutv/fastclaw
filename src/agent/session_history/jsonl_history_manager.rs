@@ -41,19 +41,16 @@ impl HistoryManager for JsonlHistoryManager {
         let history_filepath = dir.join("history.jsonl");
         let lines = messages
             .iter()
-            .rev() // 倒序存储
             .flat_map(|it| serde_json::to_string(&it).ok())
             .join("\n");
         fs::write(&history_filepath, lines).await?;
         Ok(())
     }
 
-    async fn load_with_offset(
+    async fn load(
         &self,
         session_id: &SessionId,
         agent: &AgentId,
-        offset: Option<usize>,
-        limit: Option<usize>,
     ) -> crate::Result<(Vec<Message>, Usage)> {
         let dir = self.history_dir(session_id, agent).await?;
         let filepath = dir.join("history.jsonl");
@@ -64,18 +61,9 @@ impl HistoryManager for JsonlHistoryManager {
         let reader = BufReader::new(file);
         let mut lines = reader.lines();
         let mut messages = Vec::new();
-        let (offset, limit) = (offset.unwrap_or(0), limit.unwrap_or(usize::MAX));
-        let mut skip = 0;
         while let Some(line) = lines.next_line().await? {
-            if skip < offset {
-                skip += 1;
-                continue;
-            }
             if let Ok(message) = serde_json::from_str::<Message>(&line) {
                 messages.push(message);
-            }
-            if messages.len() >= limit {
-                break;
             }
         }
         let usage_filepath = dir.join("usage.json");
@@ -86,7 +74,7 @@ impl HistoryManager for JsonlHistoryManager {
             serde_json::from_str::<Usage>(&json).ok()
         }
         .unwrap_or_default();
-        Ok((messages.into_iter().rev().collect(), usage))
+        Ok((messages.into_iter().collect(), usage))
     }
 
     async fn usage(&self, session_id: &SessionId, agent: &AgentId) -> crate::Result<Usage> {
@@ -106,24 +94,19 @@ impl HistoryManager for JsonlHistoryManager {
     ) -> crate::Result<(PathBuf, BackupTimestamp)> {
         let dir = self.history_dir(session_id, agent).await?;
         let timestamp = chrono::Local::now().format("%Y%m%d%H%M%S");
-        let (src, dst) = (
-            dir.join("history.jsonl"),
-            dir.join(format!("history_{timestamp}.jsonl")),
-        );
-        if src.exists() {
-            let (messages, _) = self.load_with_offset(session_id, agent, None, None).await?;
-            let lines = messages
-                .iter()
-                .flat_map(|it| serde_json::to_string(&it).ok())
-                .join("\n");
-            fs::write(&dst, lines).await?;
-            let _ = fs::remove_file(src).await?;
-        } else {
-            fs::write(&dst, []).await?;
-        }
+        let history_backup_path = dir.join(format!("history_{timestamp}.jsonl"));
+        // backup usage
+        let _ = tokio::fs::rename(
+            &dir.join("usage.json"),
+            &dir.join(format!("usage_{timestamp}.json")),
+        )
+        .await;
+        let _ = tokio::fs::rename(&dir.join("history.jsonl"), &history_backup_path).await;
         Ok((
-            dst.strip_prefix(&self.workspace.path)?.to_owned(),
-            timestamp.into(),
+            history_backup_path
+                .strip_prefix(&self.workspace.path)?
+                .to_owned(),
+            BackupTimestamp(timestamp.to_string()),
         ))
     }
 }

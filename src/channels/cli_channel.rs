@@ -177,7 +177,7 @@ impl CliChannel {
                 match curr_state {
                     AgentRespState::Start => {
                         cli_line_clear();
-                        if ctx.config.show_reasoning {
+                        if ctx.config.default_show_reasoning {
                             println!(
                                 r#"
 Reasoning >> ////////
@@ -202,7 +202,7 @@ Reasoning >> ////////
                         cli_line_clear();
                     }
                     AgentRespState::Reasoning => {
-                        if ctx.config.show_reasoning {
+                        if ctx.config.default_show_reasoning {
                             println!(
                                 r#"
 //////// << Reasoning

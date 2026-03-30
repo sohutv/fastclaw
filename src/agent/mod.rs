@@ -17,7 +17,7 @@ mod session_history;
 pub use session_history::{HistoryManager, JsonlHistoryManager};
 
 use crate::config::Config;
-use crate::model_provider::ModelName;
+use crate::model_provider::{ModelName, ModelProviderName};
 
 #[async_trait]
 pub trait Agent: Send + Sync {
@@ -29,7 +29,6 @@ pub trait Agent: Send + Sync {
 
     async fn session_compact(
         &self,
-        channel_message_sender: Sender<ChannelMessage>,
         session_id: &SessionId,
         compact_ratio: f32,
     ) -> HistoryCompactResult;
@@ -116,6 +115,12 @@ pub enum HistoryCompactResult {
     Err(String),
     Ignore(String),
 }
+
+impl<Err: std::fmt::Display> From<Err> for HistoryCompactResult {
+    fn from(value: Err) -> Self {
+        HistoryCompactResult::Err(value.to_string())
+    }
+}
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 pub struct HistoryCompactVal {
     current: Usage,
@@ -152,5 +157,31 @@ impl Display for HistoryCompactVal {
             "total usage {} -> {}, compression ratio: {:.2}%",
             self.before.total_tokens, self.current.total_tokens, self.compact_ratio
         )
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct AgentSettings {
+    pub model_provider: Option<ModelProviderName>,
+    pub model: Option<ModelName>,
+    pub show_reasoning: Option<bool>,
+    pub max_tokens: Option<u64>,
+    pub temperature: f64,
+    pub max_turns: usize,
+    pub compact_threshold: f32,
+}
+
+impl Default for AgentSettings {
+    fn default() -> Self {
+        Self {
+            model_provider: None,
+            model: None,
+            show_reasoning: None,
+            max_tokens: None,
+            temperature: 1.,
+            max_turns: 256,
+            compact_threshold: 0.8,
+        }
     }
 }

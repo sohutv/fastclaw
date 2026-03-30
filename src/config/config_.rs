@@ -1,10 +1,10 @@
 use crate::btree_map;
 use crate::config::logger::LogConfig;
-use crate::config::Config;
+use crate::config::{AgentSettings, Config};
 use crate::model_provider::{ModelName, ModelProviderName, ModelProviders};
 use anyhow::anyhow;
 use std::path::PathBuf;
-use std::str::FromStr;
+use crate::agent::AgentId;
 
 impl Config {
     pub fn model_provider(&self, name: &ModelProviderName) -> crate::Result<ModelProviders> {
@@ -27,6 +27,13 @@ impl Config {
         self.log_config.init()?;
         Ok(self)
     }
+
+    pub fn agent_settings(&self, name: &AgentId) -> AgentSettings {
+        self.agent_settings
+            .get(name)
+            .map(|it| it.clone())
+            .unwrap_or_default()
+    }
 }
 
 impl Default for Config {
@@ -34,10 +41,9 @@ impl Default for Config {
         Self {
             default_model_provider: Default::default(),
             default_model: Default::default(),
-            show_reasoning: true,
-            model_providers: btree_map!(
-                ModelProviderName::from_str("custom_model_provider_name").expect("unexpected err") => ModelProviders::default()
-            ),
+            default_show_reasoning: true,
+            agent_settings: btree_map!(),
+            model_providers: btree_map!(),
             log_config: LogConfig::default(),
             dingtalk_config: None,
             heartbeat_config: Default::default(),
