@@ -5,10 +5,9 @@ use rig::completion::Usage;
 use rig::message::{Message, Reasoning, ToolCall};
 use serde::{Deserialize, Serialize};
 use std::fmt::Display;
-use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use tokio::sync::RwLock;
 use tokio::sync::mpsc::Sender;
+use tokio::sync::RwLock;
 
 mod llm_agent;
 mod prompt;
@@ -16,7 +15,7 @@ mod prompt;
 mod session_history;
 pub use session_history::{HistoryManager, JsonlHistoryManager};
 
-use crate::config::Config;
+use crate::config::{Config, Workspace};
 use crate::model_provider::{ModelName, ModelProviderName, ReasoningEffort};
 
 #[async_trait]
@@ -42,18 +41,7 @@ pub struct AgentContext {
     pub history_manager: Option<Arc<RwLock<dyn HistoryManager>>>,
 }
 
-#[derive(Debug, Clone)]
-pub struct Workspace {
-    pub path: PathBuf,
-}
 
-impl<P: AsRef<Path>> From<P> for Workspace {
-    fn from(value: P) -> Self {
-        Self {
-            path: value.as_ref().join("workspace"),
-        }
-    }
-}
 
 #[derive(Debug, Clone, Deref, Eq, PartialEq, Ord, PartialOrd, Display, Serialize, Deserialize)]
 pub struct AgentId(String);

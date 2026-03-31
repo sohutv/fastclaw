@@ -4,7 +4,7 @@
 
 use crate::config::{ApiKey, ApiUrl};
 use crate::service_provider::{
-    AuthDegree, WebsearchQueryArgs, Timerange, Websearch, WebsearchConfig, WebsearchResult,
+    AuthDegree, Timerange, Websearch, WebsearchConfig, WebsearchQueryArgs, WebsearchResult,
     WebsearchResultContext,
 };
 use anyhow::anyhow;
@@ -195,6 +195,7 @@ impl TryFrom<Item> for super::super::WebsearchResultItem {
 }
 
 impl VolcengineWebsearchConfig {
+    #[allow(unused)]
     fn from_env() -> crate::Result<Self> {
         Ok(Self {
             api_url: ApiUrl::from_str(std::env::var("VOLCENGINE_WEBSEARCH_API_URL")?.as_str())?,

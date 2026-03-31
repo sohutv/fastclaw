@@ -1,8 +1,8 @@
-use crate::agent::{HistoryManager, JsonlHistoryManager, LlmAgentSupplier, Workspace};
+use crate::agent::{HistoryManager, JsonlHistoryManager, LlmAgentSupplier};
 use crate::channels;
 use crate::channels::Channel;
 use crate::cli::CmdRunner;
-use crate::config::Config;
+use crate::config::{Config, Workspace};
 use crate::model_provider::ModelProviders;
 use anyhow::anyhow;
 use clap::Args;
@@ -46,7 +46,7 @@ impl CmdRunner for Start {
             config
         };
         let _ = config.init_logger()?;
-        let workspace = { Box::leak(Box::new(Workspace::from(workdir))) };
+        let workspace = { Box::leak(Box::new(Workspace::init(workdir).await?)) };
         let history_manager: Arc<RwLock<dyn HistoryManager>> = {
             let mgr = JsonlHistoryManager::new(workspace).await?;
             Arc::new(RwLock::new(mgr))

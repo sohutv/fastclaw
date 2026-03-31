@@ -59,6 +59,7 @@ impl FunctionTool {
             } else {
                 vec![]
             },
+            vec![Box::new(task_tool::TaskCreateTool::new(Arc::clone(&ctx))?)],
         ];
         Ok(tools.into_iter().flatten().collect())
     }

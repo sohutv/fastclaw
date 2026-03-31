@@ -1,7 +1,7 @@
-use crate::agent::{Agent, AgentRequest, AgentResponse, Notify, Workspace};
+use crate::agent::{Agent, AgentRequest, AgentResponse, Notify};
 use crate::channels::console_cmd::Console;
 use crate::channels::{Channel, ChannelContext, ChannelMessage, Session, SessionId};
-use crate::config::Config;
+use crate::config::{Config, Workspace};
 use crate::hash_map;
 use anyhow::anyhow;
 use async_trait::async_trait;

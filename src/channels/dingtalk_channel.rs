@@ -1,42 +1,42 @@
-use crate::agent::{Agent, AgentRequest, AgentResponse, HistoryCompactResult, Notify, Workspace};
+use crate::agent::{Agent, AgentRequest, AgentResponse, HistoryCompactResult, Notify};
 use crate::channels::console_cmd::Console;
 use crate::channels::{
     Channel, ChannelContext, ChannelMessage, GroupSessionId, MasterSessionId, Session, SessionId,
     UserSessionId,
 };
-use crate::config::Config;
+use crate::config::{Config, Workspace};
 use anyhow::anyhow;
 use async_trait::async_trait;
 use base64::Engine;
 use dingtalk_stream::handlers::LifecycleListener;
 use dingtalk_stream::{
+    DingTalkStream,
     client::DingtalkResource,
     frames::{
+        DingTalkGroupConversationId, DingTalkUserId,
         down_message::{
+            MessageTopic,
             callback_message::{
                 CallbackMessage, Conversation, MessageData, MessagePayload, RichTextItem,
             },
-            MessageTopic,
-        }, up_message::{
-            callback_message::WebhookMessage, robot_message::{RobotGroupMessage, RobotMessage, RobotPrivateMessage}, MessageContent,
-            MessageContentMarkdown,
-            MessageContentText,
         },
-        DingTalkGroupConversationId,
-        DingTalkUserId,
+        up_message::{
+            MessageContent, MessageContentMarkdown, MessageContentText,
+            callback_message::WebhookMessage,
+            robot_message::{RobotGroupMessage, RobotMessage, RobotPrivateMessage},
+        },
     },
     handlers::{Error as HandlerError, ErrorCode, Resp as HandlerResp},
-    DingTalkStream,
 };
 use itertools::Itertools;
 use log::{error, info, warn};
 use rig::{
+    OneOrMany,
     completion::{AssistantContent, Message},
     message::{
         DocumentSourceKind, Image, ImageDetail, ImageMediaType, ReasoningContent, ToolCall,
         ToolFunction, UserContent,
     },
-    OneOrMany,
 };
 use serde::{Deserialize, Serialize};
 use std::io::Cursor;

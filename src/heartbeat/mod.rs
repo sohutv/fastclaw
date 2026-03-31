@@ -1,6 +1,6 @@
-use crate::agent::{Agent, AgentRequest, LlmAgentSupplier, Workspace};
+use crate::agent::{Agent, AgentRequest, LlmAgentSupplier};
 use crate::channels::SessionId;
-use crate::config::Config;
+use crate::config::{Config, Workspace};
 use crate::model_provider::ModelProviders;
 use rig::completion::Message;
 use std::time::Duration;

@@ -6,8 +6,8 @@ use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
 mod r#type;
-pub use r#type::*;
 use crate::service_provider::WebsearchConfigs;
+pub use r#type::*;
 
 mod config_;
 pub mod logger;
@@ -38,3 +38,6 @@ impl Default for HeartbeatConfig {
         Self { interval: 60 }
     }
 }
+
+mod workspace;
+pub use workspace::*;

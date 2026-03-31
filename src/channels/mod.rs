@@ -1,5 +1,5 @@
-use crate::agent::{Agent, AgentResponse, Workspace};
-use crate::config::Config;
+use crate::agent::{Agent, AgentResponse};
+use crate::config::{Config, Workspace};
 use async_trait::async_trait;
 use derive_more::{Deref, Display};
 use serde::{Deserialize, Serialize};
