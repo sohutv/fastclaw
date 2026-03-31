@@ -1,4 +1,4 @@
-use crate::agent::{AgentContext, AgentId};
+use crate::agent::AgentContext;
 use crate::channels::SessionId;
 use crate::tools::{ToolCallError, ToolCallRsult};
 use rig::completion::ToolDefinition;
@@ -22,8 +22,8 @@ pub struct TaskCreateArgs {
     name: String,
     cron: String,
     desc: String,
-    session_id: SessionId,
-    agent_id: AgentId,
+    session_id: String,
+    agent_id: String,
 }
 
 #[allow(async_fn_in_trait)]
@@ -61,7 +61,7 @@ impl Tool for TaskCreateTool {
                         "description": "The current agent-id",
                     },
                 },
-                "required": ["query"],
+                "required": ["name","cron", "desc","session_id","agent_id"],
             }),
         }
     }
