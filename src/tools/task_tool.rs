@@ -9,9 +9,12 @@ use sqlx::sqlite::SqliteRow;
 use std::sync::Arc;
 use strum::{EnumIter, IntoEnumIterator};
 
-mod task_create;
-mod task_list;
+mod create;
+mod get_detail;
+mod list;
+mod update;
 
+mod del;
 #[derive(Clone)]
 pub(super) struct TaskTools;
 
@@ -22,8 +25,11 @@ impl TaskTools {
             .await
             .map_err(|err| ToolCallError(format!("{err}")))?;
         Ok(vec![
-            Box::new(task_list::TaskListTool::new(Arc::clone(&ctx))?),
-            Box::new(task_create::TaskCreateTool::new(Arc::clone(&ctx))?),
+            Box::new(list::TaskListTool::new(Arc::clone(&ctx))?),
+            Box::new(create::TaskCreateTool::new(Arc::clone(&ctx))?),
+            Box::new(get_detail::TaskDetailGetTool::new(Arc::clone(&ctx))?),
+            Box::new(update::TaskUpdateTool::new(Arc::clone(&ctx))?),
+            Box::new(del::TaskDelTool::new(Arc::clone(&ctx))?),
         ])
     }
 }
@@ -68,11 +74,15 @@ impl TryFrom<SqliteRow> for TaskInfo {
             },
             created_at: {
                 let ts: String = row.try_get("created_at")?;
-                chrono::NaiveDateTime::parse_from_str(&ts, "%Y-%m-%d %H:%M:%S")?.and_utc().with_timezone(&Local)
+                chrono::NaiveDateTime::parse_from_str(&ts, "%Y-%m-%d %H:%M:%S")?
+                    .and_utc()
+                    .with_timezone(&Local)
             },
             updated_at: {
                 let ts: String = row.try_get("updated_at")?;
-                chrono::NaiveDateTime::parse_from_str(&ts, "%Y-%m-%d %H:%M:%S")?.and_utc().with_timezone(&Local)
+                chrono::NaiveDateTime::parse_from_str(&ts, "%Y-%m-%d %H:%M:%S")?
+                    .and_utc()
+                    .with_timezone(&Local)
             },
             creator: row.try_get("creator")?,
         })
@@ -107,6 +117,7 @@ create table if not exists cron_task
     enabled      INTEGER   DEFAULT 1,
     created_at   TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at   TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    deleted      INTEGER   DEFAULT 0,
     creator      TEXT NOT NULL
 );
 "#;

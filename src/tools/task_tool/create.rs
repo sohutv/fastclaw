@@ -1,9 +1,11 @@
 use crate::agent::AgentContext;
 use crate::tools::task_tool::{TaskEnabled, TaskRunState};
 use crate::tools::{ToolCallError, ToolCallRsult};
+use log::error;
 use rig::completion::ToolDefinition;
 use rig::tool::Tool;
 use serde_json::json;
+use sqlx::{QueryBuilder, Sqlite};
 use std::sync::Arc;
 
 #[derive(Clone)]
@@ -67,16 +69,21 @@ impl Tool for TaskCreateTool {
     }
 
     async fn call(&self, args: Self::Args) -> Result<Self::Output, Self::Error> {
-        let _ = sqlx::query(&args.create_sql())
+        let mut query_builder = args.create_sql();
+        let _ = query_builder
+            .build()
             .execute(&self.ctx.workspace.sql_pool)
             .await
-            .map_err(|err| ToolCallError(format!("{err}")))?;
+            .map_err(|err| {
+                error!("{err}");
+                ToolCallError(format!("{err}"))
+            })?;
         Ok(ToolCallRsult::ok(format!("create task {} ok", args.name)))
     }
 }
 
 impl Args {
-    fn create_sql(&self) -> String {
+    fn create_sql(&self) -> QueryBuilder<'_, Sqlite> {
         let Self {
             name,
             cron,
@@ -85,19 +92,25 @@ impl Args {
             agent_id,
             ..
         } = self;
-        format!(
-            r#"
-insert into `cron_task`(`name`, `cron`, `desc`, `session_id`, `run_state`, `enabled`, `creator`)
-values ('{}', '{}', '{}', '{}', '{}', {}, {})
-;
-        "#,
-            name,
-            cron,
-            desc,
-            session_id,
-            TaskRunState::Ready as u16,
-            TaskEnabled::Enabled as u8,
-            agent_id
-        )
+        let mut builder = QueryBuilder::new(
+            "insert into `cron_task`(`name`, `cron`, `desc`, `session_id`, `run_state`, `enabled`, `creator`) values ",
+        );
+        builder
+            .push("(")
+            .push_bind(name)
+            .push(", ")
+            .push_bind(cron)
+            .push(", ")
+            .push_bind(desc)
+            .push(", ")
+            .push_bind(session_id)
+            .push(", ")
+            .push_bind(TaskRunState::Ready as u16)
+            .push(", ")
+            .push_bind(TaskEnabled::Enabled as u8)
+            .push(", ")
+            .push_bind(agent_id)
+            .push(")");
+        builder
     }
 }

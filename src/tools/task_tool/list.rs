@@ -1,8 +1,10 @@
 use super::{TaskEnabled, TaskInfo, TaskRunState};
 use crate::agent::AgentContext;
+use crate::tools::task_tool::get_detail::TaskDetailGetTool;
 use crate::tools::{ToolCallError, ToolCallRsult};
 use anyhow::anyhow;
 use itertools::Itertools;
+use log::error;
 use rig::completion::ToolDefinition;
 use rig::tool::Tool;
 use serde_json::json;
@@ -66,42 +68,33 @@ impl Tool for TaskListTool {
         let mut tasks = vec![];
         while let Some(row) = stream.next().await {
             if let Ok(row) = row {
-                match TaskInfo::try_from(row) {
-                    Ok(task) => {
-                        tasks.push(format!(
-                            r#"
+                let task = TaskInfo::try_from(row).map_err(|err| {
+                    error!("{err}");
+                    ToolCallError(format!("{err}"))
+                })?;
+                tasks.push(format!(
+                    r#"
 ## {}
 - **id**: {},
 - **cron**: {},
 - **session_id**: {},
 - **run_state**: {},
 - **enabled**: {},
-- **created_at**: {},
-- **updated_at**: {},
-- **creator**: {}
-- **desc**:
-```
-{}
-```                    "#,
-                            task.name,
-                            task.id,
-                            task.cron,
-                            task.session_id,
-                            task.run_state,
-                            task.enabled,
-                            task.created_at.format("%Y-%m-%d %H:%M:%S"),
-                            task.updated_at.format("%Y-%m-%d %H:%M:%S"),
-                            task.creator,
-                            task.desc,
-                        ));
-                    }
-                    Err(err) => {
-                        return Ok(ToolCallRsult::error(format!("parse task error:{}", err)));
-                    }
-                }
+"#,
+                    task.name, task.id, task.cron, task.session_id, task.run_state, task.enabled,
+                ));
             }
         }
-        Ok(ToolCallRsult::ok(tasks.iter().join("\n\n")))
+        let output = format!(
+            r#"
+{}
+
+**Tips**: Call {} for task detail
+        "#,
+            tasks.iter().join("\n\n"),
+            TaskDetailGetTool::NAME
+        );
+        Ok(ToolCallRsult::ok(output))
     }
 }
 
@@ -111,10 +104,10 @@ impl Args {
         let sql = if let Some(run_state) = self.run_state {
             args.add(self.enabled as u8).map_err(|err| anyhow!(err))?;
             args.add(run_state as u16).map_err(|err| anyhow!(err))?;
-            "select * from `cron_task` where `enabled` = ? and `run_state` = ?"
+            "select * from `cron_task` where `deleted` = 0 and `enabled` = ? and `run_state` = ?"
         } else {
             args.add(self.enabled as u8).map_err(|err| anyhow!(err))?;
-            "select * from `cron_task` where `enabled` = ?"
+            "select * from `cron_task` where `deleted` = 0 and `enabled` = ?"
         };
         Ok(QueryBuilder::with_arguments(sql, args))
     }
