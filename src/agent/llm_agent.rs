@@ -21,7 +21,6 @@ use tokio::sync::RwLock;
 use tokio::sync::mpsc::Sender;
 use tokio_stream::StreamExt;
 
-#[allow(unused)]
 #[derive(Clone)]
 pub struct LlmAgent<C, P>
 where
