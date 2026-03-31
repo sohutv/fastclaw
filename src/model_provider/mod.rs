@@ -57,7 +57,7 @@ pub struct ModelProviderName(String);
     Default,
 )]
 pub struct ModelName(String);
-#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct ModelSettings {
     pub vision: bool,
@@ -70,6 +70,7 @@ pub struct ModelSettings {
     pub reranker: bool,
     pub embedding: bool,
     pub max_tokens: u64,
+    pub reasoning_effort_mapping: ReasoningEffortMapping,
 }
 
 impl Default for ModelSettings {
@@ -85,6 +86,57 @@ impl Default for ModelSettings {
             reranker: false,
             embedding: false,
             max_tokens: 65536,
+            reasoning_effort_mapping: Default::default(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, Display, Default)]
+pub enum ReasoningEffort {
+    #[display("minimal")]
+    Minimal,
+    #[default]
+    #[display("low")]
+    Low,
+    #[display("medium")]
+    Medium,
+    #[display("high")]
+    High,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ReasoningEffortMapping {
+    /// Zero-thought, direct answer.
+    minimal: ReasoningEffortVal,
+    /// Lightweight, optimized for speed.
+    low: ReasoningEffortVal,
+    /// Balanced, optimizing for both speed and depth.
+    medium: ReasoningEffortVal,
+    ///  Deep analysis, for complex tasks.
+    high: ReasoningEffortVal,
+}
+
+impl Default for ReasoningEffortMapping {
+    fn default() -> Self {
+        Self {
+            minimal: ReasoningEffortVal(ReasoningEffort::Minimal.to_string()),
+            low: ReasoningEffortVal(ReasoningEffort::Low.to_string()),
+            medium: ReasoningEffortVal(ReasoningEffort::Medium.to_string()),
+            high: ReasoningEffortVal(ReasoningEffort::High.to_string()),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, From, FromStr, Deref)]
+pub struct ReasoningEffortVal(String);
+
+impl ReasoningEffortMapping {
+    pub fn from(&self, effort: ReasoningEffort) -> &ReasoningEffortVal {
+        match effort {
+            ReasoningEffort::Minimal => &self.minimal,
+            ReasoningEffort::Low => &self.low,
+            ReasoningEffort::Medium => &self.medium,
+            ReasoningEffort::High => &self.high,
         }
     }
 }

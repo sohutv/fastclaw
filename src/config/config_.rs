@@ -28,11 +28,8 @@ impl Config {
         Ok(self)
     }
 
-    pub fn agent_settings(&self, name: &AgentId) -> AgentSettings {
-        self.agent_settings
-            .get(name)
-            .map(|it| it.clone())
-            .unwrap_or_default()
+    pub fn agent_settings(&self, name: &AgentId) -> Option<&AgentSettings> {
+        self.agent_settings.get(name)
     }
 }
 

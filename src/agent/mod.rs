@@ -17,7 +17,7 @@ mod session_history;
 pub use session_history::{HistoryManager, JsonlHistoryManager};
 
 use crate::config::Config;
-use crate::model_provider::{ModelName, ModelProviderName};
+use crate::model_provider::{ModelName, ModelProviderName, ReasoningEffort};
 
 #[async_trait]
 pub trait Agent: Send + Sync {
@@ -169,6 +169,7 @@ pub struct AgentSettings {
     pub max_tokens: Option<u64>,
     pub temperature: f64,
     pub max_turns: usize,
+    pub reasoning_effort: ReasoningEffort,
     pub compact_threshold: f32,
 }
 
@@ -182,6 +183,7 @@ impl Default for AgentSettings {
             temperature: 1.,
             max_turns: 256,
             compact_threshold: 0.8,
+            reasoning_effort: Default::default(),
         }
     }
 }

@@ -4,7 +4,7 @@ use crate::agent::{
 };
 use crate::channels::{ChannelMessage, SessionId};
 use crate::config::Config;
-use crate::model_provider::{ModelName, ModelProvider, ModelSettings};
+use crate::model_provider::{ModelName, ModelProvider, ModelSettings, ReasoningEffort};
 use anyhow::anyhow;
 use async_trait::async_trait;
 use itertools::Itertools;
@@ -15,6 +15,7 @@ use rig::client::CompletionClient;
 use rig::completion::{AssistantContent, Message, Usage};
 use rig::message::UserContent;
 use rig::streaming::{StreamedAssistantContent, StreamingChat};
+use serde_json::json;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 use tokio::sync::mpsc::Sender;
@@ -32,11 +33,7 @@ where
     model_provider: P,
     model_name: ModelName,
     model_settings: ModelSettings,
-    show_reasoning: bool,
-    max_tokens: u64,
-    temperature: f64,
-    max_turns: usize,
-    compact_threshold: f32,
+    agent_settings: AgentSettings,
 }
 
 #[async_trait]
@@ -85,36 +82,38 @@ where
             workspace,
             history_manager,
         });
-        let model_settings = *model_provider
-            .model_settings(&model_name)
-            .expect("model settings not found");
-        let AgentSettings {
-            show_reasoning,
-            max_tokens,
-            temperature,
-            max_turns,
-            compact_threshold,
-            ..
-        } = ctx.config.agent_settings(&agent_id);
         Ok(Self {
+            model_settings: model_provider
+                .model_settings(&model_name)
+                .map(|it| it.clone())
+                .ok_or(anyhow!(anyhow!(
+                    "model settings not found for {}",
+                    agent_id
+                )))?,
+            agent_settings: ctx
+                .config
+                .agent_settings(&agent_id)
+                .map(|it| it.clone())
+                .unwrap_or_default(),
+            model_name,
+            model_provider,
             id: agent_id,
             ctx,
-            model_provider,
-            model_name,
-            show_reasoning: show_reasoning.unwrap_or(config.default_show_reasoning),
-            max_tokens: max_tokens.unwrap_or(model_settings.max_tokens),
-            temperature,
-            max_turns,
-            compact_threshold,
-            model_settings,
         })
     }
 
-    async fn create_agent(&self) -> crate::Result<Agent<C::CompletionModel>>
+    async fn create_agent(
+        &self,
+        reasoning_effort: ReasoningEffort,
+    ) -> crate::Result<Agent<C::CompletionModel>>
     where
         P: ModelProvider<Client = C>,
     {
         let model_client = &self.model_provider.completion_client()?;
+        let reasoning_effort = self
+            .model_settings
+            .reasoning_effort_mapping
+            .from(reasoning_effort);
         let agent = model_client
             .agent(&*self.model_name)
             .preamble(
@@ -132,10 +131,20 @@ where
             .tools(crate::tools::FunctionTool::required_tools(Arc::clone(
                 &self.ctx,
             ))?)
-            .temperature(self.temperature)
-            .default_max_turns(self.max_turns)
-            .max_tokens(self.max_tokens)
+            .temperature(self.agent_settings.temperature)
+            .default_max_turns(self.agent_settings.max_turns)
+            .max_tokens(
+                self.agent_settings
+                    .max_tokens
+                    .unwrap_or(self.model_settings.max_tokens),
+            )
+            .additional_params(json!( {
+                "reasoning": {
+                    "effort": reasoning_effort,
+                }
+            }))
             .build();
+
         Ok(agent)
     }
 }
@@ -151,7 +160,7 @@ where
         request: AgentRequest,
         channel_message_sender: Sender<ChannelMessage>,
     ) -> crate::Result<()> {
-        self.handle_message(request, channel_message_sender.clone())
+        self.run_actual(request, channel_message_sender.clone())
             .await?;
         Ok(())
     }
@@ -187,7 +196,7 @@ where
     C: CompletionClient + 'static + Send + Sync,
     P: ModelProvider<Client = C> + 'static + Send + Sync,
 {
-    async fn handle_message(
+    async fn run_actual(
         &self,
         request: AgentRequest,
         channel_message_sender: Sender<ChannelMessage>,
@@ -211,7 +220,9 @@ where
         } else {
             (vec![], Default::default())
         };
-        let agent = self.create_agent().await?;
+        let agent = self
+            .create_agent(self.agent_settings.reasoning_effort)
+            .await?;
         let mut stream = agent.stream_chat(request.clone(), history).await;
         while let Some(result) = stream.next().await {
             let response = match result {
@@ -315,7 +326,13 @@ where
             }
         }
 
-        if usage.total_tokens >= ((self.max_tokens as f32 * self.compact_threshold) as u64) {
+        let max_tokens = self
+            .agent_settings
+            .max_tokens
+            .unwrap_or(self.model_settings.max_tokens);
+        if usage.total_tokens
+            >= ((max_tokens as f32 * self.agent_settings.compact_threshold) as u64)
+        {
             let _ = channel_message_sender
                 .send(ChannelMessage {
                     session_id: session_id.clone(),
@@ -327,7 +344,7 @@ where
                 .history_compact(
                     &history_manager,
                     session_id,
-                    self.compact_threshold,
+                    self.agent_settings.compact_threshold,
                     &history,
                     *usage,
                 )
@@ -374,7 +391,7 @@ where
             let tail_tokens = original_usage.total_tokens - head_tokens;
             ((head.to_vec(), head_tokens), (tail.to_vec(), tail_tokens))
         };
-        let agent = match self.create_agent().await {
+        let agent = match self.create_agent(ReasoningEffort::Minimal).await {
             Ok(agent) => agent,
             Err(err) => return HistoryCompactResult::Err(format!("创建agent失败, err: {err}")),
         };
