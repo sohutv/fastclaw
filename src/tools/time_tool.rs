@@ -4,7 +4,7 @@ use rig::tool::Tool;
 use serde_json::json;
 
 #[derive(Clone)]
-pub struct CurrentTimeTool;
+pub(super) struct CurrentTimeTool;
 
 #[derive(Debug, Clone, serde::Deserialize)]
 pub struct Args {}

@@ -127,9 +127,7 @@ where
             "#,
                 &self.id
             ))
-            .tools(crate::tools::FunctionTool::required_tools(Arc::clone(
-                &self.ctx,
-            ))?)
+            .tools(crate::tools::FunctionTool::required_tools(Arc::clone(&self.ctx)).await?)
             .temperature(self.agent_settings.temperature)
             .default_max_turns(self.agent_settings.max_turns)
             .max_tokens(

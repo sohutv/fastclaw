@@ -1,81 +1,30 @@
 use crate::agent::AgentContext;
-use crate::channels::SessionId;
-use crate::tools::{ToolCallError, ToolCallRsult};
-use rig::completion::ToolDefinition;
-use rig::tool::Tool;
-use serde_json::json;
+use crate::tools::ToolCallError;
+use anyhow::anyhow;
+use chrono::Local;
+use derive_more::Display;
+use rig::tool::ToolDyn;
+use sqlx::Row;
+use sqlx::sqlite::SqliteRow;
 use std::sync::Arc;
+use strum::{EnumIter, IntoEnumIterator};
+
+mod task_create;
+mod task_list;
 
 #[derive(Clone)]
-pub struct TaskCreateTool {
-    ctx: Arc<AgentContext>,
-}
+pub(super) struct TaskTools;
 
-impl TaskCreateTool {
-    pub fn new(ctx: Arc<AgentContext>) -> crate::Result<Self> {
-        Ok(Self { ctx })
-    }
-}
-
-#[derive(Debug, Clone, serde::Deserialize)]
-pub struct TaskCreateArgs {
-    name: String,
-    cron: String,
-    desc: String,
-    session_id: String,
-    agent_id: String,
-}
-
-#[allow(async_fn_in_trait)]
-impl Tool for TaskCreateTool {
-    const NAME: &'static str = "task-create";
-    type Error = ToolCallError;
-    type Args = TaskCreateArgs;
-    type Output = ToolCallRsult;
-
-    async fn definition(&self, _prompt: String) -> ToolDefinition {
-        ToolDefinition {
-            name: Self::NAME.to_string(),
-            description: "Create Task with description".to_string(),
-            parameters: json!({
-                "type": "object",
-                "properties": {
-                    "name": {
-                        "type": "string",
-                        "description": "The name of the task to create",
-                    },
-                    "cron": {
-                        "type": "string",
-                        "description": "The cron expression for the task schedule",
-                    },
-                    "desc": {
-                        "type": "string",
-                        "description": "The description of the task",
-                    },
-                    "session_id": {
-                        "type": "string",
-                        "description": "The current session-id",
-                    },
-                    "agent_id": {
-                        "type": "string",
-                        "description": "The current agent-id",
-                    },
-                },
-                "required": ["name","cron", "desc","session_id","agent_id"],
-            }),
-        }
-    }
-
-    async fn call(&self, args: Self::Args) -> Result<Self::Output, Self::Error> {
+impl TaskTools {
+    pub async fn create(ctx: Arc<AgentContext>) -> crate::Result<Vec<Box<dyn ToolDyn>>> {
         let _ = sqlx::query(CREATE_TASK_TABLE)
-            .execute(&self.ctx.workspace.sql_pool)
+            .execute(&ctx.workspace.sql_pool)
             .await
             .map_err(|err| ToolCallError(format!("{err}")))?;
-        let result = sqlx::query(&args.create_sql())
-            .execute(&self.ctx.workspace.sql_pool)
-            .await
-            .map_err(|err| ToolCallError(format!("{err}")))?;
-        Ok(ToolCallRsult::ok(format!("create task {} ok", args.name)))
+        Ok(vec![
+            Box::new(task_list::TaskListTool::new(Arc::clone(&ctx))?),
+            Box::new(task_create::TaskCreateTool::new(Arc::clone(&ctx))?),
+        ])
     }
 }
 
@@ -85,7 +34,7 @@ pub struct TaskInfo {
     name: String,
     cron: String,
     desc: String,
-    session_id: SessionId,
+    session_id: String,
     run_state: TaskRunState,
     enabled: TaskEnabled,
     created_at: chrono::DateTime<chrono::Local>,
@@ -95,34 +44,42 @@ pub struct TaskInfo {
 
 impl TaskInfo {}
 
-impl TaskCreateArgs {
-    fn create_sql(&self) -> String {
-        let Self {
-            name,
-            cron,
-            desc,
-            session_id,
-            agent_id,
-            ..
-        } = self;
-        format!(
-            r#"
-insert into `cron_task`(`name`, `cron`, `desc`, `session_id`, `run_state`, `enabled`, `creator`)
-values ('{}', '{}', '{}', '{}', '{}', {}, {})
-;
-        "#,
-            name,
-            cron,
-            desc,
-            session_id,
-            TaskRunState::Ready as u16,
-            TaskEnabled::Enabled as u8,
-            agent_id
-        )
+impl TryFrom<SqliteRow> for TaskInfo {
+    type Error = anyhow::Error;
+
+    fn try_from(row: SqliteRow) -> Result<Self, Self::Error> {
+        Ok(Self {
+            id: row.try_get("id")?,
+            name: row.try_get("name")?,
+            cron: row.try_get("cron")?,
+            desc: row.try_get("desc")?,
+            session_id: row.try_get("session_id")?,
+            run_state: {
+                let val: u16 = row.try_get("run_state")?;
+                TaskRunState::iter()
+                    .find(|&state| state as u16 == val)
+                    .ok_or(anyhow!("Invalid run state value: {}", val))?
+            },
+            enabled: {
+                let val: u8 = row.try_get("enabled")?;
+                TaskEnabled::iter()
+                    .find(|&state| state as u8 == val)
+                    .ok_or(anyhow!("Invalid enabled value: {}", val))?
+            },
+            created_at: {
+                let ts: String = row.try_get("created_at")?;
+                chrono::NaiveDateTime::parse_from_str(&ts, "%Y-%m-%d %H:%M:%S")?.and_utc().with_timezone(&Local)
+            },
+            updated_at: {
+                let ts: String = row.try_get("updated_at")?;
+                chrono::NaiveDateTime::parse_from_str(&ts, "%Y-%m-%d %H:%M:%S")?.and_utc().with_timezone(&Local)
+            },
+            creator: row.try_get("creator")?,
+        })
     }
 }
 
-#[derive(Debug, Clone, Copy, serde::Deserialize)]
+#[derive(Debug, Clone, Copy, serde::Deserialize, EnumIter, Display)]
 #[repr(u16)]
 pub enum TaskRunState {
     Ready = 0x01,
@@ -130,7 +87,7 @@ pub enum TaskRunState {
     Completed = 0x100,
     Failed = 0x101,
 }
-#[derive(Debug, Clone, Copy, serde::Deserialize)]
+#[derive(Debug, Clone, Copy, serde::Deserialize, EnumIter, Display)]
 #[repr(u8)]
 pub enum TaskEnabled {
     Enabled = 1,

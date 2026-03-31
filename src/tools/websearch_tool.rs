@@ -9,7 +9,7 @@ use serde_json::json;
 use std::sync::Arc;
 
 #[derive(Clone)]
-pub struct WebSearchTool {
+pub(super) struct WebSearchTool {
     ctx: Arc<AgentContext>,
 }
 

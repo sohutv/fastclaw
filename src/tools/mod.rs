@@ -50,7 +50,7 @@ impl ToolCallRsult {
 pub struct FunctionTool;
 
 impl FunctionTool {
-    pub fn required_tools(ctx: Arc<AgentContext>) -> crate::Result<Vec<Box<dyn ToolDyn>>> {
+    pub async fn required_tools(ctx: Arc<AgentContext>) -> crate::Result<Vec<Box<dyn ToolDyn>>> {
         let tools: Vec<Vec<Box<dyn ToolDyn>>> = vec![
             vec![Box::new(shell_tool::ShellTool::new(Arc::clone(&ctx))?)],
             vec![Box::new(time_tool::CurrentTimeTool)],
@@ -59,7 +59,7 @@ impl FunctionTool {
             } else {
                 vec![]
             },
-            vec![Box::new(task_tool::TaskCreateTool::new(Arc::clone(&ctx))?)],
+            task_tool::TaskTools::create(Arc::clone(&ctx)).await?,
         ];
         Ok(tools.into_iter().flatten().collect())
     }

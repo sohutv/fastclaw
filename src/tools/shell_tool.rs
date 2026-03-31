@@ -9,7 +9,7 @@ use std::time::Duration;
 use tokio::process::Command;
 
 #[derive(Clone)]
-pub struct ShellTool {
+pub(super) struct ShellTool {
     ctx: Arc<AgentContext>,
 }
 
