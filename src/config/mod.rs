@@ -1,9 +1,13 @@
-use crate::agent::{AgentSettings, AgentId};
+use crate::agent::{AgentId, AgentSettings};
 use crate::channels::dingtalk_channel::DingTalkConfig;
 use crate::config::logger::LogConfig;
 use crate::model_provider::{ModelName, ModelProviderName, ModelProviders};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
+
+mod r#type;
+pub use r#type::*;
+use crate::service_provider::WebsearchConfigs;
 
 mod config_;
 pub mod logger;
@@ -20,6 +24,7 @@ pub struct Config {
     pub dingtalk_config: Option<DingTalkConfig>,
     #[serde(default)]
     pub heartbeat_config: HeartbeatConfig,
+    pub websearch: Option<WebsearchConfigs>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

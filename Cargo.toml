@@ -18,6 +18,7 @@ toml = { version = "1.0.7" }
 tokio = { version = "1.50", features = ["full"] }
 tokio-stream = { version = "0.1" }
 url = { version = "2.5" }
+reqwest = { version = "0.13", features = ["rustls", "json"], default-features = false }
 uuid = { version = "1.22", features = ["v4"] }
 base64 = { version = "0.22" }
 itertools = { version = "0.14" }
@@ -35,10 +36,13 @@ model_provider_openai_compatible = []
 channel_cli_channel = ["rustyline"]
 channel_dingtalk_channel = ["dingtalk-stream-sdk"]
 
+volcengine = []
+
 default = [
     "model_provider_openai_compatible",
     "channel_cli_channel",
     "channel_dingtalk_channel",
+    "volcengine",
 ]
 
 

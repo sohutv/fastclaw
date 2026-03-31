@@ -1,10 +1,10 @@
+use crate::agent::AgentId;
 use crate::btree_map;
 use crate::config::logger::LogConfig;
 use crate::config::{AgentSettings, Config};
 use crate::model_provider::{ModelName, ModelProviderName, ModelProviders};
 use anyhow::anyhow;
 use std::path::PathBuf;
-use crate::agent::AgentId;
 
 impl Config {
     pub fn model_provider(&self, name: &ModelProviderName) -> crate::Result<ModelProviders> {
@@ -47,6 +47,7 @@ impl Default for Config {
             log_config: LogConfig::default(),
             dingtalk_config: None,
             heartbeat_config: Default::default(),
+            websearch: None,
         }
     }
 }

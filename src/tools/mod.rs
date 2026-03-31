@@ -8,6 +8,8 @@ mod time_tool;
 mod task_tool;
 mod memory_tool;
 
+mod web_search_tool;
+
 #[derive(Debug, Copy, Clone, serde::Deserialize)]
 pub enum RiskLevel {
     Low,
