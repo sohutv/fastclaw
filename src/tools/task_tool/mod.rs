@@ -10,7 +10,7 @@ use std::sync::Arc;
 use strum::{EnumIter, IntoEnumIterator};
 
 mod create;
-mod get_detail;
+mod detail;
 mod list;
 mod update;
 
@@ -27,7 +27,7 @@ impl TaskTools {
         Ok(vec![
             Box::new(list::TaskListTool::new(Arc::clone(&ctx))?),
             Box::new(create::TaskCreateTool::new(Arc::clone(&ctx))?),
-            Box::new(get_detail::TaskDetailGetTool::new(Arc::clone(&ctx))?),
+            Box::new(detail::TaskDetailGetTool::new(Arc::clone(&ctx))?),
             Box::new(update::TaskUpdateTool::new(Arc::clone(&ctx))?),
             Box::new(del::TaskDelTool::new(Arc::clone(&ctx))?),
         ])

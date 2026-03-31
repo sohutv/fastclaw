@@ -1,6 +1,6 @@
 use super::{TaskEnabled, TaskInfo, TaskRunState};
 use crate::agent::AgentContext;
-use crate::tools::task_tool::get_detail::TaskDetailGetTool;
+use crate::tools::task_tool::detail::TaskDetailGetTool;
 use crate::tools::{ToolCallError, ToolCallRsult};
 use anyhow::anyhow;
 use itertools::Itertools;

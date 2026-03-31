@@ -6,6 +6,7 @@ use rig::completion::ToolDefinition;
 use rig::tool::Tool;
 use serde_json::json;
 use sqlx::{QueryBuilder, Sqlite};
+use std::str::FromStr;
 use std::sync::Arc;
 
 #[derive(Clone)]
@@ -48,7 +49,7 @@ impl Tool for TaskCreateTool {
                     },
                     "cron": {
                         "type": "string",
-                        "description": "The cron expression for the task schedule",
+                        "description": "The standard cron expression for the task schedule, e.g. '0 0 9-18 * * * ?'",
                     },
                     "desc": {
                         "type": "string",
@@ -69,6 +70,8 @@ impl Tool for TaskCreateTool {
     }
 
     async fn call(&self, args: Self::Args) -> Result<Self::Output, Self::Error> {
+        let _ = cron::Schedule::from_str(&args.cron)
+            .map_err(|err| ToolCallError(format!("Invalid cron expression: {err}")))?;
         let mut query_builder = args.create_sql();
         let _ = query_builder
             .build()
