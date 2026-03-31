@@ -14,7 +14,7 @@ pub enum WebsearchConfigs {
 
 #[async_trait]
 pub trait Websearch: Sync + Send {
-    async fn search(&self, args: QueryArgs) -> crate::Result<WebsearchResult>;
+    async fn search(&self, args: WebsearchQueryArgs) -> crate::Result<WebsearchResult>;
 }
 
 #[async_trait]
@@ -36,13 +36,13 @@ impl WebsearchConfigs {
 }
 
 #[derive(Debug, Clone)]
-pub struct QueryArgs {
-    pub query: Query,
+pub struct WebsearchQueryArgs {
+    pub query: WebsearchQuery,
     pub count: usize,
     pub timerange: Timerange,
 }
 
-impl<Q: Into<Query>> From<Q> for QueryArgs {
+impl<Q: Into<WebsearchQuery>> From<Q> for WebsearchQueryArgs {
     fn from(value: Q) -> Self {
         Self {
             query: value.into(),
@@ -76,14 +76,14 @@ pub struct WebsearchResult {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct WebsearchResultContext {
-    pub query: Query,
+    pub query: WebsearchQuery,
     pub result_count: usize,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct Query(String);
+pub struct WebsearchQuery(String);
 
-impl<S: Display> From<S> for Query {
+impl<S: Display> From<S> for WebsearchQuery {
     fn from(value: S) -> Self {
         Self(value.to_string())
     }

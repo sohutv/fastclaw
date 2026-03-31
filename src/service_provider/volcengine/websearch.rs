@@ -4,7 +4,7 @@
 
 use crate::config::{ApiKey, ApiUrl};
 use crate::service_provider::{
-    AuthDegree, QueryArgs, Timerange, Websearch, WebsearchConfig, WebsearchResult,
+    AuthDegree, WebsearchQueryArgs, Timerange, Websearch, WebsearchConfig, WebsearchResult,
     WebsearchResultContext,
 };
 use anyhow::anyhow;
@@ -36,8 +36,8 @@ impl WebsearchConfig for VolcengineWebsearchConfig {
 
 #[async_trait]
 impl Websearch for VolcengineWebsearch {
-    async fn search(&self, args: QueryArgs) -> crate::Result<WebsearchResult> {
-        let QueryArgs {
+    async fn search(&self, args: WebsearchQueryArgs) -> crate::Result<WebsearchResult> {
+        let WebsearchQueryArgs {
             query,
             count,
             timerange: Timerange { from, to },
