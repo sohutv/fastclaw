@@ -434,7 +434,10 @@ Disconnected from dingtalk websocket
 }
 #[async_trait]
 impl Channel for DingtalkChannel {
-    async fn start(self, agent: Arc<dyn Agent>) -> crate::Result<JoinHandle<()>> {
+    async fn start(
+        self,
+        agent: Arc<dyn Agent>,
+    ) -> crate::Result<(Sender<AgentRequest>, JoinHandle<()>)> {
         let Self {
             ctx,
             dingtalk_config,
@@ -444,8 +447,8 @@ impl Channel for DingtalkChannel {
             ctx: Arc::clone(&ctx),
             config: dingtalk_config.clone(),
             dingtalk_bot_topic: MessageTopic::Callback(dingtalk_stream::TOPIC_ROBOT.to_string()),
-            agent,
-            channel_message_sender,
+            agent: Arc::clone(&agent),
+            channel_message_sender: channel_message_sender.clone(),
         });
         let (dingtalk, dingtalk_stream_handle) = Arc::new(
             DingTalkStream::new(dingtalk_config.credential)
@@ -456,6 +459,25 @@ impl Channel for DingtalkChannel {
         )
         .start()
         .await?;
+        let agent_request_sender = {
+            let (agent_request_sender, mut agent_request_receiver) =
+                tokio::sync::mpsc::channel::<AgentRequest>(1);
+            tokio::spawn(async move {
+                while let Some(req) = agent_request_receiver.recv().await {
+                    let task_id = uuid::Uuid::new_v4().to_string();
+                    match agent.run(req, channel_message_sender.clone()).await {
+                        Ok(_) => {
+                            info!("Agent run completed, task_id: {}", task_id);
+                        }
+                        Err(err) => {
+                            error!("Agent run failed, task_id: {}, error: {}", task_id, err);
+                        }
+                    }
+                }
+            });
+            agent_request_sender
+        };
+
         let join_handle = std::thread::spawn(move || {
             let rt = tokio::runtime::Builder::new_current_thread()
                 .enable_all()
@@ -479,7 +501,7 @@ impl Channel for DingtalkChannel {
                 let _ = agent_handle.await;
             });
         });
-        Ok(join_handle)
+        Ok((agent_request_sender, join_handle))
     }
 }
 

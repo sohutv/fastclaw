@@ -1,3 +1,4 @@
+use crate::tools::TaskTools;
 use sqlx::SqlitePool;
 use sqlx::sqlite::{SqliteConnectOptions, SqliteJournalMode, SqlitePoolOptions};
 use std::path::{Path, PathBuf};
@@ -12,7 +13,7 @@ pub struct Workspace {
 impl Workspace {
     pub async fn init<P: AsRef<Path>>(workdir: P) -> crate::Result<Self> {
         let workdir = workdir.as_ref();
-        Ok(Self {
+        let self_ = Self {
             path: workdir.join("workspace"),
             sql_pool: {
                 let sql_pool = SqlitePoolOptions::new()
@@ -28,6 +29,8 @@ impl Workspace {
                     .await?;
                 sql_pool
             },
-        })
+        };
+        TaskTools::init_cron_task(&self_).await?;
+        Ok(self_)
     }
 }

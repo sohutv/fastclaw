@@ -13,7 +13,7 @@ use std::io::{Write, stdout};
 use std::sync::Arc;
 use std::thread::JoinHandle;
 use tokio::sync::RwLock;
-use tokio::sync::mpsc::Receiver;
+use tokio::sync::mpsc::{Receiver, Sender};
 
 pub struct CliChannel {
     ctx: Arc<ChannelContext>,
@@ -38,9 +38,32 @@ impl CliChannel {
 
 #[async_trait]
 impl Channel for CliChannel {
-    async fn start(self, agent: Arc<dyn Agent>) -> crate::Result<JoinHandle<()>> {
+    async fn start(
+        self,
+        agent: Arc<dyn Agent>,
+    ) -> crate::Result<(Sender<AgentRequest>, JoinHandle<()>)> {
         let Self { ctx } = self;
         let ctx = Arc::clone(&ctx);
+        let session_id = ctx
+            .sessions
+            .read()
+            .await
+            .keys()
+            .next()
+            .expect("unexpected sessions")
+            .clone();
+        let (message_sender, mut message_receiver) = tokio::sync::mpsc::channel(32);
+        let agent_message_sender = {
+            let (agent_message_sender, mut agent_message_receiver) = tokio::sync::mpsc::channel(1);
+            let message_sender = message_sender.clone();
+            let agent = Arc::clone(&agent);
+            tokio::spawn(async move {
+                while let Some(req) = agent_message_receiver.recv().await {
+                    let _ = agent.run(req, message_sender.clone()).await;
+                }
+            });
+            agent_message_sender
+        };
         let join_handle = std::thread::spawn(move || {
             let rt = tokio::runtime::Builder::new_current_thread()
                 .enable_all()
@@ -48,24 +71,12 @@ impl Channel for CliChannel {
                 .expect("unexpected err");
             let mut rl = DefaultEditor::new().expect("unexpected err");
             let _ = rt.block_on(async move {
-                let (message_sender, mut message_receiver) = tokio::sync::mpsc::channel(32);
                 loop {
                     let readline = rl.readline(">> ");
                     match readline {
                         Ok(line) => {
                             let line = line.trim();
                             if !line.is_empty() {
-                                let session_id = {
-                                    let session_id = ctx
-                                        .sessions
-                                        .read()
-                                        .await
-                                        .keys()
-                                        .next()
-                                        .expect("unexpected sessions")
-                                        .clone();
-                                    session_id
-                                };
                                 if line.starts_with('/') {
                                     Console::handle_console_cmd(
                                         &ctx,
@@ -77,7 +88,6 @@ impl Channel for CliChannel {
                                     .await;
                                     continue;
                                 }
-
                                 let message = Message::user(line);
                                 let _ = agent
                                     .run(
@@ -102,7 +112,7 @@ impl Channel for CliChannel {
                 }
             });
         });
-        Ok(join_handle)
+        Ok((agent_message_sender, join_handle))
     }
 }
 

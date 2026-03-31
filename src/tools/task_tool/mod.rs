@@ -1,5 +1,4 @@
 use crate::agent::AgentContext;
-use crate::tools::ToolCallError;
 use anyhow::anyhow;
 use chrono::Local;
 use derive_more::Display;
@@ -10,20 +9,18 @@ use std::sync::Arc;
 use strum::{EnumIter, IntoEnumIterator};
 
 mod create;
+mod del;
 mod detail;
 mod list;
 mod update;
 
-mod del;
+pub mod task_api;
+
 #[derive(Clone)]
-pub(super) struct TaskTools;
+pub struct TaskTools;
 
 impl TaskTools {
     pub async fn create(ctx: Arc<AgentContext>) -> crate::Result<Vec<Box<dyn ToolDyn>>> {
-        let _ = sqlx::query(CREATE_TASK_TABLE)
-            .execute(&ctx.workspace.sql_pool)
-            .await
-            .map_err(|err| ToolCallError(format!("{err}")))?;
         Ok(vec![
             Box::new(list::TaskListTool::new(Arc::clone(&ctx))?),
             Box::new(create::TaskCreateTool::new(Arc::clone(&ctx))?),
@@ -36,19 +33,17 @@ impl TaskTools {
 
 #[derive(Debug, Clone)]
 pub struct TaskInfo {
-    id: u64,
-    name: String,
-    cron: String,
-    desc: String,
-    session_id: String,
-    run_state: TaskRunState,
-    enabled: TaskEnabled,
-    created_at: chrono::DateTime<chrono::Local>,
-    updated_at: chrono::DateTime<chrono::Local>,
-    creator: String,
+    pub id: u64,
+    pub name: String,
+    pub cron: String,
+    pub desc: String,
+    pub session_id: String,
+    pub run_state: TaskRunState,
+    pub enabled: TaskEnabled,
+    pub created_at: chrono::DateTime<Local>,
+    pub updated_at: chrono::DateTime<Local>,
+    pub creator: String,
 }
-
-impl TaskInfo {}
 
 impl TryFrom<SqliteRow> for TaskInfo {
     type Error = anyhow::Error;

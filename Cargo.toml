@@ -17,6 +17,7 @@ serde_json = { version = "1.0" }
 toml = { version = "1.0.7" }
 tokio = { version = "1.50", features = ["full"] }
 tokio-stream = { version = "0.1" }
+futures = { version = "0.3" }
 url = { version = "2.5" }
 reqwest = { version = "0.13", features = ["rustls", "json"], default-features = false }
 uuid = { version = "1.22", features = ["v4"] }
@@ -24,11 +25,11 @@ base64 = { version = "0.22" }
 itertools = { version = "0.14" }
 derive_more = { version = "2.1", features = ["full"] }
 strum = { version = "0.28", features = ["derive"] }
-chrono = { version = "0.4" ,features = ["serde"]}
+chrono = { version = "0.4", features = ["serde"] }
 rig-core = { version = "0.33" }
 async-trait = { version = "0.1" }
 sqlx = { version = "0.8", features = ["runtime-tokio", "sqlite"] }
-cron = {version = "0.16"}
+cron = { version = "0.16" }
 rustyline = { version = "17.0", optional = true }
 dingtalk-stream-sdk = { git = "ssh://git@code.mhlife.vip/mhlife/dingtalk-stream-sdk-rust.git", branch = "main", features = ["image"], optional = true }
 

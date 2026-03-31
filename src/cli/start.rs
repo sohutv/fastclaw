@@ -3,6 +3,7 @@ use crate::channels;
 use crate::channels::Channel;
 use crate::cli::CmdRunner;
 use crate::config::{Config, Workspace};
+use crate::heartbeat::Heartbeat;
 use crate::model_provider::ModelProviders;
 use anyhow::anyhow;
 use clap::Args;
@@ -65,14 +66,7 @@ impl CmdRunner for Start {
             }
         };
 
-        /* todo
-        let heartbeat_handle = {
-            let mut heartbeat = Heartbeat::new(config, &history_manager, workspace).await?;
-            let handle = heartbeat.start(heartbeat_agent_message_sender).await?;
-            handle
-        };
-         */
-        let channel_handle = match channel {
+        let (agent_message_sender, channel_handle) = match channel {
             #[cfg(feature = "channel_cli_channel")]
             ChannelType::Cli => {
                 info!("Starting CLI channel");
@@ -87,6 +81,10 @@ impl CmdRunner for Start {
                 dingtalk_channel.start(Arc::new(main_agent)).await?
             }
         };
+        {
+            let mut heartbeat = Heartbeat::new(config, workspace, &history_manager).await?;
+            let _ = heartbeat.start(agent_message_sender).await?;
+        }
         //todo let _ = heartbeat_handle.await;
         let _ = channel_handle.join();
         Ok(())

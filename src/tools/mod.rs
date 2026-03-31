@@ -7,6 +7,7 @@ use std::sync::Arc;
 mod memory_tool;
 mod shell_tool;
 mod task_tool;
+pub(crate) use task_tool::TaskTools;
 mod time_tool;
 
 mod websearch_tool;
