@@ -67,15 +67,20 @@ impl Channel for CliChannel {
                             let line = line.trim();
                             if !line.is_empty() {
                                 if line.starts_with('/') {
-                                    Console::handle_console_cmd(
+                                    match Console::handle_console_cmd(
                                         &ctx,
                                         &line,
                                         &agent,
                                         message_sender.clone(),
                                         &session_id,
                                     )
-                                    .await;
-                                    continue;
+                                    .await
+                                    {
+                                        Ok(_) => {
+                                            continue;
+                                        }
+                                        Err(_) => {}
+                                    }
                                 }
                                 let message = Message::user(line);
                                 let _ = agent

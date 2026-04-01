@@ -22,7 +22,12 @@ pub enum SessionId {
 
 impl Display for SessionId {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", &*self)
+        let str = match self{
+            SessionId::Master { val, .. } => val.as_str(),
+            SessionId::Anonymous { val, .. } => val.as_str(),
+            SessionId::Group { val, .. } => val.as_str(),
+        };
+        write!(f, "{}", str)
     }
 }
 

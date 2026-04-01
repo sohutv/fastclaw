@@ -1,5 +1,6 @@
 use crate::agent::{Agent, AgentResponse};
 use crate::channels::{ChannelContext, ChannelMessage, SessionId};
+use anyhow::anyhow;
 use clap::Parser;
 use derive_more::FromStr;
 use serde::{Deserialize, Serialize};
@@ -36,39 +37,40 @@ impl Console {
         agent: &Arc<dyn Agent>,
         channel_message_sender: Sender<ChannelMessage>,
         session_id: &SessionId,
-    ) {
+    ) -> crate::Result<()> {
         let line = format!("/ {}", &line[1..]);
         match Console::try_parse_from(line.split(" ")) {
-            Ok(command) => match command {
-                Console::ShowReasoning { state } => match state {
-                    ShowReasoning::On => {
-                        unimplemented!()
+            Ok(command) => {
+                match command {
+                    Console::ShowReasoning { state } => match state {
+                        ShowReasoning::On => {
+                            unimplemented!()
+                        }
+                        ShowReasoning::Off => {
+                            unimplemented!()
+                        }
+                    },
+                    Console::Compact { ratio } => {
+                        let _ = channel_message_sender
+                            .send(ChannelMessage {
+                                session_id: session_id.clone(),
+                                message: AgentResponse::Notify(
+                                    "正在执行会话压缩...".to_string().into(),
+                                ),
+                            })
+                            .await;
+                        let result = agent.session_compact(session_id, ratio).await;
+                        let _ = channel_message_sender
+                            .send(ChannelMessage {
+                                session_id: session_id.clone(),
+                                message: AgentResponse::HistoryCompact(result),
+                            })
+                            .await;
                     }
-                    ShowReasoning::Off => {
-                        unimplemented!()
-                    }
-                },
-                Console::Compact { ratio } => {
-                    let _ = channel_message_sender
-                        .send(ChannelMessage {
-                            session_id: session_id.clone(),
-                            message: AgentResponse::Notify(
-                                "正在执行会话压缩...".to_string().into(),
-                            ),
-                        })
-                        .await;
-                    let result = agent.session_compact(session_id, ratio).await;
-                    let _ = channel_message_sender
-                        .send(ChannelMessage {
-                            session_id: session_id.clone(),
-                            message: AgentResponse::HistoryCompact(result),
-                        })
-                        .await;
                 }
-            },
-            Err(err) => {
-                eprintln!("Error: {}", err.to_string());
+                Ok(())
             }
+            Err(err) => Err(anyhow!(err)),
         }
     }
 }

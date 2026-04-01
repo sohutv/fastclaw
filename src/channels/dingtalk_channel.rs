@@ -236,19 +236,25 @@ impl dingtalk_stream::handlers::CallbackHandler for DingTalkCallbackHandler {
                 )
             }
         };
-        if let Some(line) = cmd {
-            if line.starts_with('/') {
-                Console::handle_console_cmd(
-                    &self.ctx,
-                    &line,
-                    &self.agent,
-                    self.channel_message_sender.clone(),
-                    &session_id,
-                )
-                .await;
-                return Ok(HandlerResp::Text("cmd submitted".to_string()));
+        let line = if let Some(cmd_val) = &cmd {
+            match Console::handle_console_cmd(
+                &self.ctx,
+                &cmd_val,
+                &self.agent,
+                self.channel_message_sender.clone(),
+                &session_id,
+            )
+            .await
+            {
+                Ok(()) => {
+                    return Ok(HandlerResp::Text("cmd submitted".to_string()));
+                }
+                Err(_) => {}
             }
-        }
+            cmd
+        } else {
+            line
+        };
         let prompts = vec![
             UserContent::text(line.as_deref().unwrap_or_default()),
             match &session_id {
