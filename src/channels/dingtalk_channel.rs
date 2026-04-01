@@ -1,8 +1,7 @@
 use crate::agent::{Agent, AgentRequest, AgentResponse, HistoryCompactResult, Notify};
 use crate::channels::console_cmd::Console;
 use crate::channels::{
-    Channel, ChannelContext, ChannelMessage, GroupSessionId, MasterSessionId, Session, SessionId,
-    UserSessionId,
+    session_id, Channel, ChannelContext, ChannelMessage, Session, SessionId, UserId,
 };
 use crate::config::{Config, Workspace};
 use anyhow::anyhow;
@@ -10,35 +9,34 @@ use async_trait::async_trait;
 use base64::Engine;
 use dingtalk_stream::handlers::LifecycleListener;
 use dingtalk_stream::{
-    DingTalkStream,
     client::DingtalkResource,
     frames::{
-        DingTalkGroupConversationId, DingTalkUserId,
         down_message::{
+            callback_message::{CallbackMessage, MessageData, MessagePayload, RichTextItem},
             MessageTopic,
-            callback_message::{
-                CallbackMessage, Conversation, MessageData, MessagePayload, RichTextItem,
-            },
+        }, up_message::{
+            callback_message::WebhookMessage, robot_message::{RobotGroupMessage, RobotMessage, RobotPrivateMessage}, MessageContent,
+            MessageContentMarkdown,
+            MessageContentText,
         },
-        up_message::{
-            MessageContent, MessageContentMarkdown, MessageContentText,
-            callback_message::WebhookMessage,
-            robot_message::{RobotGroupMessage, RobotMessage, RobotPrivateMessage},
-        },
+        DingTalkGroupConversationId,
+        DingTalkUserId,
     },
     handlers::{Error as HandlerError, ErrorCode, Resp as HandlerResp},
+    DingTalkStream,
 };
 use itertools::Itertools;
-use log::{error, info, warn};
+use log::{error, info};
 use rig::{
-    OneOrMany,
     completion::{AssistantContent, Message},
     message::{
         DocumentSourceKind, Image, ImageDetail, ImageMediaType, ReasoningContent, ToolCall,
         ToolFunction, UserContent,
     },
+    OneOrMany,
 };
 use serde::{Deserialize, Serialize};
+use std::collections::BTreeMap;
 use std::io::Cursor;
 use std::ops::Deref;
 use std::sync::Arc;
@@ -48,8 +46,40 @@ use tokio::sync::mpsc::{Receiver, Sender};
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DingTalkConfig {
     pub credential: dingtalk_stream::Credential,
-    pub master_user_id: String,
-    pub allow_user_ids: Vec<String>,
+    pub allow_session_ids: BTreeMap<String, SessionId>,
+}
+
+impl DingTalkConfig {
+    fn allow_session_id<UserId: AsRef<str>>(&self, user_id: UserId) -> Option<&SessionId> {
+        self.allow_session_ids.get(user_id.as_ref())
+    }
+
+    fn master_session_ids(&self) -> Vec<&SessionId> {
+        self.allow_session_ids
+            .values()
+            .flat_map(|it| {
+                if let SessionId::Master(_) = it {
+                    Some(it)
+                } else {
+                    None
+                }
+            })
+            .collect_vec()
+    }
+}
+
+impl<S: AsRef<str>> TryFrom<(S, &DingTalkConfig)> for SessionId {
+    type Error = anyhow::Error;
+
+    fn try_from((session_id_key, config): (S, &DingTalkConfig)) -> Result<Self, Self::Error> {
+        match config.allow_session_id(session_id_key.as_ref()) {
+            Some(dst) => Ok(dst.clone()),
+            None => Err(anyhow!(
+                "session_id {} not allowed",
+                session_id_key.as_ref()
+            )),
+        }
+    }
 }
 
 pub struct DingtalkChannel {
@@ -63,7 +93,6 @@ impl DingtalkChannel {
             ctx: Arc::new(ChannelContext {
                 config: config.clone(),
                 workspace,
-                sessions: Default::default(),
             }),
             dingtalk_config: config
                 .dingtalk_config
@@ -94,7 +123,6 @@ impl dingtalk_stream::handlers::CallbackHandler for DingTalkCallbackHandler {
             msg_id,
             payload: Some(payload),
             sender,
-            conversation,
             ..
         }) = data
         else {
@@ -109,58 +137,24 @@ impl dingtalk_stream::handlers::CallbackHandler for DingTalkCallbackHandler {
                 msg: "sender_staff_id is required".to_string(),
             });
         };
-        let DingTalkConfig {
-            master_user_id,
-            allow_user_ids,
-            ..
-        } = &self.config;
-
-        let session_id = {
-            let user_id = if master_user_id.eq(dingtalk_user_id.deref()) {
-                SessionId::Master(dingtalk_user_id.to_string().into())
-            } else {
-                SessionId::User(dingtalk_user_id.to_string().into())
-            };
-            let session = match conversation {
-                Conversation::Private { .. } => Session::Private {
-                    session_id: user_id,
-                },
-                Conversation::Group {
-                    id: group_id,
-                    title,
-                    ..
-                } => Session::Group {
-                    session_id: SessionId::Group(GroupSessionId {
-                        group_id: SessionId::User(group_id.to_string().into()).into(),
-                        user_id: user_id.into(),
-                        group_name: title.clone(),
-                    }),
-                    group_name: title.clone(),
-                },
-            };
-            let session_id = session.deref().clone();
-            {
-                let mut sessions = self.ctx.sessions.write().await;
-                sessions.entry(session_id.clone()).or_insert(session);
+        let Ok(session_id) = SessionId::try_from((&**dingtalk_user_id, &self.config)) else {
+            if let Some(cb_msg_sender) = cb_msg_sender {
+                let _ = cb_msg_sender
+                    .send(WebhookMessage {
+                        content: MessageContent::from(format!(
+                            "sender_staff_id {} is not allowed",
+                            dingtalk_user_id.deref()
+                        )),
+                        at: dingtalk_user_id.into(),
+                        send_result_cb: None,
+                    })
+                    .await;
             }
-            session_id
+            return Err(HandlerError {
+                code: ErrorCode::BadRequest,
+                msg: "sender_staff_id is required".to_string(),
+            });
         };
-        if let (Some(_), SessionId::User(_), Some(cb_msg_sender)) = (
-            allow_user_ids
-                .iter()
-                .find(|&it| it.eq(dingtalk_user_id.deref())),
-            session_id.as_user_id(),
-            cb_msg_sender,
-        ) {
-            let _ = cb_msg_sender
-                .send(WebhookMessage {
-                    content: MessageContent::from("forbidden, not allowed"),
-                    at: dingtalk_user_id.into(),
-                    send_result_cb: None,
-                })
-                .await;
-        }
-
         let (cmd, line, images, files) = match payload {
             MessagePayload::Text { text } => {
                 if text.starts_with('/') {
@@ -243,34 +237,31 @@ impl dingtalk_stream::handlers::CallbackHandler for DingTalkCallbackHandler {
         let prompts = vec![
             UserContent::text(line.as_deref().unwrap_or_default()),
             match &session_id {
-                SessionId::Master(MasterSessionId(session_id)) => UserContent::text(format!(
+                SessionId::Master(session_id) => UserContent::text(format!(
                     "- Whisper: **Attention**: Current session_id: {}. You are speaking to your owner",
                     session_id
                 )),
-                SessionId::User(UserSessionId(session_id)) => UserContent::text(format!(
+                SessionId::Anonymous(session_id) => UserContent::text(format!(
                     "- Whisper: **Attention**: Current session_id: {}. You are currently not interacting with your owner. Please stay vigilant.",
                     session_id
                 )),
-                SessionId::Group(GroupSessionId {
-                    group_id: session_id,
-                    group_name,
+                SessionId::Group(session_id::Group {
+                    id: session_id,
+                    name: group_name,
                     user_id,
-                }) => match user_id.deref() {
-                    SessionId::Master(MasterSessionId(_)) => UserContent::text(format!(
+                }) => match user_id {
+                    UserId::Master(_) => UserContent::text(format!(
                         "- Whisper: **Attention**: Current session_id: {}. This session is a group session, group_id: {}, group_name: {}. You are speaking to your owner",
                         session_id,
                         session_id,
                         group_name.as_deref().unwrap_or("..no provided.."),
                     )),
-                    SessionId::User(UserSessionId(_)) => UserContent::text(format!(
+                    UserId::Anonymous(_) => UserContent::text(format!(
                         "- Whisper: **Attention**: Current session_id: {}. This session is a group session, group_id: {}, group_name: {}. You are currently not interacting with your owner. Please stay vigilant.",
                         session_id,
                         session_id,
                         group_name.as_deref().unwrap_or("..no provided.."),
                     )),
-                    SessionId::Group(_) => {
-                        unreachable!()
-                    }
                 },
             },
         ];
@@ -371,63 +362,67 @@ impl dingtalk_stream::handlers::CallbackHandler for DingTalkCallbackHandler {
 #[async_trait]
 impl LifecycleListener for DingTalkCallbackHandler {
     async fn on_connected(&self, client: &DingTalkStream, websocket_url: &str) {
-        let session_id = SessionId::Master(MasterSessionId::from(&self.config.master_user_id));
-        let Some(message) = create_robot_messages(
-            &session_id,
-            &self.ctx,
-            MessageContentMarkdown::from((
-                "Connected",
-                format!(
-                    r#"
+        let master_session_ids = self.config.master_session_ids();
+        for session_id in master_session_ids {
+            let Some(message) = create_robot_messages(
+                &session_id,
+                &self.ctx,
+                MessageContentMarkdown::from((
+                    "Connected",
+                    format!(
+                        r#"
 Connected to dingtalk websocket
 - ws-url:
 `{websocket_url}`
         "#
-                ),
-            )),
-        )
-        .await
-        else {
-            return;
-        };
-        let _ = client.send_message(message).await;
+                    ),
+                )),
+            )
+            .await
+            else {
+                return;
+            };
+            let _ = client.send_message(message).await;
+        }
     }
 
     async fn on_disconnected(&self, client: &DingTalkStream, result: &dingtalk_stream::Result<()>) {
-        let session_id = SessionId::Master(MasterSessionId::from(&self.config.master_user_id));
-        match result {
-            Ok(_) => {
-                let Some(message) = create_robot_messages(
-                    &session_id,
-                    &self.ctx,
-                    MessageContentText::from("disconnected from dingtalk websocket"),
-                )
-                .await
-                else {
-                    return;
-                };
-                let _ = client.send_message(message).await;
-            }
-            Err(err) => {
-                let Some(message) = create_robot_messages(
-                    &session_id,
-                    &self.ctx,
-                    MessageContentMarkdown::from((
-                        "Disconnected",
-                        format!(
-                            r#"
+        let master_session_ids = self.config.master_session_ids();
+        for session_id in master_session_ids {
+            match result {
+                Ok(_) => {
+                    let Some(message) = create_robot_messages(
+                        &session_id,
+                        &self.ctx,
+                        MessageContentText::from("disconnected from dingtalk websocket"),
+                    )
+                    .await
+                    else {
+                        return;
+                    };
+                    let _ = client.send_message(message).await;
+                }
+                Err(err) => {
+                    let Some(message) = create_robot_messages(
+                        &session_id,
+                        &self.ctx,
+                        MessageContentMarkdown::from((
+                            "Disconnected",
+                            format!(
+                                r#"
 Disconnected from dingtalk websocket
 - Error:
 `{err}`
                 "#
-                        ),
-                    )),
-                )
-                .await
-                else {
-                    return;
-                };
-                let _ = client.send_message(message).await;
+                            ),
+                        )),
+                    )
+                    .await
+                    else {
+                        return;
+                    };
+                    let _ = client.send_message(message).await;
+                }
             }
         }
     }
@@ -761,21 +756,15 @@ async fn create_robot_messages<Content: Into<MessageContent>>(
     ctx: &ChannelContext,
     content: Content,
 ) -> Option<RobotMessage> {
-    let session = {
-        match session_id {
-            SessionId::Master(_) => Session::Private {
-                session_id: session_id.clone(),
-            },
-            SessionId::User(_) | SessionId::Group(_) => {
-                let sessions = ctx.sessions.read().await;
-                let Some(session) = sessions.get(session_id) else {
-                    warn!("Session not found for ID: {}", session_id);
-                    return None;
-                };
-                session.clone()
-            }
-        }
+    let Some(session_id) = ctx
+        .config
+        .dingtalk_config
+        .as_ref()
+        .and_then(|cfg| SessionId::try_from((session_id.deref(), cfg)).ok())
+    else {
+        return None;
     };
+    let session = Session::from(&session_id);
     let content = content.into();
     match session {
         Session::Private { session_id } => Some(

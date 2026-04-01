@@ -1,5 +1,5 @@
 use crate::agent::{Agent, AgentRequest, HistoryManager, LlmAgentSupplier};
-use crate::channels::{MasterSessionId, SessionId};
+use crate::channels::{SessionId, UserId};
 use crate::config::{Config, Workspace};
 use crate::model_provider::ModelProviders;
 use crate::tools::TaskTools;
@@ -76,7 +76,7 @@ impl Heartbeat {
 
 impl Heartbeat {
     async fn spawn_cron_tasks(
-        config: &'static Config,
+        _: &'static Config,
         workspace: &Workspace,
         interval: Duration,
         agent_message_sender: Sender<AgentRequest>,
@@ -93,11 +93,7 @@ impl Heartbeat {
                         let time_until_seconds = next.signed_duration_since(now).num_seconds();
                         if time_until_seconds < interval.as_secs() as i64 && time_until_seconds >= 0
                         {
-                            let session_id = if config.is_master_session_id(&task.session_id) {
-                                SessionId::Master(MasterSessionId::from(&task.session_id))
-                            } else {
-                                task.session_id.into()
-                            };
+                            let session_id = SessionId::from(UserId::anonymous(&task.session_id));
                             let agent_message_sender = agent_message_sender.clone();
                             let _ = tokio::spawn(async move {
                                 match agent_message_sender

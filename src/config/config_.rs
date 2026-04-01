@@ -31,16 +31,6 @@ impl Config {
     pub fn agent_settings(&self, name: &AgentId) -> Option<&AgentSettings> {
         self.agent_settings.get(name)
     }
-
-    pub fn is_master_session_id(&self, session_id: &str) -> bool {
-        #[cfg(feature = "channel_dingtalk_channel")]
-        if let Some(cfg) = &self.dingtalk_config {
-            if cfg.master_user_id.eq_ignore_ascii_case(session_id) {
-                return true;
-            }
-        }
-        false
-    }
 }
 
 impl Default for Config {

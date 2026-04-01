@@ -1,8 +1,7 @@
 use crate::agent::{Agent, AgentRequest, AgentResponse, Notify};
 use crate::channels::console_cmd::Console;
-use crate::channels::{Channel, ChannelContext, ChannelMessage, Session, SessionId};
+use crate::channels::{Channel, ChannelContext, ChannelMessage, SessionId, UserId};
 use crate::config::{Config, Workspace};
-use crate::hash_map;
 use anyhow::anyhow;
 use async_trait::async_trait;
 use rig::completion::Message;
@@ -12,11 +11,11 @@ use rustyline::error::ReadlineError;
 use std::io::{Write, stdout};
 use std::sync::Arc;
 use std::thread::JoinHandle;
-use tokio::sync::RwLock;
 use tokio::sync::mpsc::{Receiver, Sender};
 
 pub struct CliChannel {
     ctx: Arc<ChannelContext>,
+    session_id: SessionId,
 }
 
 impl CliChannel {
@@ -25,13 +24,8 @@ impl CliChannel {
             ctx: Arc::new(ChannelContext {
                 config: config.clone(),
                 workspace,
-                sessions: {
-                    let session_id = SessionId::from("cli-session-channel".to_string());
-                    Arc::new(RwLock::new(
-                        hash_map!(session_id.clone() => Session::Private{session_id}),
-                    ))
-                },
             }),
+            session_id: UserId::master("cli-session-channel").into(),
         })
     }
 }
@@ -42,16 +36,8 @@ impl Channel for CliChannel {
         self,
         agent: Arc<dyn Agent>,
     ) -> crate::Result<(Sender<AgentRequest>, JoinHandle<()>)> {
-        let Self { ctx } = self;
+        let Self { ctx,session_id } = self;
         let ctx = Arc::clone(&ctx);
-        let session_id = ctx
-            .sessions
-            .read()
-            .await
-            .keys()
-            .next()
-            .expect("unexpected sessions")
-            .clone();
         let (message_sender, mut message_receiver) = tokio::sync::mpsc::channel(32);
         let agent_message_sender = {
             let (agent_message_sender, mut agent_message_receiver) = tokio::sync::mpsc::channel(1);
