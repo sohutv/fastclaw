@@ -1,39 +1,40 @@
 use crate::agent::{Agent, AgentRequest, AgentResponse, HistoryCompactResult, Notify};
 use crate::channels::console_cmd::Console;
 use crate::channels::{
-    session_id, Channel, ChannelContext, ChannelMessage, Session, SessionId, UserId,
+    Channel, ChannelContext, ChannelMessage, Session, SessionId, UserId, session_id,
 };
 use crate::config::{Config, Workspace};
 use anyhow::anyhow;
 use async_trait::async_trait;
 use base64::Engine;
+use dingtalk_stream::frames::down_message::callback_message::Conversation;
 use dingtalk_stream::handlers::LifecycleListener;
 use dingtalk_stream::{
+    DingTalkStream,
     client::DingtalkResource,
     frames::{
+        DingTalkGroupConversationId, DingTalkUserId,
         down_message::{
-            callback_message::{CallbackMessage, MessageData, MessagePayload, RichTextItem},
             MessageTopic,
-        }, up_message::{
-            callback_message::WebhookMessage, robot_message::{RobotGroupMessage, RobotMessage, RobotPrivateMessage}, MessageContent,
-            MessageContentMarkdown,
-            MessageContentText,
+            callback_message::{CallbackMessage, MessageData, MessagePayload, RichTextItem},
         },
-        DingTalkGroupConversationId,
-        DingTalkUserId,
+        up_message::{
+            MessageContent, MessageContentMarkdown, MessageContentText,
+            callback_message::WebhookMessage,
+            robot_message::{RobotGroupMessage, RobotMessage, RobotPrivateMessage},
+        },
     },
     handlers::{Error as HandlerError, ErrorCode, Resp as HandlerResp},
-    DingTalkStream,
 };
 use itertools::Itertools;
 use log::{error, info};
 use rig::{
+    OneOrMany,
     completion::{AssistantContent, Message},
     message::{
         DocumentSourceKind, Image, ImageDetail, ImageMediaType, ReasoningContent, ToolCall,
         ToolFunction, UserContent,
     },
-    OneOrMany,
 };
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
@@ -123,6 +124,7 @@ impl dingtalk_stream::handlers::CallbackHandler for DingTalkCallbackHandler {
             msg_id,
             payload: Some(payload),
             sender,
+            conversation,
             ..
         }) = data
         else {
@@ -131,20 +133,33 @@ impl dingtalk_stream::handlers::CallbackHandler for DingTalkCallbackHandler {
                 msg: "unexpected data".to_string(),
             });
         };
-        let Some(dingtalk_user_id) = &sender.sender_staff_id else {
+        let (sender_id, dingtalk_user_id) = match conversation {
+            Conversation::Private { .. } => (
+                sender.sender_staff_id.as_deref().map(|it| it.to_string()),
+                &sender.sender_staff_id,
+            ),
+            Conversation::Group { id, .. } => {
+                let conversation_id = id.deref();
+                (
+                    sender.sender_staff_id.as_deref().map(|sender_staff_id| {
+                        format!("group:{conversation_id}:{sender_staff_id}")
+                    }),
+                    &sender.sender_staff_id,
+                )
+            }
+        };
+        let (Some(sender_id), Some(dingtalk_user_id)) = (sender_id, dingtalk_user_id) else {
             return Err(HandlerError {
                 code: ErrorCode::BadRequest,
                 msg: "sender_staff_id is required".to_string(),
             });
         };
-        let Ok(session_id) = SessionId::try_from((&**dingtalk_user_id, &self.config)) else {
+
+        let Ok(session_id) = SessionId::try_from((&sender_id, &self.config)) else {
             if let Some(cb_msg_sender) = cb_msg_sender {
                 let _ = cb_msg_sender
                     .send(WebhookMessage {
-                        content: MessageContent::from(format!(
-                            "sender_staff_id {} is not allowed",
-                            dingtalk_user_id.deref()
-                        )),
+                        content: MessageContent::from("talking is forbidden"),
                         at: dingtalk_user_id.into(),
                         send_result_cb: None,
                     })
@@ -246,9 +261,10 @@ impl dingtalk_stream::handlers::CallbackHandler for DingTalkCallbackHandler {
                     session_id
                 )),
                 SessionId::Group(session_id::Group {
-                    id: session_id,
+                    session_id,
                     name: group_name,
                     user_id,
+                    ..
                 }) => match user_id {
                     UserId::Master(_) => UserContent::text(format!(
                         "- Whisper: **Attention**: Current session_id: {}. This session is a group session, group_id: {}, group_name: {}. You are speaking to your owner",
@@ -776,7 +792,7 @@ async fn create_robot_messages<Content: Into<MessageContent>>(
         ),
         Session::Group { session_id, .. } => Some(
             RobotGroupMessage {
-                group_id: DingTalkGroupConversationId::from(session_id.deref()),
+                group_id: DingTalkGroupConversationId::from(session_id.id),
                 content: content.clone(),
             }
             .into(),

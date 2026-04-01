@@ -11,6 +11,27 @@ pub enum SessionId {
     Group(Group),
 }
 
+#[cfg(test)]
+mod tests {
+    use crate::btree_map;
+    use crate::channels::{Group, Master, SessionId, UserId};
+    use std::collections::BTreeMap;
+
+    #[test]
+    fn test() {
+        let map: BTreeMap<String, SessionId> = btree_map!(
+            "group:cidUBGm9d3LTYczXMWuDIaXxg==:032615015535634423".to_string() =>  SessionId::Group(Group{
+                id: "cidUBGm9d3LTYczXMWuDIaXxg==".to_string(),
+                session_id:"group:cidUBGm9d3LTYczXMWuDIaXxg==:032615015535634423".to_string(),
+                user_id: UserId::Master(Master("032615015535634423".to_string())),
+                name: Some("GGGNNN".to_string())
+            })
+        );
+        let str = toml::to_string(&map).unwrap();
+        print!("{str}")
+    }
+}
+
 #[derive(Debug, Clone, Eq, PartialEq, Hash, Serialize, Deserialize, Display, Deref)]
 pub struct Master(pub String);
 #[derive(Debug, Clone, Eq, PartialEq, Hash, Serialize, Deserialize, Display, Deref)]
@@ -35,8 +56,9 @@ impl Deref for UserId {
 #[derive(Debug, Clone, Serialize, Deserialize, Display, Deref)]
 #[display("{name:?}[{id}]:{user_id}")]
 pub struct Group {
-    #[deref]
     pub id: String,
+    #[deref]
+    pub session_id: String,
     pub user_id: UserId,
     pub name: Option<String>,
 }
