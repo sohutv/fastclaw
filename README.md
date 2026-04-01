@@ -4,31 +4,43 @@
 
 English | [中文](./README.zh-cn.md)
 
-Fastclaw is a local terminal AI agent built with Rust. It works through an OpenAI-compatible model interface and supports streaming output, reasoning display, conversation context, and tool calls (such as `shell` and `reload-self`).
+Fastclaw is a local AI agent built with Rust. It supports OpenAI-compatible model providers, multi-channel interaction (CLI and DingTalk), streaming output, conversation history, scheduled task execution, and tool calls.
 
 ## Features
 
-- Async agent runtime based on `tokio` + `rig-core`
+- Async runtime based on `tokio` + `rig-core`
 - OpenAI-compatible model provider integration
-- Terminal interaction channel (CLI)
-- Separate streaming for reasoning and final response
+- Channels:
+  - CLI channel (`--channel Cli`)
+  - DingTalk channel (`--channel Dingtalk`, enabled by default feature)
+- Streaming reasoning and final answer output
 - Built-in tools:
-  - `shell`: execute commands in the workspace directory
-  - `reload-self`: trigger agent self-reload
-- One-command initialization for workdir and default prompt templates (`workspace/*.md`)
+  - `shell`: execute shell commands in workspace
+  - `current-time`: return local time in RFC3339 format
+  - `task-list`, `task-create`, `task-detail-get`, `task-update`, `task-del`
+  - `websearch` (only when `[websearch]` is configured)
+- Session history persistence and history compaction support (`/compact`)
+- Background heartbeat scheduler for cron tasks
+- One-command onboarding for workdir, default config, and workspace templates
 
 ## Requirements
 
-- Rust stable (must support `edition = 2024`)
+- Rust stable with `edition = 2024`
 - Cargo
 - Access to an OpenAI-compatible API service
 
-## Install and Build
+## Build
 
 ```bash
 git clone <your-repo-url>
 cd fastclaw
 cargo build
+```
+
+If you only need CLI and want to avoid DingTalk dependency:
+
+```bash
+cargo build --no-default-features --features "model_provider_openai_compatible,channel_cli_channel,volcengine"
 ```
 
 ## CLI Commands
@@ -39,34 +51,34 @@ fastclaw <COMMAND>
 
 Available subcommands:
 
-- `onboard`: initialize config and workdir
-- `start`: start the agent
+- `onboard init-config`: initialize workdir and default files
+- `start`: start agent runtime
 
-You can also run via Cargo:
+Examples:
 
 ```bash
 cargo run -- --help
-cargo run -- onboard --help
+cargo run -- onboard init-config --help
 cargo run -- start --help
 ```
 
 ## Quick Start
 
-### 1. Initialize Configuration
+### 1. Initialize Workdir
 
-By default, Fastclaw initializes into `~/.fastclaw`:
+Default workdir is `~/.fastclaw`:
 
 ```bash
 cargo run -- onboard init-config
 ```
 
-Initialize into a custom path:
+Use a custom path:
 
 ```bash
 cargo run -- onboard init-config --path /absolute/path/to/fastclaw-home
 ```
 
-If the target directory already exists, use `--rewrite`:
+If directory already exists, add `--rewrite`:
 
 ```bash
 cargo run -- onboard init-config --path /absolute/path/to/fastclaw-home --rewrite
@@ -74,19 +86,53 @@ cargo run -- onboard init-config --path /absolute/path/to/fastclaw-home --rewrit
 
 ### 2. Edit `config.toml`
 
-After initialization, a `config.toml` file is generated. Default example:
+A newly generated `config.toml` currently looks like:
 
 ```toml
 default_model_provider = ""
 default_model = ""
-show_reasoning = true
+default_show_reasoning = true
 
-[model_providers.custom_model_provider_name]
+[agent_settings]
+
+[model_providers]
+
+[log_config]
+level = "Info"
+
+[log_config.logger]
+logs_dir = "./logs"
+
+[heartbeat_config]
+interval = 60
+```
+
+Minimal usable example:
+
+```toml
+default_model_provider = "openai"
+default_model = "gpt-4.1-mini"
+default_show_reasoning = true
+
+[model_providers.openai]
 provider_type = "OpenaiCompatible"
-api_key = ""
+api_key = "sk-xxx"
 api_url = "https://api.openai.com/v1"
 
-[model_providers.custom_model_provider_name.models]
+[model_providers.openai.models.gpt-4.1-mini]
+vision = true
+audio = false
+video = false
+document = false
+websearch = false
+reasoning = true
+tool = true
+reranker = false
+embedding = false
+max_tokens = 65536
+
+[heartbeat_config]
+interval = 60
 
 [log_config]
 level = "Info"
@@ -95,45 +141,33 @@ level = "Info"
 logs_dir = "./logs"
 ```
 
-At minimum, you should:
-
-- Set `default_model_provider` (for example, `"custom_model_provider_name"`)
-- Set `default_model` (to a model name available from your provider)
-- Fill in `api_key`
-- Add model settings under `[model_providers.<provider>.models]`
-
-Example:
+Optional web search config (`volcengine` feature):
 
 ```toml
-default_model_provider = "openai"
-default_model = "gpt-4.1-mini"
-show_reasoning = true
-
-[model_providers.openai]
-provider_type = "OpenaiCompatible"
-api_key = "sk-xxx"
-api_url = "https://api.openai.com/v1"
-
-[model_providers.openai.models.gpt-4.1-mini]
-temperature = 0.7
-tool = true
-reasoning = true
-websearch = false
-vision = false
-audio = false
-video = false
-document = false
-reranker = false
-embedding = false
+[websearch]
+type = "volcengine"
+api_url = "https://<your-volcengine-endpoint>"
+api_key = "<your-token>"
 ```
 
-### 3. Start the Agent
+Optional DingTalk config (when `channel_dingtalk_channel` is enabled):
+
+```toml
+[dingtalk_config.credential]
+client_id = "..."
+client_secret = "..."
+
+[dingtalk_config.allow_session_ids]
+"staff_id_or_group_key" = { Master = { val = "owner", settings = {} } }
+```
+
+### 3. Start Agent
 
 ```bash
 cargo run -- start --channel Cli
 ```
 
-Or specify a custom workdir:
+With custom workdir:
 
 ```bash
 cargo run -- start --channel Cli --workdir /absolute/path/to/fastclaw-home
@@ -141,25 +175,25 @@ cargo run -- start --channel Cli --workdir /absolute/path/to/fastclaw-home
 
 ## CLI Interaction
 
-After startup, type messages at the `>>` prompt to chat.
+After startup, enter message at `>>`.
 
-Built-in console commands:
+Console commands:
 
-- `/showreasoning on`: show reasoning output
-- `/showreasoning off`: hide reasoning output
-- `/compact`: reserved, not implemented yet
+- `/compact --ratio <0.2~1.0>`: compact current session history
+- `/showreasoning on|off`: currently parsed but **not implemented** (see Known Issues)
 
-After each round, token usage is displayed as:
+Per-round usage footer:
 
 - `<<Tokens:total↑input↓output>>`
 
-## Generated Directory Layout
+## Generated Layout
 
-`onboard init-config` creates a layout like this:
+`onboard init-config` creates:
 
 ```text
 <workdir>/
   config.toml
+  db.sqlite
   workspace/
     AGENTS.md
     BOOTSTRAP.md
@@ -178,23 +212,29 @@ After each round, token usage is displayed as:
 
 ## Logging
 
-Logging is configured under `[log_config]`.
+`[log_config]` supports:
 
-- `level` supports: `Error` / `Warn` / `Info` / `Debug`
-- Default `logs_dir = "./logs"` resolves to `~/.fastclaw/logs`
+- `level`: `Error` / `Warn` / `Info` / `Debug`
+- `logger`:
+  - `Stdout`
+  - `File { logs_dir = "./logs" }` (relative path resolves to `<default_workdir>/logs`)
 
 ## Development
-
-Common commands:
 
 ```bash
 cargo fmt
 cargo clippy --all-targets --all-features
-cargo test
+cargo test --all-features
 ```
+
+## Known Issues
+
+- `/showreasoning on|off` triggers `unimplemented!()` in current code path.
+- In CLI channel, reasoning text is still printed even when `default_show_reasoning = false`; only heading/closing markers are gated.
+- `cargo test --all-features` requires `VOLCENGINE_WEBSEARCH_API_URL` and `VOLCENGINE_WEBSEARCH_API_KEY` for `volcengine` websearch test.
 
 ## Notes
 
-- Before first startup, ensure model configuration in `config.toml` is complete, otherwise agent creation may fail.
-- `start --workdir` must point to an initialized directory containing `config.toml`.
-- Startup fails if the log directory is not writable.
+- `start --workdir` must point to initialized workdir containing `config.toml`.
+- Startup fails if log directory is not writable.
+- Model creation fails if `default_model_provider`, `default_model`, or provider model settings are missing.
