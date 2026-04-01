@@ -1,34 +1,36 @@
 use derive_more::{Deref, Display};
 use serde::{Deserialize, Serialize};
+use std::fmt::{Display, Formatter};
 use std::hash::{Hash, Hasher};
 use std::ops::Deref;
 
-#[derive(Debug, Clone, Eq, PartialEq, Hash, Serialize, Deserialize, Display)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum SessionId {
-    Master(Master),
-    Anonymous(Anonymous),
-    Group(Group),
+    Master {
+        val: Master,
+        settings: SessionSettings,
+    },
+    Anonymous {
+        val: Anonymous,
+        settings: SessionSettings,
+    },
+    Group {
+        val: Group,
+        settings: SessionSettings,
+    },
 }
 
-#[cfg(test)]
-mod tests {
-    use crate::btree_map;
-    use crate::channels::{Group, Master, SessionId, UserId};
-    use std::collections::BTreeMap;
-
-    #[test]
-    fn test() {
-        let map: BTreeMap<String, SessionId> = btree_map!(
-            "group:cidUBGm9d3LTYczXMWuDIaXxg==:032615015535634423".to_string() =>  SessionId::Group(Group{
-                id: "cidUBGm9d3LTYczXMWuDIaXxg==".to_string(),
-                session_id:"group:cidUBGm9d3LTYczXMWuDIaXxg==:032615015535634423".to_string(),
-                user_id: UserId::Master(Master("032615015535634423".to_string())),
-                name: Some("GGGNNN".to_string())
-            })
-        );
-        let str = toml::to_string(&map).unwrap();
-        print!("{str}")
+impl Display for SessionId {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", &*self)
     }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(default)]
+pub struct SessionSettings {
+    pub show_reasoning: bool,
+    pub show_toolcall: bool,
 }
 
 #[derive(Debug, Clone, Eq, PartialEq, Hash, Serialize, Deserialize, Display, Deref)]
@@ -81,24 +83,11 @@ impl Deref for SessionId {
 
     fn deref(&self) -> &Self::Target {
         let val: &str = match self {
-            SessionId::Master(val) => val,
-            SessionId::Anonymous(val) => val,
-            SessionId::Group(val) => val,
+            SessionId::Master { val, .. } => val,
+            SessionId::Anonymous { val, .. } => val,
+            SessionId::Group { val, .. } => val,
         };
         val
-    }
-}
-
-impl<U> From<U> for SessionId
-where
-    U: Into<UserId>,
-{
-    fn from(value: U) -> Self {
-        let user_id = value.into();
-        match user_id {
-            UserId::Master(id) => SessionId::Master(id),
-            UserId::Anonymous(id) => SessionId::Anonymous(id),
-        }
     }
 }
 
@@ -133,9 +122,9 @@ where
 impl Into<UserId> for &SessionId {
     fn into(self) -> UserId {
         match self {
-            SessionId::Master(val) => UserId::Master(val.clone()),
-            SessionId::Anonymous(val) => UserId::Anonymous(val.clone()),
-            SessionId::Group(Group { user_id, .. }) => user_id.clone(),
+            SessionId::Master { val, .. } => UserId::Master(val.clone()),
+            SessionId::Anonymous { val, .. } => UserId::Anonymous(val.clone()),
+            SessionId::Group { val, .. } => val.user_id.clone(),
         }
     }
 }

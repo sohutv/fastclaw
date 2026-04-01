@@ -1,6 +1,6 @@
 use crate::agent::{Agent, AgentRequest, AgentResponse, Notify};
 use crate::channels::console_cmd::Console;
-use crate::channels::{Channel, ChannelContext, ChannelMessage, SessionId, UserId};
+use crate::channels::{Channel, ChannelContext, ChannelMessage, SessionId};
 use crate::config::{Config, Workspace};
 use anyhow::anyhow;
 use async_trait::async_trait;
@@ -25,7 +25,10 @@ impl CliChannel {
                 config: config.clone(),
                 workspace,
             }),
-            session_id: UserId::master("cli-session-channel").into(),
+            session_id: SessionId::Master {
+                val: "cli-session-channel".into(),
+                settings: Default::default(),
+            },
         })
     }
 }
@@ -36,7 +39,7 @@ impl Channel for CliChannel {
         self,
         agent: Arc<dyn Agent>,
     ) -> crate::Result<(Sender<AgentRequest>, JoinHandle<()>)> {
-        let Self { ctx,session_id } = self;
+        let Self { ctx, session_id } = self;
         let ctx = Arc::clone(&ctx);
         let (message_sender, mut message_receiver) = tokio::sync::mpsc::channel(32);
         let agent_message_sender = {

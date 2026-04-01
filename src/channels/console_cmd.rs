@@ -2,6 +2,7 @@ use crate::agent::{Agent, AgentResponse};
 use crate::channels::{ChannelContext, ChannelMessage, SessionId};
 use clap::Parser;
 use derive_more::FromStr;
+use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use strum::Display;
 use tokio::sync::mpsc::Sender;
@@ -22,7 +23,7 @@ pub enum Console {
     },
 }
 
-#[derive(Debug, Clone, Copy, FromStr, Display)]
+#[derive(Debug, Clone, Copy, FromStr, Display, Serialize, Deserialize)]
 pub enum ShowReasoning {
     On,
     Off,
@@ -56,9 +57,7 @@ impl Console {
                             ),
                         })
                         .await;
-                    let result = agent
-                        .session_compact(session_id, ratio)
-                        .await;
+                    let result = agent.session_compact(session_id, ratio).await;
                     let _ = channel_message_sender
                         .send(ChannelMessage {
                             session_id: session_id.clone(),

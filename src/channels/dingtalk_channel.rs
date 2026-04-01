@@ -1,8 +1,6 @@
 use crate::agent::{Agent, AgentRequest, AgentResponse, HistoryCompactResult, Notify};
 use crate::channels::console_cmd::Console;
-use crate::channels::{
-    Channel, ChannelContext, ChannelMessage, SessionId, UserId, session_id,
-};
+use crate::channels::{Channel, ChannelContext, ChannelMessage, SessionId, UserId, session_id};
 use crate::config::{Config, Workspace};
 use anyhow::anyhow;
 use async_trait::async_trait;
@@ -59,7 +57,7 @@ impl DingTalkConfig {
         self.allow_session_ids
             .values()
             .flat_map(|it| {
-                if let SessionId::Master(_) = it {
+                if let SessionId::Master { .. } = it {
                     Some(it)
                 } else {
                     None
@@ -252,20 +250,28 @@ impl dingtalk_stream::handlers::CallbackHandler for DingTalkCallbackHandler {
         let prompts = vec![
             UserContent::text(line.as_deref().unwrap_or_default()),
             match &session_id {
-                SessionId::Master(session_id) => UserContent::text(format!(
+                SessionId::Master {
+                    val: session_id, ..
+                } => UserContent::text(format!(
                     "- Whisper: **Attention**: Current session_id: {}. You are speaking to your owner",
                     session_id
                 )),
-                SessionId::Anonymous(session_id) => UserContent::text(format!(
+                SessionId::Anonymous {
+                    val: session_id, ..
+                } => UserContent::text(format!(
                     "- Whisper: **Attention**: Current session_id: {}. You are currently not interacting with your owner. Please stay vigilant.",
                     session_id
                 )),
-                SessionId::Group(session_id::Group {
-                    session_id,
-                    name: group_name,
-                    user_id,
+                SessionId::Group {
+                    val:
+                        session_id::Group {
+                            session_id,
+                            name: group_name,
+                            user_id,
+                            ..
+                        },
                     ..
-                }) => match user_id {
+                } => match user_id {
                     UserId::Master(_) => UserContent::text(format!(
                         "- Whisper: **Attention**: Current session_id: {}. This session is a group session, group_id: {}, group_name: {}. You are speaking to your owner",
                         session_id,
@@ -782,12 +788,12 @@ async fn create_robot_messages<Content: Into<MessageContent>>(
     };
     let content = content.into();
     let message = match &session_id {
-        SessionId::Master(_) | SessionId::Anonymous(_) => RobotPrivateMessage {
+        SessionId::Master { .. } | SessionId::Anonymous { .. } => RobotPrivateMessage {
             user_ids: vec![DingTalkUserId::from(session_id.deref())],
             content: content.clone(),
         }
         .into(),
-        SessionId::Group(group) => RobotGroupMessage {
+        SessionId::Group { val: group, .. } => RobotGroupMessage {
             group_id: DingTalkGroupConversationId::from(&group.id),
             content: content.clone(),
         }
