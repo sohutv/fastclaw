@@ -1,6 +1,8 @@
 use crate::agent::{Agent, AgentRequest, AgentResponse, HistoryCompactResult, Notify};
 use crate::channels::console_cmd::Console;
-use crate::channels::{Channel, ChannelContext, ChannelMessage, SessionId, UserId, session_id};
+use crate::channels::{
+    Channel, ChannelContext, ChannelMessage, SessionId, SessionSettings, UserId, session_id,
+};
 use crate::config::{Config, Workspace};
 use anyhow::anyhow;
 use async_trait::async_trait;
@@ -558,9 +560,10 @@ impl DingtalkChannel {
             AgentResponse::Start => {
                 if let AgentRespState::Wait = curr_state {
                     buff.clear();
-                    if let Some(robot_message) = create_robot_messages(
+                    if let Some(robot_message) = create_robot_messages_for_agent(
                         session_id,
                         ctx,
+                        AgentRespType::Start,
                         MessageContentText::from("正在思考..."),
                     )
                     .await
@@ -576,9 +579,10 @@ impl DingtalkChannel {
                 function: ToolFunction { name, arguments },
                 ..
             }) => {
-                if let Some(robot_message) = create_robot_messages(
+                if let Some(robot_message) = create_robot_messages_for_agent(
                     session_id,
                     ctx,
+                    AgentRespType::ToolCall,
                     MessageContentMarkdown::from((
                         format!("工具调用: {name}..."),
                         format!(
@@ -633,8 +637,13 @@ impl DingtalkChannel {
                                     ),
                                 ))
                             };
-                            if let Some(robot_message) =
-                                create_robot_messages(session_id, ctx, content).await
+                            if let Some(robot_message) = create_robot_messages_for_agent(
+                                session_id,
+                                ctx,
+                                AgentRespType::Reasoning,
+                                content,
+                            )
+                            .await
                             {
                                 let _ = dingtalk.send_message(robot_message).await;
                             }
@@ -679,26 +688,50 @@ impl DingtalkChannel {
                     buff.clear();
                     content
                 };
-                if let Some(robot_message) = create_robot_messages(session_id, ctx, content).await {
+                if let Some(robot_message) = create_robot_messages_for_agent(
+                    session_id,
+                    ctx,
+                    AgentRespType::Content,
+                    content,
+                )
+                .await
+                {
                     let _ = dingtalk.send_message(robot_message).await;
                 }
                 Ok(AgentRespState::Final)
             }
-            AgentResponse::Error(error) => Err(anyhow!("Agent error: {}", error)),
+            AgentResponse::Error(error) => {
+                if let Some(robot_message) = create_robot_messages_for_agent(
+                    session_id,
+                    ctx,
+                    AgentRespType::Error,
+                    MessageContentText::from(format!("Agent error: {}", error)),
+                )
+                .await
+                {
+                    let _ = dingtalk.send_message(robot_message).await;
+                }
+                Ok(AgentRespState::Final)
+            }
             AgentResponse::Notify(notify) => {
                 match notify {
                     Notify::Text(text) => {
-                        if let Some(robot_message) =
-                            create_robot_messages(session_id, ctx, MessageContentText::from(text))
-                                .await
+                        if let Some(robot_message) = create_robot_messages_for_agent(
+                            session_id,
+                            ctx,
+                            AgentRespType::Notify,
+                            MessageContentText::from(text),
+                        )
+                        .await
                         {
                             let _ = dingtalk.send_message(robot_message).await;
                         }
                     }
                     Notify::Markdown { title, content } => {
-                        if let Some(robot_message) = create_robot_messages(
+                        if let Some(robot_message) = create_robot_messages_for_agent(
                             session_id,
                             ctx,
+                            AgentRespType::Notify,
                             MessageContentMarkdown::from((title, &format!("{content}",))),
                         )
                         .await
@@ -712,9 +745,10 @@ impl DingtalkChannel {
             AgentResponse::HistoryCompact(result) => {
                 match result {
                     HistoryCompactResult::Ok(val) => {
-                        if let Some(robot_message) = create_robot_messages(
+                        if let Some(robot_message) = create_robot_messages_for_agent(
                             session_id,
                             ctx,
+                            AgentRespType::HistoryCompactOk,
                             MessageContentMarkdown::from((
                                 "压缩上下文完成",
                                 &format!(
@@ -736,9 +770,10 @@ impl DingtalkChannel {
                         }
                     }
                     HistoryCompactResult::Err(err_msg) => {
-                        if let Some(robot_message) = create_robot_messages(
+                        if let Some(robot_message) = create_robot_messages_for_agent(
                             session_id,
                             ctx,
+                            AgentRespType::HistoryCompactErr,
                             MessageContentText::from(err_msg),
                         )
                         .await
@@ -747,9 +782,10 @@ impl DingtalkChannel {
                         }
                     }
                     HistoryCompactResult::Ignore(msg) => {
-                        if let Some(robot_message) = create_robot_messages(
+                        if let Some(robot_message) = create_robot_messages_for_agent(
                             session_id,
                             ctx,
+                            AgentRespType::HistoryCompactIgnore,
                             MessageContentMarkdown::from((
                                 "压缩请求被忽略",
                                 format!(
@@ -773,9 +809,21 @@ impl DingtalkChannel {
     }
 }
 
-async fn create_robot_messages<Content: Into<MessageContent>>(
+pub enum AgentRespType {
+    Start,
+    ToolCall,
+    Reasoning,
+    Content,
+    Notify,
+    HistoryCompactOk,
+    HistoryCompactErr,
+    HistoryCompactIgnore,
+    Error,
+}
+async fn create_robot_messages_for_agent<Content: Into<MessageContent>>(
     session_id: &SessionId,
     ctx: &ChannelContext,
+    resp_type: AgentRespType,
     content: Content,
 ) -> Option<RobotMessage> {
     let Some(session_id) = ctx
@@ -786,6 +834,68 @@ async fn create_robot_messages<Content: Into<MessageContent>>(
     else {
         return None;
     };
+
+    let SessionSettings {
+        show_start,
+        show_toolcall,
+        show_reasoning,
+        show_notify,
+        show_compacting,
+        show_compacting_ok,
+        show_compacting_err,
+        show_compacting_ignore,
+        show_error,
+    } = session_id.settings();
+    match resp_type {
+        AgentRespType::Start => {
+            let true = show_start else {
+                return None;
+            };
+        }
+        AgentRespType::ToolCall => {
+            let true = show_toolcall else {
+                return None;
+            };
+        }
+        AgentRespType::Reasoning => {
+            let true = show_reasoning else {
+                return None;
+            };
+        }
+        AgentRespType::Content => {}
+        AgentRespType::Notify => {
+            let true = show_notify else {
+                return None;
+            };
+        }
+        AgentRespType::HistoryCompactOk => {
+            let true = (*show_compacting && *show_compacting_ok) else {
+                return None;
+            };
+        }
+        AgentRespType::HistoryCompactErr => {
+            let true = (*show_compacting && *show_compacting_err) else {
+                return None;
+            };
+        }
+        AgentRespType::HistoryCompactIgnore => {
+            let true = (*show_compacting && *show_compacting_ignore) else {
+                return None;
+            };
+        }
+        AgentRespType::Error => {
+            let true = show_error else {
+                return None;
+            };
+        }
+    }
+    create_robot_messages(&session_id, ctx, content).await
+}
+async fn create_robot_messages<Content: Into<MessageContent>>(
+    session_id: &SessionId,
+    _: &ChannelContext,
+    content: Content,
+) -> Option<RobotMessage> {
     let content = content.into();
     let message = match &session_id {
         SessionId::Master { .. } | SessionId::Anonymous { .. } => RobotPrivateMessage {

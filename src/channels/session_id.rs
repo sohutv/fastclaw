@@ -26,11 +26,44 @@ impl Display for SessionId {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+impl SessionId {
+    pub fn settings(&self) -> &SessionSettings {
+        match self {
+            SessionId::Master { settings, .. } => settings,
+            SessionId::Anonymous { settings, .. } => settings,
+            SessionId::Group { settings, .. } => settings,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct SessionSettings {
-    pub show_reasoning: bool,
+    pub show_start: bool,
     pub show_toolcall: bool,
+    pub show_reasoning: bool,
+    pub show_notify: bool,
+    pub show_compacting: bool,
+    pub show_compacting_ok: bool,
+    pub show_compacting_err: bool,
+    pub show_compacting_ignore: bool,
+    pub show_error: bool,
+}
+
+impl Default for SessionSettings {
+    fn default() -> Self {
+        Self {
+            show_start: true,
+            show_toolcall: false,
+            show_reasoning: false,
+            show_notify: false,
+            show_compacting: true,
+            show_compacting_ok: true,
+            show_compacting_err: true,
+            show_compacting_ignore: false,
+            show_error: true,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Eq, PartialEq, Hash, Serialize, Deserialize, Display, Deref)]
