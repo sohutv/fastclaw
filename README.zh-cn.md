@@ -2,33 +2,45 @@
 
 # Fastclaw
 
-[English](./README.en.md) | 中文
+[English](./README.md) | 中文
 
-Fastclaw 是一个基于 Rust 的本地终端 AI Agent。它通过 OpenAI-Compatible 模型接口工作，支持流式输出、推理内容显示、会话上下文和工具调用（如 shell、reload-self）。
+Fastclaw 是一个基于 Rust 的本地 AI Agent，支持 OpenAI-Compatible 模型提供商、多通道交互（CLI 与钉钉）、流式输出、会话历史、定时任务执行和工具调用。
 
 ## 功能特性
 
-- 基于 `tokio` + `rig-core` 的异步 Agent 运行时
+- 基于 `tokio` + `rig-core` 的异步运行时
 - OpenAI-Compatible 模型提供商接入
-- 终端交互通道（CLI）
-- 支持推理流与回答流分离输出
+- 通道支持：
+  - CLI 通道（`--channel Cli`）
+  - 钉钉通道（`--channel Dingtalk`，默认 feature 启用）
+- 支持推理流与最终回答流式输出
 - 内置工具：
-  - `shell`：在工作目录执行命令
-  - `reload-self`：触发 Agent 自重载
-- 一键初始化工作目录与默认提示模板（`workspace/*.md`）
+  - `shell`：在工作区执行 shell 命令
+  - `current-time`：返回本地 RFC3339 时间
+  - `task-list`、`task-create`、`task-detail-get`、`task-update`、`task-del`
+  - `websearch`（仅在配置 `[websearch]` 后可用）
+- 支持会话历史持久化与历史压缩（`/compact`）
+- 内置 heartbeat 后台调度 cron 任务
+- 一键初始化工作目录、默认配置和工作区模板
 
 ## 环境要求
 
-- Rust 稳定版（需支持 `edition = 2024`）
+- Rust stable（需支持 `edition = 2024`）
 - Cargo
 - 可访问的 OpenAI-Compatible API 服务
 
-## 安装与构建
+## 构建
 
 ```bash
 git clone <your-repo-url>
 cd fastclaw
 cargo build
+```
+
+如果只需要 CLI，且希望避免钉钉依赖：
+
+```bash
+cargo build --no-default-features --features "model_provider_openai_compatible,channel_cli_channel,volcengine"
 ```
 
 ## CLI 命令
@@ -39,34 +51,34 @@ fastclaw <COMMAND>
 
 可用子命令：
 
-- `onboard`：初始化配置与工作目录
-- `start`：启动 Agent
+- `onboard init-config`：初始化工作目录与默认文件
+- `start`：启动 Agent 运行时
 
-也可直接用 Cargo：
+示例：
 
 ```bash
 cargo run -- --help
-cargo run -- onboard --help
+cargo run -- onboard init-config --help
 cargo run -- start --help
 ```
 
 ## 快速开始
 
-### 1. 初始化配置
+### 1. 初始化工作目录
 
-默认会初始化到 `~/.fastclaw`：
+默认工作目录是 `~/.fastclaw`：
 
 ```bash
 cargo run -- onboard init-config
 ```
 
-指定路径初始化：
+指定自定义路径：
 
 ```bash
 cargo run -- onboard init-config --path /absolute/path/to/fastclaw-home
 ```
 
-若目标目录已存在，可用 `--rewrite` 覆盖：
+如果目录已存在，可加 `--rewrite`：
 
 ```bash
 cargo run -- onboard init-config --path /absolute/path/to/fastclaw-home --rewrite
@@ -74,19 +86,53 @@ cargo run -- onboard init-config --path /absolute/path/to/fastclaw-home --rewrit
 
 ### 2. 编辑 `config.toml`
 
-初始化后会生成 `config.toml`。默认内容示例：
+新生成的 `config.toml` 当前内容如下：
 
 ```toml
 default_model_provider = ""
 default_model = ""
-show_reasoning = true
+default_show_reasoning = true
 
-[model_providers.custom_model_provider_name]
+[agent_settings]
+
+[model_providers]
+
+[log_config]
+level = "Info"
+
+[log_config.logger]
+logs_dir = "./logs"
+
+[heartbeat_config]
+interval = 60
+```
+
+最小可用示例：
+
+```toml
+default_model_provider = "openai"
+default_model = "gpt-4.1-mini"
+default_show_reasoning = true
+
+[model_providers.openai]
 provider_type = "OpenaiCompatible"
-api_key = ""
+api_key = "sk-xxx"
 api_url = "https://api.openai.com/v1"
 
-[model_providers.custom_model_provider_name.models]
+[model_providers.openai.models.gpt-4.1-mini]
+vision = true
+audio = false
+video = false
+document = false
+websearch = false
+reasoning = true
+tool = true
+reranker = false
+embedding = false
+max_tokens = 65536
+
+[heartbeat_config]
+interval = 60
 
 [log_config]
 level = "Info"
@@ -95,36 +141,24 @@ level = "Info"
 logs_dir = "./logs"
 ```
 
-你至少需要完成：
-
-- 设置 `default_model_provider`（例如 `"custom_model_provider_name"`）
-- 设置 `default_model`（例如你可用的模型名）
-- 填写 `api_key`
-- 在 `[model_providers.<provider>.models]` 下添加对应模型配置
-
-示例：
+可选：配置 websearch（`volcengine` feature）：
 
 ```toml
-default_model_provider = "openai"
-default_model = "gpt-4.1-mini"
-show_reasoning = true
+[websearch]
+type = "volcengine"
+api_url = "https://<your-volcengine-endpoint>"
+api_key = "<your-token>"
+```
 
-[model_providers.openai]
-provider_type = "OpenaiCompatible"
-api_key = "sk-xxx"
-api_url = "https://api.openai.com/v1"
+可选：配置钉钉（启用 `channel_dingtalk_channel` 时）：
 
-[model_providers.openai.models.gpt-4.1-mini]
-temperature = 0.7
-tool = true
-reasoning = true
-websearch = false
-vision = false
-audio = false
-video = false
-document = false
-reranker = false
-embedding = false
+```toml
+[dingtalk_config.credential]
+client_id = "..."
+client_secret = "..."
+
+[dingtalk_config.allow_session_ids]
+"staff_id_or_group_key" = { Master = { val = "owner", settings = {} } }
 ```
 
 ### 3. 启动 Agent
@@ -133,33 +167,33 @@ embedding = false
 cargo run -- start --channel Cli
 ```
 
-或指定工作目录：
+指定工作目录：
 
 ```bash
 cargo run -- start --channel Cli --workdir /absolute/path/to/fastclaw-home
 ```
 
-## 交互说明（CLI）
+## CLI 交互
 
-启动后在 `>>` 提示符输入消息即可对话。
+启动后在 `>>` 输入消息。
 
-内置控制命令：
+控制命令：
 
-- `/showreasoning on`：显示推理输出
-- `/showreasoning off`：隐藏推理输出
-- `/compact`：已预留，当前尚未实现
+- `/compact --ratio <0.2~1.0>`：压缩当前会话历史
+- `/showreasoning on|off`：当前已解析但**尚未实现**（见“已知问题”）
 
-每轮输出结束后会显示 token 统计：
+每轮会显示 token 用量：
 
-- `<<Tokens:总量↑输入↓输出>>`
+- `<<Tokens:total↑input↓output>>`
 
-## 初始化后的目录结构
+## 初始化目录结构
 
-`onboard init-config` 会创建类似结构：
+`onboard init-config` 会创建：
 
 ```text
 <workdir>/
   config.toml
+  db.sqlite
   workspace/
     AGENTS.md
     BOOTSTRAP.md
@@ -178,23 +212,29 @@ cargo run -- start --channel Cli --workdir /absolute/path/to/fastclaw-home
 
 ## 日志
 
-默认日志级别在 `[log_config]` 配置。
+`[log_config]` 支持：
 
-- `level` 支持：`Error` / `Warn` / `Info` / `Debug`
-- 默认 `logs_dir = "./logs"` 会被解析到 `~/.fastclaw/logs`
+- `level`：`Error` / `Warn` / `Info` / `Debug`
+- `logger`：
+  - `Stdout`
+  - `File { logs_dir = "./logs" }`（相对路径会解析到 `<default_workdir>/logs`）
 
 ## 开发
-
-常用命令：
 
 ```bash
 cargo fmt
 cargo clippy --all-targets --all-features
-cargo test
+cargo test --all-features
 ```
 
-## 注意事项
+## 已知问题
 
-- 首次启动前请确保 `config.toml` 中模型配置完整，否则可能在创建 Agent 时失败。
-- `start` 的 `--workdir` 必须是已初始化目录，且包含 `config.toml`。
-- 若日志目录不可写，启动阶段会失败。
+- `/showreasoning on|off` 目前会触发代码中的 `unimplemented!()`。
+- CLI 通道下即使 `default_show_reasoning = false`，reasoning 文本本体仍会输出；当前只对头尾标记做了开关控制。
+- `cargo test --all-features` 运行 `volcengine` websearch 测试时需要环境变量 `VOLCENGINE_WEBSEARCH_API_URL` 和 `VOLCENGINE_WEBSEARCH_API_KEY`。
+
+## 说明
+
+- `start --workdir` 必须指向已初始化且包含 `config.toml` 的目录。
+- 日志目录不可写会导致启动失败。
+- 若 `default_model_provider`、`default_model` 或 provider 对应模型配置缺失，Agent 创建会失败。
