@@ -13,7 +13,8 @@ mod console_cmd;
 pub mod dingtalk_channel;
 
 pub mod a2a_channel;
-
+mod session_id;
+pub use session_id::*;
 #[async_trait]
 pub trait Channel {
     async fn start(
@@ -35,18 +36,3 @@ pub struct ChannelMessage {
     #[deref]
     pub message: AgentResponse,
 }
-
-#[allow(unused)]
-#[derive(Debug, Clone)]
-pub enum Session {
-    Private {
-        session_id: UserId,
-    },
-    Group {
-        session_id: Group,
-        group_name: Option<String>,
-    },
-}
-
-mod session_id;
-pub use session_id::*;

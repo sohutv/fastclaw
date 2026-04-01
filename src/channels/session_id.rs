@@ -1,4 +1,3 @@
-use crate::channels::Session;
 use derive_more::{Deref, Display};
 use serde::{Deserialize, Serialize};
 use std::hash::{Hash, Hasher};
@@ -162,22 +161,5 @@ impl From<Anonymous> for UserId {
 impl From<&Anonymous> for UserId {
     fn from(value: &Anonymous) -> Self {
         UserId::Anonymous(value.clone())
-    }
-}
-
-impl From<&SessionId> for Session {
-    fn from(value: &SessionId) -> Self {
-        match value {
-            SessionId::Master(user_id) => Session::Private {
-                session_id: user_id.into(),
-            },
-            SessionId::Anonymous(user_id) => Session::Private {
-                session_id: user_id.into(),
-            },
-            SessionId::Group(group) => Session::Group {
-                session_id: group.clone(),
-                group_name: group.name.clone(),
-            },
-        }
     }
 }

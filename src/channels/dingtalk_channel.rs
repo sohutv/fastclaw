@@ -1,7 +1,7 @@
 use crate::agent::{Agent, AgentRequest, AgentResponse, HistoryCompactResult, Notify};
 use crate::channels::console_cmd::Console;
 use crate::channels::{
-    Channel, ChannelContext, ChannelMessage, Session, SessionId, UserId, session_id,
+    Channel, ChannelContext, ChannelMessage, SessionId, UserId, session_id,
 };
 use crate::config::{Config, Workspace};
 use anyhow::anyhow;
@@ -780,24 +780,20 @@ async fn create_robot_messages<Content: Into<MessageContent>>(
     else {
         return None;
     };
-    let session = Session::from(&session_id);
     let content = content.into();
-    match session {
-        Session::Private { session_id } => Some(
-            RobotPrivateMessage {
-                user_ids: vec![DingTalkUserId::from(session_id.deref())],
-                content: content.clone(),
-            }
-            .into(),
-        ),
-        Session::Group { session_id, .. } => Some(
-            RobotGroupMessage {
-                group_id: DingTalkGroupConversationId::from(session_id.id),
-                content: content.clone(),
-            }
-            .into(),
-        ),
-    }
+    let message = match &session_id {
+        SessionId::Master(_) | SessionId::Anonymous(_) => RobotPrivateMessage {
+            user_ids: vec![DingTalkUserId::from(session_id.deref())],
+            content: content.clone(),
+        }
+        .into(),
+        SessionId::Group(group) => RobotGroupMessage {
+            group_id: DingTalkGroupConversationId::from(&group.id),
+            content: content.clone(),
+        }
+        .into(),
+    };
+    Some(message)
 }
 
 #[derive(Debug, Clone, Copy)]
