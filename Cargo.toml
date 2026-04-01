@@ -17,6 +17,7 @@ serde_json = { version = "1.0" }
 toml = { version = "1.0.7" }
 tokio = { version = "1.50", features = ["full"] }
 tokio-stream = { version = "0.1" }
+url = { version = "2.5" }
 reqwest = { version = "0.13", features = ["rustls", "json"], default-features = false }
 uuid = { version = "1.22", features = ["v4"] }
 base64 = { version = "0.22" }
