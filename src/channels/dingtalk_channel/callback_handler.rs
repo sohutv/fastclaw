@@ -1,6 +1,6 @@
 use crate::agent::{Agent, AgentRequest};
 use crate::channels::console_cmd::Console;
-use crate::channels::dingtalk_channel::{DingTalkConfig, create_robot_messages};
+use crate::channels::dingtalk_channel::{DingTalkConfig, DingtalkChannel};
 use crate::channels::{ChannelContext, ChannelMessage, SessionId, UserId, session_id};
 use async_trait::async_trait;
 use base64::Engine;
@@ -322,7 +322,7 @@ impl LifecycleListener for DingTalkCallbackHandler {
     async fn on_connected(&self, client: &DingTalkStream, websocket_url: &str) {
         let master_session_ids = self.config.master_session_ids();
         for session_id in master_session_ids {
-            let Some(message) = create_robot_messages(
+            let Some(message) = DingtalkChannel::create_robot_messages(
                 &session_id,
                 &self.ctx,
                 MessageContentMarkdown::from((
@@ -349,7 +349,7 @@ Connected to dingtalk websocket
         for session_id in master_session_ids {
             match result {
                 Ok(_) => {
-                    let Some(message) = create_robot_messages(
+                    let Some(message) = DingtalkChannel::create_robot_messages(
                         &session_id,
                         &self.ctx,
                         MessageContentText::from("disconnected from dingtalk websocket"),
@@ -361,7 +361,7 @@ Connected to dingtalk websocket
                     let _ = client.send_message(message).await;
                 }
                 Err(err) => {
-                    let Some(message) = create_robot_messages(
+                    let Some(message) = DingtalkChannel::create_robot_messages(
                         &session_id,
                         &self.ctx,
                         MessageContentMarkdown::from((
