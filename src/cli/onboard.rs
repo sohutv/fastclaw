@@ -143,5 +143,11 @@ async fn init_config_workspace(config_dir: &Path) -> crate::Result<()> {
     )
     .await?;
 
+    tokio::fs::write(
+        workspace.join("USER.md"),
+        include_str!("../../resources/CRON_TASK.md"),
+    )
+        .await?;
+
     Ok(())
 }
