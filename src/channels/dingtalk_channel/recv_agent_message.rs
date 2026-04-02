@@ -1,5 +1,5 @@
 use crate::agent::{AgentResponse, HistoryCompactResult, Notify};
-use crate::channels::dingtalk_channel::{DingtalkChannel};
+use crate::channels::dingtalk_channel::DingtalkChannel;
 use crate::channels::{ChannelContext, ChannelMessage, SessionId, SessionSettings};
 use anyhow::anyhow;
 use dingtalk_stream::DingTalkStream;
@@ -10,18 +10,19 @@ use dingtalk_stream::frames::up_message::{
 use rig::completion::{AssistantContent, Message};
 use rig::message::{ReasoningContent, ToolCall, ToolFunction};
 use std::ops::Deref;
+use std::sync::Arc;
 use tokio::sync::mpsc::Receiver;
 
 impl DingtalkChannel {
-    pub(super) async fn recv_agent_message(
-        dingtalk: &DingTalkStream,
+    pub async fn recv_agent_message(
+        dingtalk: Arc<DingTalkStream>,
         ctx: &ChannelContext,
         receiver: &mut Receiver<ChannelMessage>,
     ) -> crate::Result<()> {
         let mut state = AgentRespState::Wait;
         let mut buff = Vec::<String>::new();
         while let Some(message) = receiver.recv().await {
-            match Self::handle_agent_message(dingtalk, &*ctx, &message, state, &mut buff).await {
+            match Self::handle_agent_message(&dingtalk, &*ctx, &message, state, &mut buff).await {
                 Ok(AgentRespState::Final) | Err(_) => {
                     state = AgentRespState::Wait;
                     buff.clear();

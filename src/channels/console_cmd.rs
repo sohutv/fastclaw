@@ -6,7 +6,7 @@ use derive_more::FromStr;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use strum::Display;
-use tokio::sync::mpsc::Sender;
+use tokio::sync::mpsc::Receiver;
 
 #[derive(Debug, clap::Parser)]
 #[command(name = "/")]
@@ -35,23 +35,25 @@ impl Console {
         _: &ChannelContext,
         line: &str,
         agent: &Arc<dyn Agent>,
-        channel_message_sender: Sender<ChannelMessage>,
         session_id: &SessionId,
-    ) -> crate::Result<()> {
+    ) -> crate::Result<Receiver<ChannelMessage>> {
         let line = format!("/ {}", &line[1..]);
         match Console::try_parse_from(line.split(" ")) {
-            Ok(command) => {
-                match command {
-                    Console::ShowReasoning { state } => match state {
-                        ShowReasoning::On => {
-                            unimplemented!()
-                        }
-                        ShowReasoning::Off => {
-                            unimplemented!()
-                        }
-                    },
-                    Console::Compact { ratio } => {
-                        let _ = channel_message_sender
+            Ok(command) => match command {
+                Console::ShowReasoning { state } => match state {
+                    ShowReasoning::On => {
+                        unimplemented!()
+                    }
+                    ShowReasoning::Off => {
+                        unimplemented!()
+                    }
+                },
+                Console::Compact { ratio } => {
+                    let (tx, rx) = tokio::sync::mpsc::channel(8);
+                    let agent =Arc::clone(&agent);
+                    let session_id = session_id.clone();
+                    let _ = tokio::spawn(async move{
+                        let _ = tx
                             .send(ChannelMessage {
                                 session_id: session_id.clone(),
                                 message: AgentResponse::Notify(
@@ -59,17 +61,17 @@ impl Console {
                                 ),
                             })
                             .await;
-                        let result = agent.session_compact(session_id, ratio).await;
-                        let _ = channel_message_sender
+                        let result = agent.session_compact(&session_id, ratio).await;
+                        let _ = tx
                             .send(ChannelMessage {
-                                session_id: session_id.clone(),
+                                session_id,
                                 message: AgentResponse::HistoryCompact(result),
                             })
                             .await;
-                    }
+                    });
+                    Ok(rx)
                 }
-                Ok(())
-            }
+            },
             Err(err) => Err(anyhow!(err)),
         }
     }

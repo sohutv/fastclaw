@@ -6,8 +6,8 @@ use rig::message::{Message, Reasoning, ToolCall};
 use serde::{Deserialize, Serialize};
 use std::fmt::Display;
 use std::sync::Arc;
-use tokio::sync::mpsc::Sender;
 use tokio::sync::RwLock;
+use tokio::sync::mpsc::Sender;
 
 mod llm_agent;
 mod prompt;
@@ -41,8 +41,6 @@ pub struct AgentContext {
     pub history_manager: Option<Arc<RwLock<dyn HistoryManager>>>,
 }
 
-
-
 #[derive(Debug, Clone, Deref, Eq, PartialEq, Ord, PartialOrd, Display, Serialize, Deserialize)]
 pub struct AgentId(String);
 
@@ -67,10 +65,19 @@ pub trait LlmAgentSupplier {
 
 #[derive(Debug, Clone, Deref, Into)]
 pub struct AgentRequest {
+    pub id: RequestId,
     pub session_id: SessionId,
     #[deref]
     #[into]
     pub message: Message,
+}
+
+#[derive(Debug, Clone, Deref, Display)]
+pub struct RequestId(String);
+impl Default for RequestId {
+    fn default() -> Self {
+        Self(uuid::Uuid::new_v4().to_string())
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

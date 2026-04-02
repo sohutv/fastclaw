@@ -101,6 +101,17 @@ where
         })
     }
 
+    pub async fn fork<ID: Into<AgentId>>(&self, agent_id: ID) -> crate::Result<Self> {
+        Ok(Self {
+            id: agent_id.into(),
+            model_settings: self.model_settings.clone(),
+            agent_settings: self.agent_settings.clone(),
+            model_name: self.model_name.clone(),
+            model_provider: self.model_provider.clone(),
+            ctx: self.ctx.clone(),
+        })
+    }
+
     async fn create_agent(
         &self,
         reasoning_effort: ReasoningEffort,
@@ -283,12 +294,14 @@ where
             match vec.len() {
                 0 => None,
                 1 => Some(AgentRequest {
+                    id: Default::default(),
                     session_id: request.session_id,
                     message: Message::User {
                         content: OneOrMany::one(vec.remove(0)),
                     },
                 }),
                 2.. => OneOrMany::many(vec).ok().map(|content| AgentRequest {
+                    id: Default::default(),
                     session_id: request.session_id,
                     message: Message::User { content },
                 }),

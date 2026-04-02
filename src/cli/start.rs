@@ -65,28 +65,44 @@ impl CmdRunner for Start {
                     .await?
             }
         };
-
-        let (agent_message_sender, channel_handle) = match channel {
+        match channel {
             #[cfg(feature = "channel_cli_channel")]
             ChannelType::Cli => {
                 info!("Starting CLI channel");
                 let cli_channel = channels::cli_channel::CliChannel::new(config, workspace)?;
-                cli_channel.start(Arc::new(main_agent)).await?
+                let _ = cli_channel.start(Arc::new(main_agent)).await?.join();
             }
             #[cfg(feature = "channel_dingtalk_channel")]
             ChannelType::Dingtalk => {
                 info!("Starting Dingtalk channel");
                 let dingtalk_channel =
                     channels::dingtalk_channel::DingtalkChannel::new(config, workspace)?;
-                dingtalk_channel.start(Arc::new(main_agent)).await?
+                let channel_ctx = Arc::clone(&(dingtalk_channel.ctx));
+                let heartbeat_agent = Arc::new(main_agent.fork("heartbeat").await?);
+                let main_agent = Arc::new(main_agent);
+                let (dingtalk, chanel_join_handle) = dingtalk_channel.start(main_agent).await?;
+                let heartbeat_join_handle = {
+                    let channel_ctx = Arc::clone(&channel_ctx);
+                    let dingtalk_client = Arc::clone(&dingtalk);
+                    let heartbeat = Heartbeat::new(config, workspace, &history_manager).await?;
+                    let join_handle = heartbeat.start(
+                        heartbeat_agent,
+                        move|agent, req| {
+                            let channel_ctx = Arc::clone(&channel_ctx);
+                            let dingtalk_client = Arc::clone(&dingtalk_client);
+                            async move {
+                                let mut receiver = channels::dingtalk_channel::DingtalkChannel::spawn_agent_task(req, || agent).await?;
+                                let _ = channels::dingtalk_channel::DingtalkChannel::recv_agent_message(dingtalk_client, &channel_ctx, &mut receiver).await;
+                                Ok(())
+                            }
+                        },
+                    ).await?;
+                    join_handle
+                };
+                let _ = chanel_join_handle.await;
+                let _ = heartbeat_join_handle.await;
             }
         };
-        {
-            let mut heartbeat = Heartbeat::new(config, workspace, &history_manager).await?;
-            let _ = heartbeat.start(agent_message_sender).await?;
-        }
-        //todo let _ = heartbeat_handle.await;
-        let _ = channel_handle.join();
         Ok(())
     }
 }

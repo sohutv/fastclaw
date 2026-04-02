@@ -1,4 +1,4 @@
-use crate::agent::AgentRequest;
+use crate::agent::{Agent, AgentRequest};
 use crate::channels::{Anonymous, SessionId};
 use crate::config::{Config, Workspace};
 use crate::tools::TaskTools;
@@ -6,16 +6,21 @@ use chrono::TimeDelta;
 use log::{error, info};
 use rig::completion::Message;
 use std::str::FromStr;
+use std::sync::Arc;
 use std::time::Duration;
-use tokio::sync::mpsc::Sender;
 
 impl super::Heartbeat {
-    pub(super) async fn spawn_cron_tasks(
+    pub(super) async fn spawn_cron_tasks<F, R>(
+        agent: Arc<dyn Agent>,
         _: &'static Config,
         workspace: &Workspace,
         interval: Duration,
-        agent_message_sender: Sender<AgentRequest>,
-    ) -> crate::Result<()> {
+        task_submitter: F,
+    ) -> crate::Result<()>
+    where
+        R: Future<Output = crate::Result<()>> + Send + Sync,
+        F: (Fn(Arc<dyn Agent>, AgentRequest) -> R) + Clone,
+    {
         let tasks = TaskTools::fetch_ready_tasks(workspace).await?;
         let now = chrono::Local::now();
         let execute_deadline = TimeDelta::from_std(interval)
@@ -42,35 +47,36 @@ impl super::Heartbeat {
                                 val: Anonymous(task.session_id.clone()),
                                 settings: Default::default(),
                             };
-                            let agent_message_sender = agent_message_sender.clone();
-                            let _ = tokio::spawn(async move {
-                                match agent_message_sender
-                                    .send(AgentRequest {
-                                        session_id: session_id,
-                                        message: Message::user(format!(
-                                            r#"
+                            let submitter = task_submitter.clone();
+                            match submitter(
+                                Arc::clone(&agent),
+                                AgentRequest {
+                                    id: Default::default(),
+                                    session_id: session_id,
+                                    message: Message::user(format!(
+                                        r#"
 **Execute task immediately**: task_id: {}
 **Tips**: If the task fails, you are authorized to retry or ignore it at your discretion.
                                             "#,
-                                            task.id
-                                        )),
-                                    })
-                                    .await
-                                {
-                                    Ok(_) => {
-                                        info!(
-                                            "Task '{}' (id: {}) is ready to execute based on cron schedule: {}, next trigger: {}",
-                                            task.name, task.id, cron, next
-                                        );
-                                    }
-                                    Err(err) => {
-                                        error!(
-                                            "Failed to send agent request for task '{}': {}",
-                                            task.name, err
-                                        );
-                                    }
+                                        task.id
+                                    )),
+                                },
+                            )
+                            .await
+                            {
+                                Ok(_) => {
+                                    info!(
+                                        "Task '{}' (id: {}) is ready to execute based on cron schedule: {}, next trigger: {}",
+                                        task.name, task.id, cron, next
+                                    );
                                 }
-                            });
+                                Err(err) => {
+                                    error!(
+                                        "Failed to send agent request for task '{}': {}",
+                                        task.name, err
+                                    );
+                                }
+                            }
                         }
                     }
                 }

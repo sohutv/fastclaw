@@ -1,5 +1,5 @@
 use crate::agent::{Agent, AgentRequest};
-use crate::channels::{Channel, ChannelContext, SessionId};
+use crate::channels::{Channel, ChannelContext, ChannelMessage, SessionId};
 use crate::config::{Config, Workspace};
 use anyhow::anyhow;
 use async_trait::async_trait;
@@ -19,8 +19,8 @@ use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::ops::Deref;
 use std::sync::Arc;
-use std::thread::JoinHandle;
-use tokio::sync::mpsc::Sender;
+use tokio::sync::mpsc::Receiver;
+use tokio::task::JoinHandle;
 
 mod callback_handler;
 mod config;
@@ -33,7 +33,7 @@ pub struct DingTalkConfig {
 }
 
 pub struct DingtalkChannel {
-    ctx: Arc<ChannelContext>,
+    pub ctx: Arc<ChannelContext>,
     dingtalk_config: DingTalkConfig,
 }
 
@@ -54,21 +54,18 @@ impl DingtalkChannel {
 
 #[async_trait]
 impl Channel for DingtalkChannel {
-    async fn start(
-        self,
-        agent: Arc<dyn Agent>,
-    ) -> crate::Result<(Sender<AgentRequest>, JoinHandle<()>)> {
+    type Output = (Arc<DingTalkStream>, JoinHandle<crate::Result<()>>);
+
+    async fn start(self, agent: Arc<dyn Agent>) -> crate::Result<Self::Output> {
         let Self {
             ctx,
             dingtalk_config,
         } = self;
-        let (channel_message_sender, mut channel_message_receiver) = tokio::sync::mpsc::channel(32);
         let cb_handler = Arc::new(callback_handler::DingTalkCallbackHandler {
             ctx: Arc::clone(&ctx),
             config: dingtalk_config.clone(),
             dingtalk_bot_topic: MessageTopic::Callback(dingtalk_stream::TOPIC_ROBOT.to_string()),
             agent: Arc::clone(&agent),
-            channel_message_sender: channel_message_sender.clone(),
         });
         let (dingtalk, dingtalk_stream_handle) = Arc::new(
             DingTalkStream::new(dingtalk_config.credential)
@@ -79,48 +76,31 @@ impl Channel for DingtalkChannel {
         )
         .start()
         .await?;
-        let agent_request_sender = {
-            let (agent_request_sender, mut agent_request_receiver) =
-                tokio::sync::mpsc::channel::<AgentRequest>(1);
-            tokio::spawn(async move {
-                while let Some(req) = agent_request_receiver.recv().await {
-                    let task_id = uuid::Uuid::new_v4().to_string();
-                    match agent.run(req, channel_message_sender.clone()).await {
-                        Ok(_) => {
-                            info!("Agent run completed, task_id: {}", task_id);
-                        }
-                        Err(err) => {
-                            error!("Agent run failed, task_id: {}, error: {}", task_id, err);
-                        }
-                    }
+        Ok((dingtalk, dingtalk_stream_handle))
+    }
+}
+impl DingtalkChannel {
+    pub async fn spawn_agent_task<F>(
+        req: AgentRequest,
+        agent_supplier: F,
+    ) -> crate::Result<Receiver<ChannelMessage>>
+    where
+        F: FnOnce() -> Arc<dyn Agent>,
+    {
+        let agent = agent_supplier();
+        let (channel_message_sender, channel_message_receiver) = tokio::sync::mpsc::channel(32);
+        tokio::spawn(async move {
+            let task_id = req.id.clone();
+            match agent.run(req, channel_message_sender.clone()).await {
+                Ok(_) => {
+                    info!("Agent run completed, task_id: {}", task_id);
                 }
-            });
-            agent_request_sender
-        };
-
-        let join_handle = std::thread::spawn(move || {
-            let rt = tokio::runtime::Builder::new_current_thread()
-                .enable_all()
-                .build()
-                .expect("unexpected err");
-            let agent_handle = {
-                let ctx = Arc::clone(&ctx);
-                let dingtalk = Arc::clone(&dingtalk);
-                rt.spawn(async move {
-                    let _ = DingtalkChannel::recv_agent_message(
-                        &dingtalk,
-                        &ctx,
-                        &mut channel_message_receiver,
-                    )
-                    .await;
-                })
-            };
-            rt.block_on(async {
-                let _ = dingtalk_stream_handle.await;
-                let _ = agent_handle.await;
-            });
+                Err(err) => {
+                    error!("Agent run failed, task_id: {}, error: {}", task_id, err);
+                }
+            }
         });
-        Ok((agent_request_sender, join_handle))
+        Ok(channel_message_receiver)
     }
 }
 impl DingtalkChannel {

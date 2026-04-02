@@ -1,7 +1,7 @@
-use crate::agent::{Agent, AgentRequest};
+use crate::agent::{Agent, AgentRequest, RequestId};
 use crate::channels::console_cmd::Console;
 use crate::channels::dingtalk_channel::{DingTalkConfig, DingtalkChannel};
-use crate::channels::{ChannelContext, ChannelMessage, SessionId, UserId, session_id};
+use crate::channels::{ChannelContext, SessionId, UserId, session_id};
 use async_trait::async_trait;
 use base64::Engine;
 use dingtalk_stream::{
@@ -22,7 +22,7 @@ use dingtalk_stream::{
     handlers::{Error as HandlerError, ErrorCode, LifecycleListener, Resp as HandlerResp},
 };
 use itertools::Itertools;
-use log::{error, info};
+use log::{info, warn};
 use rig::OneOrMany;
 use rig::completion::Message;
 use rig::message::{DocumentSourceKind, Image, ImageDetail, ImageMediaType, UserContent};
@@ -37,14 +37,13 @@ pub(super) struct DingTalkCallbackHandler {
     pub(super) config: DingTalkConfig,
     pub(super) dingtalk_bot_topic: MessageTopic,
     pub(super) agent: Arc<dyn Agent>,
-    pub(super) channel_message_sender: Sender<ChannelMessage>,
 }
 
 #[async_trait]
 impl dingtalk_stream::handlers::CallbackHandler for DingTalkCallbackHandler {
     async fn process(
         &self,
-        dingtalk_client: &DingTalkStream,
+        dingtalk_client: Arc<DingTalkStream>,
         CallbackMessage { data, .. }: &CallbackMessage,
         cb_msg_sender: Option<Sender<WebhookMessage>>,
     ) -> Result<HandlerResp, HandlerError> {
@@ -113,7 +112,7 @@ impl dingtalk_stream::handlers::CallbackHandler for DingTalkCallbackHandler {
             }
             MessagePayload::Picture { content: picture } => {
                 let downloads_dir = self.ctx.workspace.path.join("downloads");
-                match picture.fetch(dingtalk_client, downloads_dir).await {
+                match picture.fetch(&dingtalk_client, downloads_dir).await {
                     Ok((filepath, image)) => {
                         (None, None, Some(vec![(1usize, filepath, image)]), None)
                     }
@@ -122,7 +121,7 @@ impl dingtalk_stream::handlers::CallbackHandler for DingTalkCallbackHandler {
             }
             MessagePayload::File { content } => {
                 let downloads_dir = self.ctx.workspace.path.join("downloads");
-                match content.fetch(dingtalk_client, downloads_dir).await {
+                match content.fetch(&dingtalk_client, downloads_dir).await {
                     Ok((filepath, _)) => (None, None, None, Some(vec![filepath])),
                     Err(e) => (
                         None,
@@ -143,7 +142,7 @@ impl dingtalk_stream::handlers::CallbackHandler for DingTalkCallbackHandler {
                             texts.push(text.to_string());
                         }
                         RichTextItem::Picture(picture) => {
-                            match picture.fetch(dingtalk_client, downloads_dir.clone()).await {
+                            match picture.fetch(&dingtalk_client, downloads_dir.clone()).await {
                                 Ok((filepath, image)) => {
                                     img_idx += 1;
                                     pictures.push((img_idx, filepath, image));
@@ -165,16 +164,14 @@ impl dingtalk_stream::handlers::CallbackHandler for DingTalkCallbackHandler {
             }
         };
         let line = if let Some(cmd_val) = &cmd {
-            match Console::handle_console_cmd(
-                &self.ctx,
-                &cmd_val,
-                &self.agent,
-                self.channel_message_sender.clone(),
-                &session_id,
-            )
-            .await
-            {
-                Ok(()) => {
+            match Console::handle_console_cmd(&self.ctx, &cmd_val, &self.agent, &session_id).await {
+                Ok(mut receiver) => {
+                    let client = Arc::clone(&dingtalk_client);
+                    let ctx = Arc::clone(&self.ctx);
+                    let _ = tokio::spawn(async move {
+                        let _ =
+                            DingtalkChannel::recv_agent_message(client, &ctx, &mut receiver).await;
+                    });
                     return Ok(HandlerResp::Text("cmd submitted".to_string()));
                 }
                 Err(_) => {}
@@ -282,34 +279,51 @@ impl dingtalk_stream::handlers::CallbackHandler for DingTalkCallbackHandler {
         let Some(user_content) = user_content else {
             return Ok(HandlerResp::Text("no content to submit".to_string()));
         };
+
+        let msg_id = msg_id.clone();
+        info!("Submit task to agent, msg_id: {}", msg_id);
+        let task_id = RequestId::default();
+        let agent = Arc::clone(&self.agent);
+        match DingtalkChannel::spawn_agent_task(
+            AgentRequest {
+                id: task_id.clone(),
+                session_id,
+                message: Message::User {
+                    content: user_content,
+                },
+            },
+            move || agent,
+        )
+        .await
         {
-            let msg_id = msg_id.clone();
-            info!("Submit task to agent, msg_id: {}", msg_id);
-            let agent = Arc::clone(&self.agent);
-            let channel_message_sender = self.channel_message_sender.clone();
-            tokio::spawn(async move {
-                match agent
-                    .run(
-                        AgentRequest {
-                            session_id,
-                            message: Message::User {
-                                content: user_content,
-                            },
-                        },
-                        channel_message_sender.clone(),
-                    )
-                    .await
+            Ok(receiver) => {
+                let msg = format!(
+                    "Submit agent task ok, msg_id: {}, task_id: {}",
+                    msg_id, task_id
+                );
+                info!("{msg}");
                 {
-                    Ok(_) => {
-                        info!("Agent run completed, task_id: {}", msg_id);
-                    }
-                    Err(err) => {
-                        error!("Agent run failed, task_id: {}, error: {}", msg_id, err);
-                    }
+                    let mut receiver = receiver;
+                    let client = Arc::clone(&dingtalk_client);
+                    let ctx = Arc::clone(&self.ctx);
+                    let _ = tokio::spawn(async move {
+                        let _ =
+                            DingtalkChannel::recv_agent_message(client, &ctx, &mut receiver).await;
+                    });
                 }
-            });
+                Ok(HandlerResp::Text(msg))
+            }
+            Err(err) => {
+                warn!(
+                    "Agent run failed, msg_id: {}, task_id: {}, error: {}",
+                    msg_id, task_id, err
+                );
+                Ok(HandlerResp::Text(format!(
+                    "Submit agent task failed, msg_id: {}, task_id: {}",
+                    msg_id, task_id
+                )))
+            }
         }
-        Ok(HandlerResp::Text(format!("task submitted: {}", msg_id)))
     }
 
     fn topic(&self) -> &MessageTopic {
@@ -319,7 +333,7 @@ impl dingtalk_stream::handlers::CallbackHandler for DingTalkCallbackHandler {
 
 #[async_trait]
 impl LifecycleListener for DingTalkCallbackHandler {
-    async fn on_connected(&self, client: &DingTalkStream, websocket_url: &str) {
+    async fn on_connected(&self, client: Arc<DingTalkStream>, websocket_url: &str) {
         let master_session_ids = self.config.master_session_ids();
         for session_id in master_session_ids {
             let Some(message) = DingtalkChannel::create_robot_messages(
@@ -344,7 +358,11 @@ Connected to dingtalk websocket
         }
     }
 
-    async fn on_disconnected(&self, client: &DingTalkStream, result: &dingtalk_stream::Result<()>) {
+    async fn on_disconnected(
+        &self,
+        client: Arc<DingTalkStream>,
+        result: &dingtalk_stream::Result<()>,
+    ) {
         let master_session_ids = self.config.master_session_ids();
         for session_id in master_session_ids {
             match result {

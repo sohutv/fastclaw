@@ -1,10 +1,8 @@
-use crate::agent::{Agent, AgentRequest, AgentResponse};
+use crate::agent::{Agent, AgentResponse};
 use crate::config::{Config, Workspace};
 use async_trait::async_trait;
 use derive_more::Deref;
 use std::sync::Arc;
-use std::thread::JoinHandle;
-use tokio::sync::mpsc::Sender;
 
 #[cfg(feature = "channel_cli_channel")]
 pub mod cli_channel;
@@ -17,10 +15,9 @@ mod session_id;
 pub use session_id::*;
 #[async_trait]
 pub trait Channel {
-    async fn start(
-        self,
-        agent: Arc<dyn Agent>,
-    ) -> crate::Result<(Sender<AgentRequest>, JoinHandle<()>)>;
+    type Output;
+
+    async fn start(self, agent: Arc<dyn Agent>) -> crate::Result<Self::Output>;
 }
 
 #[allow(unused)]

@@ -5,7 +5,6 @@ use log::error;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::RwLock;
-use tokio::sync::mpsc::Sender;
 use tokio::task::JoinHandle;
 mod spawn_cron_tasks;
 
@@ -46,27 +45,37 @@ impl Heartbeat {
         })
     }
 
-    pub async fn start(
-        &mut self,
-        agent_message_sender: Sender<AgentRequest>,
-    ) -> crate::Result<JoinHandle<()>> {
+    pub async fn start<F, R>(
+        self,
+        agent: Arc<dyn Agent>,
+        task_submitter: F,
+    ) -> crate::Result<JoinHandle<()>>
+    where
+        R: Future<Output = crate::Result<()>> + Send + Sync,
+        F: (Fn(Arc<dyn Agent>, AgentRequest) -> R) + Clone+Sync+Send+'static,
+    {
         let config = self.config;
         let workspace = self.workspace;
         let interval_dur = self.interval;
         let mut interval = tokio::time::interval(interval_dur);
-        let handle = tokio::spawn(async move {
-            loop {
-                tokio::select! {
-                    _ = interval.tick() => {
-                        match Self::spawn_cron_tasks(config,workspace, interval_dur,agent_message_sender.clone()).await{
-                            Ok(_)=>{}
-                            Err(e)=>{error!("Failed to fetch cron tasks: {}",e)}
-                        }
-                    },
-                    _ = tokio::signal::ctrl_c() => break,
+
+        let handle = {
+            tokio::spawn(async move {
+                let agent = Arc::clone(&agent);
+                let task_submitter =task_submitter;
+                loop {
+                    tokio::select! {
+                        _ = interval.tick() => {
+                            match Self::spawn_cron_tasks(Arc::clone(&agent), config,workspace, interval_dur,task_submitter.clone()).await{
+                                Ok(_)=>{}
+                                Err(e)=>{error!("Failed to fetch cron tasks: {}",e)}
+                            }
+                        },
+                        _ = tokio::signal::ctrl_c() => break,
+                    }
                 }
-            }
-        });
+            })
+        };
         Ok(handle)
     }
 }

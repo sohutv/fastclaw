@@ -30,7 +30,7 @@ async-trait = { version = "0.1" }
 sqlx = { version = "0.8", features = ["runtime-tokio", "sqlite"] }
 cron = { version = "0.16" }
 rustyline = { version = "17.0", optional = true }
-dingtalk-stream-sdk = { version = "0.2.0", features = ["image"], optional = true }
+dingtalk-stream-sdk = { version = "0.2", features = ["image"], optional = true }
 
 image = { version = "0.25" }
 [features]

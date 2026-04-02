@@ -11,7 +11,7 @@ use rustyline::error::ReadlineError;
 use std::io::{Write, stdout};
 use std::sync::Arc;
 use std::thread::JoinHandle;
-use tokio::sync::mpsc::{Receiver, Sender};
+use tokio::sync::mpsc::Receiver;
 
 pub struct CliChannel {
     ctx: Arc<ChannelContext>,
@@ -35,24 +35,12 @@ impl CliChannel {
 
 #[async_trait]
 impl Channel for CliChannel {
-    async fn start(
-        self,
-        agent: Arc<dyn Agent>,
-    ) -> crate::Result<(Sender<AgentRequest>, JoinHandle<()>)> {
+    type Output = JoinHandle<()>;
+
+    async fn start(self, agent: Arc<dyn Agent>) -> crate::Result<Self::Output> {
         let Self { ctx, session_id } = self;
         let ctx = Arc::clone(&ctx);
         let (message_sender, mut message_receiver) = tokio::sync::mpsc::channel(32);
-        let agent_message_sender = {
-            let (agent_message_sender, mut agent_message_receiver) = tokio::sync::mpsc::channel(1);
-            let message_sender = message_sender.clone();
-            let agent = Arc::clone(&agent);
-            tokio::spawn(async move {
-                while let Some(req) = agent_message_receiver.recv().await {
-                    let _ = agent.run(req, message_sender.clone()).await;
-                }
-            });
-            agent_message_sender
-        };
         let join_handle = std::thread::spawn(move || {
             let rt = tokio::runtime::Builder::new_current_thread()
                 .enable_all()
@@ -71,7 +59,6 @@ impl Channel for CliChannel {
                                         &ctx,
                                         &line,
                                         &agent,
-                                        message_sender.clone(),
                                         &session_id,
                                     )
                                     .await
@@ -86,6 +73,7 @@ impl Channel for CliChannel {
                                 let _ = agent
                                     .run(
                                         AgentRequest {
+                                            id: Default::default(),
                                             session_id: session_id.clone(),
                                             message,
                                         },
@@ -106,7 +94,7 @@ impl Channel for CliChannel {
                 }
             });
         });
-        Ok((agent_message_sender, join_handle))
+        Ok(join_handle)
     }
 }
 
