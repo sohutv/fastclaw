@@ -2,7 +2,6 @@ use crate::config::Workspace;
 use crate::tools::ToolCallError;
 use crate::tools::task_tool::{CREATE_TASK_TABLE, TaskEnabled, TaskInfo, TaskRunState, TaskTools};
 use anyhow::anyhow;
-use chrono::{DateTime, Local};
 use itertools::Itertools;
 use log::warn;
 
@@ -43,12 +42,9 @@ impl TaskTools {
         Ok(tasks)
     }
 
-    pub async fn mark_task_executed_at(
-        workspace: &Workspace,
-        task_id: u64,
-    ) -> crate::Result<()> {
-        let task_id = i64::try_from(task_id)
-            .map_err(|_| anyhow!("task id {} is out of range", task_id))?;
+    pub async fn mark_task_executed_at(workspace: &Workspace, task_id: u64) -> crate::Result<()> {
+        let task_id =
+            i64::try_from(task_id).map_err(|_| anyhow!("task id {} is out of range", task_id))?;
         sqlx::query(
             "update `cron_task` set `last_exe_at` = CURRENT_TIMESTAMP, `updated_at` = CURRENT_TIMESTAMP where `id` = ? and `deleted` = 0",
         )
