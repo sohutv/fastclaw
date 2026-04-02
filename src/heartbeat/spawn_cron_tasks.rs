@@ -35,7 +35,7 @@ impl super::Heartbeat {
                     if let Some(next) = schedule.after(&last_exe_at).next() {
                         if next <= execute_deadline {
                             if let Err(err) =
-                                TaskTools::mark_task_executed_at(workspace, task.id, next).await
+                                TaskTools::mark_task_executed_at(workspace, task.id).await
                             {
                                 error!(
                                     "Failed to update last_exe_at for task '{}' (id: {}): {}",

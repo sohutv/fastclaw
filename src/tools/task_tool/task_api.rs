@@ -46,14 +46,12 @@ impl TaskTools {
     pub async fn mark_task_executed_at(
         workspace: &Workspace,
         task_id: u64,
-        execute_at: DateTime<Local>,
     ) -> crate::Result<()> {
         let task_id = i64::try_from(task_id)
             .map_err(|_| anyhow!("task id {} is out of range", task_id))?;
         sqlx::query(
-            "update `cron_task` set `last_exe_at` = ?, `updated_at` = CURRENT_TIMESTAMP where `id` = ? and `deleted` = 0",
+            "update `cron_task` set `last_exe_at` = CURRENT_TIMESTAMP, `updated_at` = CURRENT_TIMESTAMP where `id` = ? and `deleted` = 0",
         )
-        .bind(execute_at.format("%Y-%m-%d %H:%M:%S").to_string())
         .bind(task_id)
         .execute(&workspace.sql_pool)
         .await
