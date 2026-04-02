@@ -2,7 +2,9 @@ use crate::config::Workspace;
 use crate::tools::ToolCallError;
 use crate::tools::task_tool::{CREATE_TASK_TABLE, TaskEnabled, TaskInfo, TaskRunState, TaskTools};
 use anyhow::anyhow;
+use chrono::{DateTime, Local};
 use itertools::Itertools;
+use log::warn;
 
 impl TaskTools {
     pub async fn init_cron_task(workspace: &Workspace) -> crate::Result<()> {
@@ -10,6 +12,16 @@ impl TaskTools {
             .execute(&workspace.sql_pool)
             .await
             .map_err(|err| ToolCallError(format!("{err}")))?;
+        if let Err(err) = sqlx::query("alter table `cron_task` add column `last_exe_at` TIMESTAMP")
+            .execute(&workspace.sql_pool)
+            .await
+        {
+            let err_msg = err.to_string();
+            if !err_msg.contains("duplicate column name") {
+                return Err(ToolCallError(format!("{err}")).into());
+            }
+            warn!("cron_task.last_exe_at already exists");
+        }
         Ok(())
     }
 
@@ -29,5 +41,23 @@ impl TaskTools {
             .flat_map(|row| TaskInfo::try_from(row))
             .collect_vec();
         Ok(tasks)
+    }
+
+    pub async fn mark_task_executed_at(
+        workspace: &Workspace,
+        task_id: u64,
+        execute_at: DateTime<Local>,
+    ) -> crate::Result<()> {
+        let task_id = i64::try_from(task_id)
+            .map_err(|_| anyhow!("task id {} is out of range", task_id))?;
+        sqlx::query(
+            "update `cron_task` set `last_exe_at` = ?, `updated_at` = CURRENT_TIMESTAMP where `id` = ? and `deleted` = 0",
+        )
+        .bind(execute_at.format("%Y-%m-%d %H:%M:%S").to_string())
+        .bind(task_id)
+        .execute(&workspace.sql_pool)
+        .await
+        .map_err(|err| anyhow!(err))?;
+        Ok(())
     }
 }

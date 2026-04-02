@@ -80,8 +80,17 @@ impl Tool for TaskListTool {
 - **session_id**: {},
 - **run_state**: {},
 - **enabled**: {},
+- **last_exe_at**: {},
 "#,
-                    task.name, task.id, task.cron, task.session_id, task.run_state, task.enabled,
+                    task.name,
+                    task.id,
+                    task.cron,
+                    task.session_id,
+                    task.run_state,
+                    task.enabled,
+                    task.last_exe_at
+                        .map(|it| it.format("%Y-%m-%d %H:%M:%S").to_string())
+                        .unwrap_or_else(|| "never".to_string()),
                 ));
             }
         }

@@ -42,6 +42,7 @@ pub struct TaskInfo {
     pub enabled: TaskEnabled,
     pub created_at: chrono::DateTime<Local>,
     pub updated_at: chrono::DateTime<Local>,
+    pub last_exe_at: Option<chrono::DateTime<Local>>,
     pub creator: String,
 }
 
@@ -79,6 +80,14 @@ impl TryFrom<SqliteRow> for TaskInfo {
                     .and_utc()
                     .with_timezone(&Local)
             },
+            last_exe_at: {
+                let ts: Option<String> = row.try_get("last_exe_at")?;
+                ts.map(|ts| {
+                    chrono::NaiveDateTime::parse_from_str(&ts, "%Y-%m-%d %H:%M:%S")
+                        .map(|dt| dt.and_utc().with_timezone(&Local))
+                })
+                .transpose()?
+            },
             creator: row.try_get("creator")?,
         })
     }
@@ -112,6 +121,7 @@ create table if not exists cron_task
     enabled      INTEGER   DEFAULT 1,
     created_at   TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at   TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    last_exe_at  TIMESTAMP,
     deleted      INTEGER   DEFAULT 0,
     creator      TEXT NOT NULL
 );

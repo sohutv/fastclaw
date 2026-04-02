@@ -3,6 +3,7 @@ use crate::channels::{Anonymous, SessionId};
 use crate::config::{Config, Workspace};
 use crate::model_provider::ModelProviders;
 use crate::tools::TaskTools;
+use chrono::TimeDelta;
 use log::{error, info};
 use rig::completion::Message;
 use std::str::FromStr;
@@ -83,16 +84,26 @@ impl Heartbeat {
     ) -> crate::Result<()> {
         let tasks = TaskTools::fetch_ready_tasks(workspace).await?;
         let now = chrono::Local::now();
+        let execute_deadline = TimeDelta::from_std(interval)
+            .map(|delta| now + delta)
+            .unwrap_or(now);
         for task in tasks {
             let cron = task.cron;
             // Parse cron expression and check if current time matches
             match cron::Schedule::from_str(&cron) {
                 Ok(schedule) => {
-                    // Check if task should execute within the next minute
-                    if let Some(next) = schedule.upcoming(chrono::Local).next() {
-                        let time_until_seconds = next.signed_duration_since(now).num_seconds();
-                        if time_until_seconds < interval.as_secs() as i64 && time_until_seconds >= 0
-                        {
+                    let last_exe_at = task.last_exe_at.unwrap_or(task.created_at);
+                    if let Some(next) = schedule.after(&last_exe_at).next() {
+                        if next <= execute_deadline {
+                            if let Err(err) =
+                                TaskTools::mark_task_executed_at(workspace, task.id, next).await
+                            {
+                                error!(
+                                    "Failed to update last_exe_at for task '{}' (id: {}): {}",
+                                    task.name, task.id, err
+                                );
+                                continue;
+                            }
                             let session_id = SessionId::Anonymous {
                                 val: Anonymous(task.session_id.clone()),
                                 settings: Default::default(),
@@ -114,8 +125,8 @@ impl Heartbeat {
                                 {
                                     Ok(_) => {
                                         info!(
-                                            "Task '{}' (id: {}) is ready to execute based on cron schedule: {}",
-                                            task.name, task.id, cron
+                                            "Task '{}' (id: {}) is ready to execute based on cron schedule: {}, next trigger: {}",
+                                            task.name, task.id, cron, next
                                         );
                                     }
                                     Err(err) => {

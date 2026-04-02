@@ -72,6 +72,7 @@ impl Tool for TaskDetailGetTool {
 - **enabled**: {},
 - **created_at**: {},
 - **updated_at**: {},
+- **last_exe_at**: {},
 - **creator**: {}
 - **desc**:
 ```
@@ -85,6 +86,9 @@ impl Tool for TaskDetailGetTool {
             task.enabled,
             task.created_at.format("%Y-%m-%d %H:%M:%S"),
             task.updated_at.format("%Y-%m-%d %H:%M:%S"),
+            task.last_exe_at
+                .map(|it| it.format("%Y-%m-%d %H:%M:%S").to_string())
+                .unwrap_or_else(|| "never".to_string()),
             task.creator,
             task.desc,
         )))
