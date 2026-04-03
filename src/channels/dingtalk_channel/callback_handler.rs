@@ -182,6 +182,12 @@ impl dingtalk_stream::handlers::CallbackHandler for DingTalkCallbackHandler {
         };
         let prompts = vec![
             UserContent::text(line.as_deref().unwrap_or_default()),
+            UserContent::text(format!(
+                r#"
+- Whisper: **MetaData**: Current DateTime {}
+            "#,
+                chrono::Local::now().to_rfc3339()
+            )),
             match &session_id {
                 SessionId::Master {
                     val: session_id, ..

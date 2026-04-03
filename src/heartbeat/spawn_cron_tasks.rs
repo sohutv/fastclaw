@@ -2,7 +2,6 @@ use crate::agent::{Agent, AgentRequest};
 use crate::channels::{Anonymous, SessionId};
 use crate::config::{Config, Workspace};
 use crate::tools::TaskTools;
-use chrono::TimeDelta;
 use log::{error, info};
 use rig::completion::Message;
 use std::str::FromStr;
@@ -14,18 +13,15 @@ impl super::Heartbeat {
         agent: Arc<dyn Agent>,
         _: &'static Config,
         workspace: &Workspace,
-        interval: Duration,
+        _: Duration,
         task_submitter: F,
     ) -> crate::Result<()>
     where
         R: Future<Output = crate::Result<()>> + Send + Sync,
-        F: (Fn(Arc<dyn Agent>, AgentRequest) -> R) + Clone,
+        F: (Fn(Arc<dyn Agent>, AgentRequest) -> R),
     {
         let tasks = TaskTools::fetch_ready_tasks(workspace).await?;
         let now = chrono::Local::now();
-        let execute_deadline = TimeDelta::from_std(interval)
-            .map(|delta| now + delta)
-            .unwrap_or(now);
         for task in tasks {
             let cron = task.cron;
             // Parse cron expression and check if current time matches
@@ -33,22 +29,12 @@ impl super::Heartbeat {
                 Ok(schedule) => {
                     let last_exe_at = task.last_exe_at.unwrap_or(task.created_at);
                     if let Some(next) = schedule.after(&last_exe_at).next() {
-                        if next <= execute_deadline {
-                            if let Err(err) =
-                                TaskTools::mark_task_executed_at(workspace, task.id).await
-                            {
-                                error!(
-                                    "Failed to update last_exe_at for task '{}' (id: {}): {}",
-                                    task.name, task.id, err
-                                );
-                                continue;
-                            }
+                        if next < now {
                             let session_id = SessionId::Anonymous {
                                 val: Anonymous(task.session_id.clone()),
                                 settings: Default::default(),
                             };
-                            let submitter = task_submitter.clone();
-                            match submitter(
+                            match task_submitter(
                                 Arc::clone(&agent),
                                 AgentRequest {
                                     id: Default::default(),
@@ -56,9 +42,11 @@ impl super::Heartbeat {
                                     message: Message::user(format!(
                                         r#"
 **Execute task immediately**: task_id: {}
-**Tips**: If the task fails, you are authorized to retry or ignore it at your discretion.
+- **CurrentTime**: {}
+- **Tips**: If the task fails, you are authorized to retry or ignore it at your discretion.
                                             "#,
-                                        task.id
+                                        task.id,
+                                        now.to_rfc3339(),
                                     )),
                                 },
                             )
@@ -69,6 +57,14 @@ impl super::Heartbeat {
                                         "Task '{}' (id: {}) is ready to execute based on cron schedule: {}, next trigger: {}",
                                         task.name, task.id, cron, next
                                     );
+                                    if let Err(err) =
+                                        TaskTools::mark_task_executed(workspace, task.id).await
+                                    {
+                                        error!(
+                                            "Failed to update last_exe_at for task '{}' (id: {}): {}",
+                                            task.name, task.id, err
+                                        );
+                                    }
                                 }
                                 Err(err) => {
                                     error!(

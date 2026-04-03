@@ -42,7 +42,7 @@ impl TaskTools {
         Ok(tasks)
     }
 
-    pub async fn mark_task_executed_at(workspace: &Workspace, task_id: u64) -> crate::Result<()> {
+    pub async fn mark_task_executed(workspace: &Workspace, task_id: u64) -> crate::Result<()> {
         let task_id =
             i64::try_from(task_id).map_err(|_| anyhow!("task id {} is out of range", task_id))?;
         sqlx::query(

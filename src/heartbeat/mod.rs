@@ -52,7 +52,7 @@ impl Heartbeat {
     ) -> crate::Result<JoinHandle<()>>
     where
         R: Future<Output = crate::Result<()>> + Send + Sync,
-        F: (Fn(Arc<dyn Agent>, AgentRequest) -> R) + Clone+Sync+Send+'static,
+        F: (Fn(Arc<dyn Agent>, AgentRequest) -> R) + Clone + Sync + Send + 'static,
     {
         let config = self.config;
         let workspace = self.workspace;
@@ -62,7 +62,7 @@ impl Heartbeat {
         let handle = {
             tokio::spawn(async move {
                 let agent = Arc::clone(&agent);
-                let task_submitter =task_submitter;
+                let task_submitter = task_submitter;
                 loop {
                     tokio::select! {
                         _ = interval.tick() => {
