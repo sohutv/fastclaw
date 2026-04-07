@@ -24,6 +24,7 @@ pub trait Agent: Send + Sync {
         &self,
         request: AgentRequest,
         channel_message_sender: Sender<ChannelMessage>,
+        addi_system_prompt: Option<&str>,
     ) -> crate::Result<()>;
 
     async fn session_compact(

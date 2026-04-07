@@ -83,6 +83,7 @@ impl DingtalkChannel {
     pub async fn spawn_agent_task<F>(
         req: AgentRequest,
         agent_supplier: F,
+        addi_system_prompt: Option<String>,
     ) -> crate::Result<Receiver<ChannelMessage>>
     where
         F: FnOnce() -> Arc<dyn Agent>,
@@ -91,7 +92,7 @@ impl DingtalkChannel {
         let (channel_message_sender, channel_message_receiver) = tokio::sync::mpsc::channel(32);
         tokio::spawn(async move {
             let task_id = req.id.clone();
-            match agent.run(req, channel_message_sender.clone()).await {
+            match agent.run(req, channel_message_sender.clone(), addi_system_prompt.as_deref()).await {
                 Ok(_) => {
                     info!("Agent run completed, task_id: {}", task_id);
                 }

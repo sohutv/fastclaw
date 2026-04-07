@@ -115,6 +115,7 @@ where
     async fn create_agent(
         &self,
         reasoning_effort: ReasoningEffort,
+        addi_system_prompt: Option<&str>,
     ) -> crate::Result<Agent<C::CompletionModel>>
     where
         P: ModelProvider<Client = C>,
@@ -138,6 +139,7 @@ where
             "#,
                 &self.id
             ))
+            .append_preamble(addi_system_prompt.unwrap_or_default())
             .tools(crate::tools::FunctionTool::required_tools(Arc::clone(&self.ctx)).await?)
             .temperature(self.agent_settings.temperature)
             .default_max_turns(self.agent_settings.max_turns)
@@ -167,8 +169,9 @@ where
         &self,
         request: AgentRequest,
         channel_message_sender: Sender<ChannelMessage>,
+        addi_system_prompt: Option<&str>,
     ) -> crate::Result<()> {
-        self.run_actual(request, channel_message_sender.clone())
+        self.run_actual(request, channel_message_sender, addi_system_prompt)
             .await?;
         Ok(())
     }
@@ -208,8 +211,15 @@ where
         &self,
         request: AgentRequest,
         channel_message_sender: Sender<ChannelMessage>,
+        addi_system_prompt: Option<&str>,
     ) -> crate::Result<()> {
-        let Some(ref request @ AgentRequest { ref session_id, .. }) = self.request_filter(request)
+        let Some(
+            ref request @ AgentRequest {
+                ref session_id,
+                ref message,
+                ..
+            },
+        ) = self.request_filter(request)
         else {
             return Ok(());
         };
@@ -229,9 +239,30 @@ where
             (vec![], Default::default())
         };
         let agent = self
-            .create_agent(self.agent_settings.reasoning_effort)
+            .create_agent(self.agent_settings.reasoning_effort, addi_system_prompt)
             .await?;
-        let mut stream = agent.stream_chat(request.clone(), history).await;
+
+        let message = match message {
+            Message::System { .. } => message.clone(),
+            Message::User { content, .. } => Message::User {
+                content: OneOrMany::many(
+                    vec![
+                        content.clone().into_iter().collect_vec(),
+                        vec![UserContent::text(format!(
+                            r#"
+- **Current DateTime**: {}
+            "#,
+                            chrono::Local::now().to_rfc3339()
+                        ))],
+                    ]
+                    .into_iter()
+                    .flatten()
+                    .collect_vec(),
+                )?,
+            },
+            Message::Assistant { .. } => message.clone(),
+        };
+        let mut stream = agent.stream_chat(message, history).await;
         while let Some(result) = stream.next().await {
             let response = match result {
                 Ok(MultiTurnStreamItem::StreamAssistantItem(content)) => match content {
@@ -401,7 +432,7 @@ where
             let tail_tokens = original_usage.total_tokens - head_tokens;
             ((head.to_vec(), head_tokens), (tail.to_vec(), tail_tokens))
         };
-        let agent = match self.create_agent(ReasoningEffort::Minimal).await {
+        let agent = match self.create_agent(ReasoningEffort::Minimal, None).await {
             Ok(agent) => agent,
             Err(err) => return HistoryCompactResult::Err(format!("创建agent失败, err: {err}")),
         };

@@ -91,7 +91,7 @@ impl CmdRunner for Start {
                             let channel_ctx = Arc::clone(&channel_ctx);
                             let dingtalk_client = Arc::clone(&dingtalk_client);
                             async move {
-                                let mut receiver = channels::dingtalk_channel::DingtalkChannel::spawn_agent_task(req, || agent).await?;
+                                let mut receiver = channels::dingtalk_channel::DingtalkChannel::spawn_agent_task(req, || agent, None).await?;
                                 let _ = channels::dingtalk_channel::DingtalkChannel::recv_agent_message(dingtalk_client, &channel_ctx, &mut receiver).await;
                                 Ok(())
                             }

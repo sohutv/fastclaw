@@ -78,6 +78,7 @@ impl Channel for CliChannel {
                                             message,
                                         },
                                         message_sender.clone(),
+                                        None,
                                     )
                                     .await;
                                 let _ = Self::poll_agent_message(&ctx, &mut message_receiver).await;
