@@ -2,7 +2,7 @@
 //! https://www.volcengine.com/docs/87772/2272953?lang=zh
 //!
 
-use crate::config::{ApiKey, ApiUrl};
+use crate::config::{ApiKey, ApiUrl, Workspace};
 use crate::service_provider::{
     AuthDegree, Timerange, Websearch, WebsearchConfig, WebsearchQueryArgs, WebsearchResult,
     WebsearchResultContext,
@@ -36,7 +36,11 @@ impl WebsearchConfig for VolcengineWebsearchConfig {
 
 #[async_trait]
 impl Websearch for VolcengineWebsearch {
-    async fn search(&self, args: WebsearchQueryArgs) -> crate::Result<WebsearchResult> {
+    async fn search(
+        &self,
+        _: &'static Workspace,
+        args: WebsearchQueryArgs,
+    ) -> crate::Result<WebsearchResult> {
         let WebsearchQueryArgs {
             query,
             count,
@@ -44,8 +48,7 @@ impl Websearch for VolcengineWebsearch {
         } = &args;
         // YYYY-MM-DD..YYYY-MM-DD
         let timerange = format!("{}..{}", from.format("%Y-%m-%d"), to.format("%Y-%m-%d"));
-        let response = reqwest::Client::builder()
-            .build()?
+        let response = reqwest::Client::default()
             .post(self.config.api_url.as_str())
             .header(
                 "Authorization",
@@ -206,6 +209,7 @@ impl VolcengineWebsearchConfig {
 
 #[cfg(test)]
 mod tests {
+    use crate::config::Workspace;
     use crate::service_provider::volcengine::websearch::VolcengineWebsearchConfig;
     use crate::service_provider::{Websearch, WebsearchConfig};
 
@@ -213,7 +217,8 @@ mod tests {
     async fn test_websearch() -> crate::Result<()> {
         let config = VolcengineWebsearchConfig::from_env()?;
         let websearch = config.try_into_websearch().await?;
-        let result = websearch.search("热点事件".into()).await?;
+        let workspace: &'static Workspace = Box::leak(Box::new(Workspace::init("/tmp").await?));
+        let result = websearch.search(workspace, "热点事件".into()).await?;
         println!("{}", serde_json::to_string_pretty(&result)?);
         Ok(())
     }

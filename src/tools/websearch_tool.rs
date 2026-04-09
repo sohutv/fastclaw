@@ -84,40 +84,43 @@ impl Tool for WebSearchTool {
             Err(err) => return Ok(ToolCallRsult::error(err.to_string())),
         };
         let search_result = websearch
-            .search(WebsearchQueryArgs {
-                query: query.into(),
-                count: top_k.unwrap_or(5),
-                timerange: {
-                    let timerange_from = if let Some(timerange_from) = timerange_from {
-                        let Ok(timerange_from) =
-                            chrono::NaiveDate::parse_from_str(&timerange_from, "%Y-%m-%d")
-                        else {
-                            return Ok(ToolCallRsult::error(
-                                "Invalid timerange_from format. Expected format: YYYY-MM-DD",
-                            ));
+            .search(
+                self.ctx.workspace,
+                WebsearchQueryArgs {
+                    query: query.into(),
+                    count: top_k.unwrap_or(5),
+                    timerange: {
+                        let timerange_from = if let Some(timerange_from) = timerange_from {
+                            let Ok(timerange_from) =
+                                chrono::NaiveDate::parse_from_str(&timerange_from, "%Y-%m-%d")
+                            else {
+                                return Ok(ToolCallRsult::error(
+                                    "Invalid timerange_from format. Expected format: YYYY-MM-DD",
+                                ));
+                            };
+                            timerange_from
+                        } else {
+                            chrono::Local::now().date_naive() - Duration::days(7)
                         };
-                        timerange_from
-                    } else {
-                        chrono::Local::now().date_naive() - Duration::days(7)
-                    };
-                    let timerange_to = if let Some(timerange_to) = timerange_to {
-                        let Ok(timerange_to) =
-                            chrono::NaiveDate::parse_from_str(&timerange_to, "%Y-%m-%d")
-                        else {
-                            return Ok(ToolCallRsult::error(
-                                "Invalid timerange_to format. Expected format: YYYY-MM-DD",
-                            ));
+                        let timerange_to = if let Some(timerange_to) = timerange_to {
+                            let Ok(timerange_to) =
+                                chrono::NaiveDate::parse_from_str(&timerange_to, "%Y-%m-%d")
+                            else {
+                                return Ok(ToolCallRsult::error(
+                                    "Invalid timerange_to format. Expected format: YYYY-MM-DD",
+                                ));
+                            };
+                            timerange_to
+                        } else {
+                            chrono::Local::now().date_naive()
                         };
-                        timerange_to
-                    } else {
-                        chrono::Local::now().date_naive()
-                    };
-                    Timerange {
-                        from: timerange_from,
-                        to: timerange_to,
-                    }
+                        Timerange {
+                            from: timerange_from,
+                            to: timerange_to,
+                        }
+                    },
                 },
-            })
+            )
             .await;
         match search_result {
             Ok(search_result) => {

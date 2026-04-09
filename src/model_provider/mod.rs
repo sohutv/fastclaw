@@ -2,7 +2,7 @@ use derive_more::{Deref, Display, From, FromStr};
 use rig::client::CompletionClient;
 use serde::{Deserialize, Serialize};
 use std::fmt::Debug;
-
+use crate::ModelName;
 #[cfg(feature = "model_provider_openai_compatible")]
 pub mod openai_compatible;
 
@@ -42,21 +42,7 @@ impl Default for ModelProviders {
     Display,
 )]
 pub struct ModelProviderName(String);
-#[derive(
-    Debug,
-    Clone,
-    Serialize,
-    Deserialize,
-    From,
-    FromStr,
-    Deref,
-    Eq,
-    PartialEq,
-    Ord,
-    PartialOrd,
-    Default,
-)]
-pub struct ModelName(String);
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct ModelSettings {

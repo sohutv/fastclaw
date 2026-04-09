@@ -6,8 +6,8 @@ use rig::message::{Message, Reasoning, ToolCall};
 use serde::{Deserialize, Serialize};
 use std::fmt::Display;
 use std::sync::Arc;
-use tokio::sync::RwLock;
 use tokio::sync::mpsc::Sender;
+use tokio::sync::RwLock;
 
 mod llm_agent;
 mod prompt;
@@ -16,8 +16,8 @@ mod session_history;
 pub use session_history::{HistoryManager, JsonlHistoryManager};
 
 use crate::config::{Config, Workspace};
-use crate::model_provider::{ModelName, ModelProviderName, ReasoningEffort};
-
+use crate::model_provider::{ModelProviderName, ReasoningEffort};
+use crate::ModelName;
 #[async_trait]
 pub trait Agent: Send + Sync {
     async fn run(

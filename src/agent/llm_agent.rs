@@ -1,10 +1,11 @@
+use crate::ModelName;
 use crate::agent::{
     AgentContext, AgentId, AgentRequest, AgentResponse, AgentSettings, HistoryCompactResult,
     HistoryCompactVal, HistoryManager, LlmAgentSupplier, Workspace,
 };
 use crate::channels::{ChannelMessage, SessionId};
 use crate::config::Config;
-use crate::model_provider::{ModelName, ModelProvider, ModelSettings, ReasoningEffort};
+use crate::model_provider::{ModelProvider, ModelSettings, ReasoningEffort};
 use anyhow::anyhow;
 use async_trait::async_trait;
 use itertools::Itertools;

@@ -111,7 +111,7 @@ impl dingtalk_stream::handlers::CallbackHandler for DingTalkCallbackHandler {
                 }
             }
             MessagePayload::Picture { content: picture } => {
-                let downloads_dir = self.ctx.workspace.path.join("downloads");
+                let downloads_dir = self.ctx.workspace.downloads_path().to_path_buf();
                 match picture.fetch(&dingtalk_client, downloads_dir).await {
                     Ok((filepath, image)) => {
                         (None, None, Some(vec![(1usize, filepath, image)]), None)
@@ -120,7 +120,7 @@ impl dingtalk_stream::handlers::CallbackHandler for DingTalkCallbackHandler {
                 }
             }
             MessagePayload::File { content } => {
-                let downloads_dir = self.ctx.workspace.path.join("downloads");
+                let downloads_dir = self.ctx.workspace.downloads_path().to_path_buf();
                 match content.fetch(&dingtalk_client, downloads_dir).await {
                     Ok((filepath, _)) => (None, None, None, Some(vec![filepath])),
                     Err(e) => (
@@ -132,7 +132,7 @@ impl dingtalk_stream::handlers::CallbackHandler for DingTalkCallbackHandler {
                 }
             }
             MessagePayload::RichText { content } => {
-                let downloads_dir = self.ctx.workspace.path.join("downloads");
+                let downloads_dir = self.ctx.workspace.downloads_path().to_path_buf();
                 let mut texts = vec![];
                 let mut pictures = vec![];
                 let mut img_idx = 0;

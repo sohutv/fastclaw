@@ -2,7 +2,8 @@ use crate::agent::AgentId;
 use crate::btree_map;
 use crate::config::logger::LogConfig;
 use crate::config::{AgentSettings, Config};
-use crate::model_provider::{ModelName, ModelProviderName, ModelProviders};
+use crate::model_provider::{ModelProviderName, ModelProviders};
+use crate::ModelName;
 use anyhow::anyhow;
 use std::path::PathBuf;
 

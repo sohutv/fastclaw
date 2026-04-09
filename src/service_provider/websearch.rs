@@ -3,6 +3,7 @@ use serde::{Deserialize, Serialize};
 use std::fmt::Display;
 use std::sync::Arc;
 use strum::Display;
+use crate::config::Workspace;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type")]
@@ -14,7 +15,7 @@ pub enum WebsearchConfigs {
 
 #[async_trait]
 pub trait Websearch: Sync + Send {
-    async fn search(&self, args: WebsearchQueryArgs) -> crate::Result<WebsearchResult>;
+    async fn search(&self, workspace: &'static Workspace, args: WebsearchQueryArgs) -> crate::Result<WebsearchResult>;
 }
 
 #[async_trait]

@@ -11,6 +11,7 @@ mod heartbeat;
 mod service_provider;
 
 mod type_;
+use type_::*;
 
 pub type Result<T, E = anyhow::Error> = anyhow::Result<T, E>;
 

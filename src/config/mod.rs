@@ -1,7 +1,8 @@
+use crate::ModelName;
 use crate::agent::{AgentId, AgentSettings};
 use crate::channels::dingtalk_channel::DingTalkConfig;
 use crate::config::logger::LogConfig;
-use crate::model_provider::{ModelName, ModelProviderName, ModelProviders};
+use crate::model_provider::{ModelProviderName, ModelProviders};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
