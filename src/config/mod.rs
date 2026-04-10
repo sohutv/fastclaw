@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
 mod r#type;
-use crate::service_provider::WebsearchConfigs;
+use crate::service_provider::{ImageGenConfigs, WebsearchConfigs};
 pub use r#type::*;
 
 mod config_;
@@ -26,6 +26,7 @@ pub struct Config {
     #[serde(default)]
     pub heartbeat_config: HeartbeatConfig,
     pub websearch: Option<WebsearchConfigs>,
+    pub imagegen: Option<ImageGenConfigs>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

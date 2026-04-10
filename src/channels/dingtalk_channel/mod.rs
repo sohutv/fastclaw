@@ -92,7 +92,14 @@ impl DingtalkChannel {
         let (channel_message_sender, channel_message_receiver) = tokio::sync::mpsc::channel(32);
         tokio::spawn(async move {
             let task_id = req.id.clone();
-            match agent.run(req, channel_message_sender.clone(), addi_system_prompt.as_deref()).await {
+            match agent
+                .run(
+                    req,
+                    channel_message_sender.clone(),
+                    addi_system_prompt.as_deref(),
+                )
+                .await
+            {
                 Ok(_) => {
                     info!("Agent run completed, task_id: {}", task_id);
                 }

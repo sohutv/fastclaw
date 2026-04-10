@@ -1,7 +1,8 @@
-use super::super::image_gen::*;
+use super::super::imagegen::*;
 use crate::ModelName;
 use crate::config::{ApiKey, ApiUrl, Workspace};
 use anyhow::anyhow;
+use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use std::str::FromStr;
@@ -18,16 +19,18 @@ pub struct VolcengineImageGen {
     config: VolcengineImageGenConfig,
 }
 
+#[async_trait]
 impl ImageGenConfig for VolcengineImageGenConfig {
     type T = VolcengineImageGen;
 
-    async fn try_into_image_gen(&self) -> crate::Result<Self::T> {
+    async fn try_into_imagegen(&self) -> crate::Result<Self::T> {
         Ok(VolcengineImageGen {
             config: self.clone(),
         })
     }
 }
 
+#[async_trait]
 impl ImageGen for VolcengineImageGen {
     async fn generate(
         &self,
@@ -116,13 +119,13 @@ impl VolcengineImageGenConfig {
 #[cfg(test)]
 mod tests {
     use crate::config::Workspace;
-    use crate::service_provider::volcengine::image_gen::VolcengineImageGenConfig;
+    use crate::service_provider::volcengine::imagegen::VolcengineImageGenConfig;
     use crate::service_provider::{Image, ImageGen, ImageGenConfig, ImageGenResult};
 
     #[tokio::test]
     async fn test_image_gen() -> crate::Result<()> {
         let config = VolcengineImageGenConfig::from_env()?;
-        let websearch = config.try_into_image_gen().await?;
+        let websearch = config.try_into_imagegen().await?;
         let workspace: &'static Workspace = Box::leak(Box::new(Workspace::init("/tmp").await?));
         let ImageGenResult { images, .. } = websearch
             .generate(workspace, "一只阿拉蕾风格的兔子".into())

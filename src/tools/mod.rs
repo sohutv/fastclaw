@@ -1,4 +1,5 @@
 use crate::agent::AgentContext;
+use crate::tools::imagegen_tool::ImageGenTool;
 use crate::tools::websearch_tool::WebSearchTool;
 use rig::tool::ToolDyn;
 use serde::Serialize;
@@ -11,6 +12,8 @@ pub(crate) use task_tool::TaskTools;
 mod time_tool;
 
 mod websearch_tool;
+
+mod imagegen_tool;
 
 #[derive(Debug, Copy, Clone, serde::Deserialize)]
 pub enum RiskLevel {
@@ -57,6 +60,11 @@ impl FunctionTool {
             vec![Box::new(time_tool::CurrentTimeTool)],
             if let Some(_) = ctx.config.websearch {
                 vec![Box::new(WebSearchTool::new(Arc::clone(&ctx))?)]
+            } else {
+                vec![]
+            },
+            if let Some(_) = ctx.config.imagegen {
+                vec![Box::new(ImageGenTool::new(Arc::clone(&ctx))?)]
             } else {
                 vec![]
             },

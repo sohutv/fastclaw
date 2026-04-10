@@ -40,7 +40,10 @@ pub struct InitConfig {
 impl CmdRunner for InitConfig {
     async fn run(&self) -> crate::Result<()> {
         let Self { path, rewrite } = self;
-        let workdir = path.as_deref().map(|it| it.to_owned()).unwrap_or_else(|| Config::default_workdir());
+        let workdir = path
+            .as_deref()
+            .map(|it| it.to_owned())
+            .unwrap_or_else(|| Config::default_workdir());
         if workdir.exists() {
             if workdir.is_file() {
                 return Err(anyhow!(
@@ -51,17 +54,11 @@ impl CmdRunner for InitConfig {
             if *rewrite {
                 tokio::fs::remove_dir_all(&workdir).await?;
             } else {
-                return Err(anyhow!(
-                    "Workdir already exists at {}",
-                    workdir.display()
-                ));
+                return Err(anyhow!("Workdir already exists at {}", workdir.display()));
             }
         }
         if workdir.exists() {
-            return Err(anyhow!(
-                "Workdir already exists at {}",
-                workdir.display()
-            ));
+            return Err(anyhow!("Workdir already exists at {}", workdir.display()));
         }
         tokio::fs::create_dir_all(&workdir).await?;
         init_config_file(&workdir).await?;
@@ -147,7 +144,7 @@ async fn init_config_workspace(config_dir: &Path) -> crate::Result<()> {
         workspace.join("USER.md"),
         include_str!("../../resources/CRON_TASK.md"),
     )
-        .await?;
+    .await?;
 
     Ok(())
 }

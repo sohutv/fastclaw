@@ -1,7 +1,7 @@
-use std::str::FromStr;
 use derive_more::{Deref, From, FromStr};
-use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use serde::de::Error;
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
+use std::str::FromStr;
 use url::Url;
 
 #[derive(Debug, Clone, Serialize, Deserialize, FromStr, From, Deref, Eq, PartialEq, Default)]

@@ -1,8 +1,8 @@
+use crate::ModelName;
 use derive_more::{Deref, Display, From, FromStr};
 use rig::client::CompletionClient;
 use serde::{Deserialize, Serialize};
 use std::fmt::Debug;
-use crate::ModelName;
 #[cfg(feature = "model_provider_openai_compatible")]
 pub mod openai_compatible;
 

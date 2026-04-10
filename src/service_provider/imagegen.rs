@@ -1,7 +1,29 @@
 use crate::config::Workspace;
+use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use std::fmt::Display;
 use std::path::PathBuf;
+use std::sync::Arc;
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "type")]
+pub enum ImageGenConfigs {
+    #[cfg(feature = "volcengine")]
+    #[serde(rename = "volcengine")]
+    Volcengine(super::volcengine::imagegen::VolcengineImageGenConfig),
+}
+
+impl ImageGenConfigs {
+    pub async fn try_into_imagegen(&self) -> crate::Result<Arc<dyn ImageGen>> {
+        match self {
+            #[cfg(feature = "volcengine")]
+            ImageGenConfigs::Volcengine(config) => {
+                let imagegen = config.try_into_imagegen().await?;
+                Ok(Arc::new(imagegen))
+            }
+        }
+    }
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ImageGenArgs {
@@ -36,6 +58,7 @@ pub enum Image {
     File(PathBuf),
 }
 
+#[async_trait]
 pub trait ImageGen: Sync + Send {
     async fn generate(
         &self,
@@ -44,7 +67,8 @@ pub trait ImageGen: Sync + Send {
     ) -> crate::Result<ImageGenResult>;
 }
 
+#[async_trait]
 pub trait ImageGenConfig: Sync + Send {
     type T: ImageGen;
-    async fn try_into_image_gen(&self) -> crate::Result<Self::T>;
+    async fn try_into_imagegen(&self) -> crate::Result<Self::T>;
 }

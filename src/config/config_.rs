@@ -1,9 +1,9 @@
+use crate::ModelName;
 use crate::agent::AgentId;
 use crate::btree_map;
 use crate::config::logger::LogConfig;
 use crate::config::{AgentSettings, Config};
 use crate::model_provider::{ModelProviderName, ModelProviders};
-use crate::ModelName;
 use anyhow::anyhow;
 use std::path::PathBuf;
 
@@ -46,6 +46,7 @@ impl Default for Config {
             dingtalk_config: None,
             heartbeat_config: Default::default(),
             websearch: None,
+            imagegen: None,
         }
     }
 }

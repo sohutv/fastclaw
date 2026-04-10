@@ -50,9 +50,9 @@ impl Console {
                 },
                 Console::Compact { ratio } => {
                     let (tx, rx) = tokio::sync::mpsc::channel(8);
-                    let agent =Arc::clone(&agent);
+                    let agent = Arc::clone(&agent);
                     let session_id = session_id.clone();
-                    let _ = tokio::spawn(async move{
+                    let _ = tokio::spawn(async move {
                         let _ = tx
                             .send(ChannelMessage {
                                 session_id: session_id.clone(),
