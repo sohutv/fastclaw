@@ -1,10 +1,10 @@
 use crate::agent::AgentContext;
 use crate::tools::imagegen_tool::ImageGenTool;
 use crate::tools::websearch_tool::WebSearchTool;
+use derive_more::From;
 use rig::tool::ToolDyn;
 use serde::Serialize;
 use std::sync::Arc;
-use derive_more::From;
 
 mod memory_tool;
 mod shell_tool;
@@ -15,6 +15,9 @@ mod time_tool;
 mod websearch_tool;
 
 mod imagegen_tool;
+
+#[cfg(feature = "cloud_storage_tool")]
+mod cloud_storage_tool;
 
 #[derive(Debug, Copy, Clone, serde::Deserialize)]
 pub enum RiskLevel {
@@ -66,6 +69,12 @@ impl FunctionTool {
             },
             if let Some(_) = ctx.config.imagegen {
                 vec![Box::new(ImageGenTool::new(Arc::clone(&ctx))?)]
+            } else {
+                vec![]
+            },
+            #[cfg(feature = "cloud_storage_tool")]
+            if let Some(_) = ctx.config.storage {
+                cloud_storage_tool::CloudStorageTools::create(Arc::clone(&ctx)).await?
             } else {
                 vec![]
             },

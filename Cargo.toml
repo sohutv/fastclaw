@@ -41,7 +41,7 @@ image = { version = "0.25" }
 model_provider_openai_compatible = []
 channel_cli_channel = ["rustyline"]
 channel_dingtalk_channel = ["dingtalk-stream-sdk"]
-
+cloud_storage_tool = []
 volcengine = [
     "ve-tos-rust-sdk"
 ]
