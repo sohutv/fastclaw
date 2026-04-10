@@ -6,3 +6,7 @@ pub use websearch::*;
 
 mod imagegen;
 pub use imagegen::*;
+
+mod storage;
+
+pub use storage::*;
