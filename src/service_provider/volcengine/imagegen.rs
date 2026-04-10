@@ -36,8 +36,26 @@ impl ImageGen for VolcengineImageGen {
     async fn generate(
         &self,
         workspace: &'static Workspace,
-        ImageGenArgs { prompt }: ImageGenArgs,
+        ImageGenArgs { prompt, images }: ImageGenArgs,
     ) -> crate::Result<ImageGenResult> {
+        let images = {
+            let images = if let Some(images) = images {
+                images.as_base64().await?
+            } else {
+                vec![]
+            };
+            match images.len() {
+                0 => serde_json::Value::Null,
+                1 => {
+                    let Some(image) = images.first().map(|it| &**it) else {
+                        unreachable!()
+                    };
+                    serde_json::Value::String(image.clone())
+                }
+                _ => serde_json::to_value(&images[..14])?,
+            }
+        };
+
         let response = reqwest::Client::default()
             .post(self.config.api_url.as_str())
             .header(
@@ -48,6 +66,7 @@ impl ImageGen for VolcengineImageGen {
             .json(&json!({
                 "model": self.config.model.as_str(),
                 "prompt": &prompt,
+                "image": &images,
                 "size": "2K",
                 "output_format": "png",
                 "watermark": false,
@@ -139,6 +158,7 @@ mod tests {
                 Image::File { path: filepath, .. } => {
                     println!("image-file: {}", filepath.display())
                 }
+                _ => {}
             }
         }
         Ok(())
