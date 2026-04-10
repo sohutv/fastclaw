@@ -61,6 +61,7 @@ pub struct StoreResult {
     pub signed_url: Url,
 }
 
+#[allow(unused)]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LoadArgs {
     pub key: ObjectKey,
@@ -81,6 +82,7 @@ pub struct LoadResult {
     pub request_id: String,
 }
 
+#[allow(unused)]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DelArgs {
     pub key: ObjectKey,
@@ -122,12 +124,14 @@ pub trait Storage: Sync + Send {
         args: StoreArgs,
     ) -> crate::Result<StoreResult>;
 
+    #[allow(unused)]
     async fn load(
         &self,
         workspace: &'static Workspace,
         args: LoadArgs,
     ) -> crate::Result<LoadResult>;
 
+    #[allow(unused)]
     async fn del(&self, workspace: &'static Workspace, args: DelArgs) -> crate::Result<DelResult>;
 }
 
