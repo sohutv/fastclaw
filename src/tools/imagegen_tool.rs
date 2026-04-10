@@ -36,6 +36,8 @@ impl Tool for ImageGenTool {
             name: Self::NAME.to_string(),
             description: r#"
 Generate images from a text prompt.
+- Optionally provide 1-14 reference images via `images` to guide generation.
+- If an `images` item is a URL, it must be the full URL including all query parameters; do not truncate it.
 - Returns local image file paths under the workspace downloads directory.
 - Use this when the user asks to draw, design, or visualize ideas.
 "#
@@ -46,6 +48,15 @@ Generate images from a text prompt.
                     "prompt": {
                         "type": "string",
                         "description": "The text prompt used to generate images."
+                    },
+                    "images": {
+                        "type": "array",
+                        "description": "Optional reference images used to guide generation. Each item can be a local file path or image URL. If using URL, provide the complete URL including all query parameters; do not truncate it.",
+                        "items": {
+                            "type": "string"
+                        },
+                        "minItems": 1,
+                        "maxItems": 14
                     }
                 },
                 "required": ["prompt"]
@@ -98,7 +109,8 @@ Generate images from a text prompt.
                                     .store(
                                         self.ctx.workspace,
                                         StoreArgs {
-                                            key: path.display().to_string().into(),
+                                            key: format!("{}.{}", uuid::Uuid::new_v4(), format)
+                                                .into(),
                                             mime: format.into(),
                                             content: Content::File(path),
                                         },
