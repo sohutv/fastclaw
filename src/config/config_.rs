@@ -47,6 +47,7 @@ impl Default for Config {
             heartbeat_config: Default::default(),
             websearch: None,
             imagegen: None,
+            storage: None,
         }
     }
 }

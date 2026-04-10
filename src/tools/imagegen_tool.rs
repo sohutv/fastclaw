@@ -1,6 +1,7 @@
 use crate::agent::AgentContext;
-use crate::service_provider::Image;
+use crate::service_provider::{Content, Image, StoreArgs, StoreResult};
 use crate::tools::{ToolCallError, ToolCallRsult};
+use itertools::Itertools;
 use rig::completion::ToolDefinition;
 use rig::tool::Tool;
 use serde_json::json;
@@ -65,16 +66,45 @@ Generate images from a text prompt.
                 if result.images.is_empty() {
                     return Ok(ToolCallRsult::error("no images generated"));
                 }
-                let output = result
-                    .images
+                let images = if let Some(storage_config) = &self.ctx.config.storage {
+                    let storage = storage_config
+                        .try_into_storage()
+                        .await
+                        .map_err(|err| ToolCallError(format!("{err}")))?;
+                    let mut vec = Vec::with_capacity(result.images.len());
+                    for image in result.images {
+                        let url = match image {
+                            Image::File { path, format } => {
+                                let StoreResult { signed_url, .. } = storage
+                                    .store(
+                                        self.ctx.workspace,
+                                        StoreArgs {
+                                            key: path.display().to_string().into(),
+                                            mime: format.into(),
+                                            content: Content::File(path),
+                                        },
+                                    )
+                                    .await
+                                    .map_err(|err| ToolCallError(format!("{err}")))?;
+                                signed_url
+                            }
+                        };
+                        vec.push(url.to_string());
+                    }
+                    vec
+                } else {
+                    result
+                        .images
+                        .into_iter()
+                        .map(|it| match it {
+                            Image::File { path, .. } => path.display().to_string(),
+                        })
+                        .collect_vec()
+                };
+                let output = images
                     .iter()
                     .enumerate()
-                    .map(|(idx, image)| match image {
-                        Image::File(filepath) => {
-                            format!("- image {}: {}", idx + 1, filepath.to_string_lossy())
-                        }
-                    })
-                    .collect::<Vec<_>>()
+                    .map(|(idx, image)| format!("- image {}: {}", idx + 1, image))
                     .join("\n");
                 Ok(ToolCallRsult::ok(output))
             }

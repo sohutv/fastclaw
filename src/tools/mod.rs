@@ -4,6 +4,7 @@ use crate::tools::websearch_tool::WebSearchTool;
 use rig::tool::ToolDyn;
 use serde::Serialize;
 use std::sync::Arc;
+use derive_more::From;
 
 mod memory_tool;
 mod shell_tool;
@@ -22,7 +23,7 @@ pub enum RiskLevel {
     High,
 }
 
-#[derive(Debug, thiserror::Error)]
+#[derive(Debug, thiserror::Error, From)]
 #[error("{0}")]
 pub struct ToolCallError(String);
 
@@ -68,7 +69,7 @@ impl FunctionTool {
             } else {
                 vec![]
             },
-            task_tool::TaskTools::create(Arc::clone(&ctx)).await?,
+            TaskTools::create(Arc::clone(&ctx)).await?,
         ];
         Ok(tools.into_iter().flatten().collect())
     }

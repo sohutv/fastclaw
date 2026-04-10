@@ -1,6 +1,7 @@
 use super::super::imagegen::*;
 use crate::ModelName;
 use crate::config::{ApiKey, ApiUrl, Workspace};
+use crate::service_provider::ImgFormat::Png;
 use anyhow::anyhow;
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
@@ -99,7 +100,10 @@ impl Response {
                 .downloads_path()
                 .join(format!("{}.png", uuid::Uuid::new_v4()));
             let _ = tokio::fs::write(&filepath, bytes).await?;
-            let _ = images.push(Image::File(filepath));
+            let _ = images.push(Image::File {
+                path: filepath,
+                format: Png,
+            });
         }
         Ok(ImageGenResult { images })
     }
@@ -132,7 +136,9 @@ mod tests {
             .await?;
         for image in images {
             match image {
-                Image::File(filepath) => println!("image-file: {}", filepath.display()),
+                Image::File { path: filepath, .. } => {
+                    println!("image-file: {}", filepath.display())
+                }
             }
         }
         Ok(())

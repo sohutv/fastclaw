@@ -55,7 +55,21 @@ pub struct ImageGenResult {
 #[derive(Debug, Clone)]
 pub enum Image {
     //Url(url::Url),
-    File(PathBuf),
+    File { path: PathBuf, format: ImgFormat },
+}
+#[derive(Debug, Clone, Copy)]
+pub enum ImgFormat {
+    Jpg,
+    Png,
+}
+
+impl From<ImgFormat> for mime::Mime {
+    fn from(value: ImgFormat) -> Self {
+        match value {
+            ImgFormat::Jpg => mime::IMAGE_JPEG,
+            ImgFormat::Png => mime::IMAGE_PNG,
+        }
+    }
 }
 
 #[async_trait]

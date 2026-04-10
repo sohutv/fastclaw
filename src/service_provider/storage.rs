@@ -54,6 +54,7 @@ impl Content {
 }
 
 #[derive(Debug, Clone)]
+#[allow(unused)]
 pub struct StoreResult {
     pub key: ObjectKey,
     pub request_id: String,
@@ -72,6 +73,7 @@ impl<K: Into<ObjectKey>> From<K> for LoadArgs {
 }
 
 #[derive(Debug, Clone)]
+#[allow(unused)]
 pub struct LoadResult {
     pub key: ObjectKey,
     pub content: Vec<u8>,
@@ -91,6 +93,7 @@ impl<K: Into<ObjectKey>> From<K> for DelArgs {
 }
 
 #[derive(Debug, Clone)]
+#[allow(unused)]
 pub struct DelResult {
     pub key: ObjectKey,
     pub request_id: String,
