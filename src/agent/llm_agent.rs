@@ -86,10 +86,10 @@ where
             model_settings: model_provider
                 .model_settings(&model_name)
                 .map(|it| it.clone())
-                .ok_or(anyhow!(anyhow!(
+                .ok_or(anyhow!(
                     "model settings not found for {}",
                     agent_id
-                )))?,
+                ))?,
             agent_settings: ctx
                 .config
                 .agent_settings(&agent_id)
