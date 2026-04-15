@@ -4,7 +4,6 @@ use crate::channels::{ChannelContext, ChannelMessage, SessionId, SessionSettings
 use anyhow::anyhow;
 use rig::completion::{AssistantContent, Message};
 use rig::message::{ReasoningContent, ToolCall, ToolFunction};
-use std::ops::Deref;
 use std::sync::Arc;
 use tokio::sync::mpsc::Receiver;
 use wechat_sdk::client::WechatClient;
@@ -307,15 +306,6 @@ async fn create_robot_messages_for_agent<Content: Into<MessageItems>>(
     resp_type: AgentRespType,
     content: Content,
 ) -> crate::Result<Option<WechatMessage>> {
-    let Some(session_id) = ctx
-        .config
-        .dingtalk_config
-        .as_ref()
-        .and_then(|cfg| SessionId::try_from((session_id.deref(), cfg)).ok())
-    else {
-        return Ok(None);
-    };
-
     let SessionSettings {
         show_start,
         show_toolcall,

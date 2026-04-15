@@ -121,6 +121,8 @@ impl WechatChannel {
         super::spawn_agent_task(req, agent_supplier, addi_system_prompt).await
     }
 
+    /// ### handle_wechat_message
+    /// - wechat-bot 不支持群聊, 所以不会出现未授权的会话
     async fn handle_wechat_message(
         ctx: Arc<ChannelContext>,
         session_id: &SessionId,
@@ -128,27 +130,10 @@ impl WechatChannel {
         wechat_client: Arc<WechatClient>,
         data: WechatMessage,
     ) -> crate::Result<()> {
+        // wechat bot 不支持群聊, 所以不会出现未授权的会话
         let WechatMessage {
-            message_id,
-            from_user_id,
-            items,
-            ..
+            message_id, items, ..
         } = data;
-        let sender_id = from_user_id.deref();
-        if !session_id.deref().eq_ignore_ascii_case(&sender_id) {
-            let _ = wechat_client
-                .send_message(
-                    WechatMessage::new(
-                        &wechat_client.config,
-                        &from_user_id,
-                        "talking is forbidden",
-                    )
-                    .await?,
-                )
-                .await?;
-            return Ok(());
-        }
-
         let (cmd, line) = {
             let mut cmd = None;
             let mut lines = vec![];
@@ -208,44 +193,6 @@ impl WechatChannel {
             return Ok(());
         };
 
-        let addi_system_prompt = match &session_id {
-            SessionId::Master {
-                val: session_id, ..
-            } => format!(
-                "- **Attention current session_id**: {}. You are speaking to your owner",
-                session_id
-            ),
-            SessionId::Anonymous {
-                val: session_id, ..
-            } => format!(
-                "- **Attention current session_id**: {}. You are currently not interacting with your owner. Please stay vigilant.",
-                session_id
-            ),
-            SessionId::Group {
-                val:
-                    session_id::Group {
-                        session_id,
-                        name: group_name,
-                        user_id,
-                        ..
-                    },
-                ..
-            } => match user_id {
-                UserId::Master(_) => format!(
-                    "- **Attention current session_id**: {}. This session is a group session, group_id: {}, group_name: {}. You are speaking to your owner",
-                    session_id,
-                    session_id,
-                    group_name.as_deref().unwrap_or("..no provided.."),
-                ),
-                UserId::Anonymous(_) => format!(
-                    "- **Attention current session_id**: {}. This session is a group session, group_id: {}, group_name: {}. You are currently not interacting with your owner. Please stay vigilant.",
-                    session_id,
-                    session_id,
-                    group_name.as_deref().unwrap_or("..no provided.."),
-                ),
-            },
-        };
-
         let msg_id = message_id.clone();
         info!("Submit task to agent, msg_id: {}", msg_id);
         let task_id = RequestId::default();
@@ -259,7 +206,7 @@ impl WechatChannel {
                 },
             },
             move || agent,
-            Some(addi_system_prompt),
+            None,
         )
         .await
         {
