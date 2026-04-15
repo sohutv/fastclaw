@@ -248,8 +248,13 @@ impl WechatChannel {
         let content = content.into();
         let message = match &session_id {
             SessionId::Master { .. } | SessionId::Anonymous { .. } => {
-                WechatMessage::new(config, WechatUserId::from_str(session_id.deref())?, content)
-                    .await?
+                WechatMessage::new(
+                    config,
+                    WechatUserId::from_str(session_id.deref())?,
+                    content,
+                    None,
+                )
+                .await?
             }
             SessionId::Group { .. } => {
                 unreachable!("send robot message to group is not supported by wechat")
