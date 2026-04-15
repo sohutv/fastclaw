@@ -1,31 +1,19 @@
 use crate::agent::{Agent, AgentRequest, RequestId};
 use crate::channels::console_cmd::Console;
-use crate::channels::dingtalk_channel::DingtalkChannel;
-use crate::channels::{Channel, ChannelContext, SessionId, UserId, session_id, ChannelMessage};
+use crate::channels::{Channel, ChannelContext, ChannelMessage, SessionId, UserId, session_id};
 use crate::config::{Config, Workspace};
 use anyhow::anyhow;
 use async_trait::async_trait;
-use base64::Engine;
-use dingtalk_stream::frames::down_message::callback_message::{
-    Conversation, MessageData, MessagePayload, RichTextItem,
-};
-use dingtalk_stream::frames::up_message::MessageContent;
-use dingtalk_stream::frames::up_message::callback_message::WebhookMessage;
-use dingtalk_stream::handlers::ErrorCode;
-use itertools::Itertools;
 use log::{info, warn};
 use rig::OneOrMany;
 use rig::completion::Message;
-use rig::message::{DocumentSourceKind, Image, ImageDetail, ImageMediaType, UserContent};
-use rig::providers::anthropic::decoders::sse::iter_sse_messages;
+use rig::message::UserContent;
 use serde::{Deserialize, Serialize};
-use std::collections::BTreeMap;
-use std::io::Cursor;
 use std::ops::Deref;
 use std::str::FromStr;
 use std::sync::Arc;
 use tokio::sync::mpsc::Receiver;
-use wechat_sdk::account::WechatAccountId;
+use wechat_sdk::account::{WechatAccountId, WechatUserId};
 use wechat_sdk::client::message::{MessageItem, MessageItemValue, MessageItems, TextItem};
 use wechat_sdk::client::{WechatClient, WechatConfig as WechatInnerConfig, message::WechatMessage};
 
@@ -35,6 +23,8 @@ mod recv_agent_message;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct WechatConfig {
+    // o9cq808B3iiWivLs-uzgKSmbwtXI@im.wechat
+    pub account_id: WechatAccountId,
     pub session_id: SessionId,
 }
 
@@ -77,7 +67,7 @@ impl Channel for WechatChannel {
                 .parent()
                 .expect("unexpected workspace path parent")
                 .join("wechat"),
-            account_id: WechatAccountId::from_str(&self.wechat_config.session_id)?,
+            account_id: self.wechat_config.account_id.clone(),
             http_timeout: Default::default(),
             qr_login_timeout: Default::default(),
             http_api_get_updates_timeout: Default::default(),
@@ -93,11 +83,25 @@ impl Channel for WechatChannel {
         );
         let join_handle = {
             let wechat_client = Arc::clone(&wechat_client);
+            let ctx = Arc::clone(&self.ctx);
+            let session_id = self.wechat_config.session_id.clone();
             tokio::spawn(async move {
                 loop {
                     let messages = wechat_client.get_updates().await?;
+                    if let Some(message) = messages.into_iter().reduce(|mut l, mut r| {
+                        let _ = (&mut l.items).append(&mut r.items);
+                        l
+                    }) {
+                        let _ = Self::handle_wechat_message(
+                            Arc::clone(&ctx),
+                            &session_id,
+                            Arc::clone(&agent),
+                            Arc::clone(&wechat_client),
+                            message,
+                        )
+                        .await;
+                    }
                 }
-                Ok(())
             })
         };
 
@@ -106,7 +110,6 @@ impl Channel for WechatChannel {
 }
 
 impl WechatChannel {
-
     pub async fn spawn_agent_task<F>(
         req: AgentRequest,
         agent_supplier: F,
@@ -120,9 +123,7 @@ impl WechatChannel {
 
     async fn handle_wechat_message(
         ctx: Arc<ChannelContext>,
-        config: &WechatConfig,
-        inner_config: &WechatInnerConfig,
-        session_id: SessionId,
+        session_id: &SessionId,
         agent: Arc<dyn Agent>,
         wechat_client: Arc<WechatClient>,
         data: WechatMessage,
@@ -137,7 +138,12 @@ impl WechatChannel {
         if !session_id.deref().eq_ignore_ascii_case(&sender_id) {
             let _ = wechat_client
                 .send_message(
-                    WechatMessage::new(inner_config, &from_user_id, "talking is forbidden").await?,
+                    WechatMessage::new(
+                        &wechat_client.config,
+                        &from_user_id,
+                        "talking is forbidden",
+                    )
+                    .await?,
                 )
                 .await?;
             return Ok(());
@@ -247,7 +253,7 @@ impl WechatChannel {
         match WechatChannel::spawn_agent_task(
             AgentRequest {
                 id: task_id.clone(),
-                session_id,
+                session_id: session_id.clone(),
                 message: Message::User {
                     content: user_content,
                 },
@@ -282,5 +288,26 @@ impl WechatChannel {
                 Ok(())
             }
         }
+    }
+}
+
+impl WechatChannel {
+    async fn create_robot_messages<Content: Into<MessageItems>>(
+        session_id: &SessionId,
+        _: &ChannelContext,
+        config: &WechatInnerConfig,
+        content: Content,
+    ) -> crate::Result<WechatMessage> {
+        let content = content.into();
+        let message = match &session_id {
+            SessionId::Master { .. } | SessionId::Anonymous { .. } => {
+                WechatMessage::new(config, WechatUserId::from_str(session_id.deref())?, content)
+                    .await?
+            }
+            SessionId::Group { .. } => {
+                unreachable!("send robot message to group is not supported by wechat")
+            }
+        };
+        Ok(message)
     }
 }

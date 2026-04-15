@@ -29,6 +29,9 @@ pub enum ChannelType {
     #[cfg(feature = "channel_dingtalk_channel")]
     /// start with dingtalk
     Dingtalk,
+    #[cfg(feature = "channel_wechat_channel")]
+    /// start with wechat
+    Wechat,
 }
 
 impl CmdRunner for Start {
@@ -69,18 +72,18 @@ impl CmdRunner for Start {
             #[cfg(feature = "channel_cli_channel")]
             ChannelType::Cli => {
                 info!("Starting CLI channel");
-                let cli_channel = channels::cli_channel::CliChannel::new(config, workspace).await?;
-                let _ = cli_channel.start(Arc::new(main_agent)).await?.join();
+                let channel = channels::cli_channel::CliChannel::new(config, workspace).await?;
+                let _ = channel.start(Arc::new(main_agent)).await?.join();
             }
             #[cfg(feature = "channel_dingtalk_channel")]
             ChannelType::Dingtalk => {
                 info!("Starting Dingtalk channel");
-                let dingtalk_channel =
+                let channel =
                     channels::dingtalk_channel::DingtalkChannel::new(config, workspace).await?;
-                let channel_ctx = Arc::clone(&(dingtalk_channel.ctx));
+                let channel_ctx = Arc::clone(&(channel.ctx));
                 let heartbeat_agent = Arc::new(main_agent.fork("heartbeat").await?);
                 let main_agent = Arc::new(main_agent);
-                let (dingtalk, chanel_join_handle) = dingtalk_channel.start(main_agent).await?;
+                let (dingtalk, chanel_join_handle) = channel.start(main_agent).await?;
                 let heartbeat_join_handle = {
                     let channel_ctx = Arc::clone(&channel_ctx);
                     let dingtalk_client = Arc::clone(&dingtalk);
@@ -101,6 +104,16 @@ impl CmdRunner for Start {
                 };
                 let _ = chanel_join_handle.await;
                 let _ = heartbeat_join_handle.await;
+            }
+            #[cfg(feature = "channel_wechat_channel")]
+            ChannelType::Wechat => {
+                info!("Starting Wechat channel");
+                let channel =
+                    channels::wechat_channel::WechatChannel::new(config, workspace).await?;
+                let channel_ctx = Arc::clone(&(channel.ctx));
+                let main_agent = Arc::new(main_agent);
+                let (wechat, chanel_join_handle) = channel.start(main_agent).await?;
+                let _ = chanel_join_handle.await;
             }
         };
         Ok(())
