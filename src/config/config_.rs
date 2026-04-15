@@ -44,6 +44,7 @@ impl Default for Config {
             model_providers: btree_map!(),
             log_config: LogConfig::default(),
             dingtalk_config: None,
+            wechat_config: None,
             heartbeat_config: Default::default(),
             websearch: None,
             imagegen: None,

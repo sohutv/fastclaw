@@ -19,7 +19,7 @@ pub struct CliChannel {
 }
 
 impl CliChannel {
-    pub fn new(config: &'static Config, workspace: &'static Workspace) -> crate::Result<Self> {
+    pub async fn new(config: &'static Config, workspace: &'static Workspace) -> crate::Result<Self> {
         Ok(CliChannel {
             ctx: Arc::new(ChannelContext {
                 config: config.clone(),

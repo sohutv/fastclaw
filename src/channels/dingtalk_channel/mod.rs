@@ -14,7 +14,6 @@ use dingtalk_stream::{
         },
     },
 };
-use log::{error, info};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::ops::Deref;
@@ -38,7 +37,10 @@ pub struct DingtalkChannel {
 }
 
 impl DingtalkChannel {
-    pub fn new(config: &'static Config, workspace: &'static Workspace) -> crate::Result<Self> {
+    pub async fn new(
+        config: &'static Config,
+        workspace: &'static Workspace,
+    ) -> crate::Result<Self> {
         Ok(Self {
             ctx: Arc::new(ChannelContext {
                 config: config.clone(),
@@ -88,27 +90,7 @@ impl DingtalkChannel {
     where
         F: FnOnce() -> Arc<dyn Agent>,
     {
-        let agent = agent_supplier();
-        let (channel_message_sender, channel_message_receiver) = tokio::sync::mpsc::channel(32);
-        tokio::spawn(async move {
-            let task_id = req.id.clone();
-            match agent
-                .run(
-                    req,
-                    channel_message_sender.clone(),
-                    addi_system_prompt.as_deref(),
-                )
-                .await
-            {
-                Ok(_) => {
-                    info!("Agent run completed, task_id: {}", task_id);
-                }
-                Err(err) => {
-                    error!("Agent run failed, task_id: {}, error: {}", task_id, err);
-                }
-            }
-        });
-        Ok(channel_message_receiver)
+        super::spawn_agent_task(req, agent_supplier, addi_system_prompt).await
     }
 }
 impl DingtalkChannel {
