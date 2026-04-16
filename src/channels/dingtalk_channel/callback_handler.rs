@@ -99,16 +99,16 @@ impl dingtalk_stream::handlers::CallbackHandler for DingTalkCallbackHandler {
         };
         let (cmd, line, images, files) = match payload {
             MessagePayload::Text { text } => {
+                let mut cmd = None;
                 if text.starts_with('/') {
-                    (Some(text.to_string()), None, None, None)
-                } else {
-                    (
-                        None,
-                        Some(text.content.to_string()).filter(|it| !it.is_empty()),
-                        None,
-                        None,
-                    )
+                    cmd = Some(text.to_string());
                 }
+                (
+                    cmd,
+                    Some(text.content.to_string()).filter(|it| !it.is_empty()),
+                    None,
+                    None,
+                )
             }
             MessagePayload::Picture { content: picture } => {
                 let downloads_dir = self.ctx.workspace.downloads_path().to_path_buf();
@@ -163,7 +163,7 @@ impl dingtalk_stream::handlers::CallbackHandler for DingTalkCallbackHandler {
                 )
             }
         };
-        let line = if let Some(cmd_val) = &cmd {
+        if let Some(cmd_val) = &cmd {
             match Console::handle_console_cmd(&self.ctx, &cmd_val, &self.agent, &session_id).await {
                 Ok(mut receiver) => {
                     let client = Arc::clone(&dingtalk_client);
@@ -176,10 +176,7 @@ impl dingtalk_stream::handlers::CallbackHandler for DingTalkCallbackHandler {
                 }
                 Err(_) => {}
             }
-            cmd
-        } else {
-            line
-        };
+        }
         let prompts = vec![UserContent::text(line.as_deref().unwrap_or_default())];
 
         let mut user_content = Vec::<UserContent>::new();
@@ -211,8 +208,7 @@ impl dingtalk_stream::handlers::CallbackHandler for DingTalkCallbackHandler {
             }
         }
         if let Some(files) = files {
-            let workspace_path = &self.ctx.workspace.path;
-            for filepath in files.iter().flat_map(|it| it.strip_prefix(workspace_path)) {
+            for filepath in files.iter() {
                 user_content.push(UserContent::Text(
                     format!(
                         r#"
