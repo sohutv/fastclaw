@@ -1,12 +1,13 @@
 use super::super::{AgentRespState, AgentRespType};
 use crate::agent::{AgentResponse, HistoryCompactResult, Notify};
 use crate::channels::dingtalk_channel::DingtalkChannel;
-use crate::channels::{ChannelContext, ChannelMessage, create_robot_messages_for_agent};
+use crate::channels::{ChannelContext, ChannelMessage, SessionId};
 use anyhow::anyhow;
 use dingtalk_stream::DingTalkStream;
 use dingtalk_stream::frames::up_message::{MessageContentMarkdown, MessageContentText};
 use rig::completion::{AssistantContent, Message};
 use rig::message::{ReasoningContent, ToolCall, ToolFunction};
+use std::ops::Deref;
 use std::sync::Arc;
 use tokio::sync::mpsc::Receiver;
 
@@ -303,4 +304,32 @@ impl DingtalkChannel {
             }
         }
     }
+}
+
+async fn create_robot_messages_for_agent<Content, F, OutboundMsg>(
+    session_id: &SessionId,
+    ctx: &ChannelContext,
+    resp_type: AgentRespType,
+    content: Content,
+    outbound_msg_creator: F,
+) -> crate::Result<Option<OutboundMsg>>
+where
+    F: FnOnce(&SessionId, &ChannelContext, Content) -> crate::Result<OutboundMsg>,
+{
+    let Some(session_id) = ctx
+        .config
+        .dingtalk_config
+        .as_ref()
+        .and_then(|cfg| SessionId::try_from((session_id.deref(), cfg)).ok())
+    else {
+        return Ok(None);
+    };
+    super::super::create_robot_messages_for_agent(
+        &session_id,
+        ctx,
+        resp_type,
+        content,
+        outbound_msg_creator,
+    )
+    .await
 }

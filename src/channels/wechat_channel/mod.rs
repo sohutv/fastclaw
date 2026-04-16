@@ -93,19 +93,25 @@ impl Channel for WechatChannel {
                         .await;
                 }
                 loop {
-                    let messages = wechat_client.get_updates().await?;
-                    if let Some(message) = messages.into_iter().reduce(|mut l, mut r| {
-                        let _ = (&mut l.items).append(&mut r.items);
-                        l
-                    }) {
-                        let _ = Self::handle_wechat_message(
-                            Arc::clone(&ctx),
-                            &session_id,
-                            Arc::clone(&agent),
-                            Arc::clone(&wechat_client),
-                            message,
-                        )
-                        .await;
+                    match wechat_client.get_updates().await {
+                        Ok(messages) => {
+                            if let Some(message) = messages.into_iter().reduce(|mut l, mut r| {
+                                let _ = (&mut l.items).append(&mut r.items);
+                                l
+                            }) {
+                                let _ = Self::handle_wechat_message(
+                                    Arc::clone(&ctx),
+                                    &session_id,
+                                    Arc::clone(&agent),
+                                    Arc::clone(&wechat_client),
+                                    message,
+                                )
+                                .await;
+                            }
+                        }
+                        Err(err) => {
+                            warn!("{err}");
+                        }
                     }
                 }
             })
@@ -251,7 +257,6 @@ impl WechatChannel {
         content: Content,
     ) -> crate::Result<WechatRobotMessage> {
         let content = content.into();
-
         let message = match &session_id {
             SessionId::Master { .. } | SessionId::Anonymous { .. } => WechatRobotMessage {
                 to_user_id: session_id.to_string().into(),

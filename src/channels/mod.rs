@@ -3,7 +3,6 @@ use crate::config::{Config, Workspace};
 use async_trait::async_trait;
 use derive_more::Deref;
 use log::{error, info};
-use std::ops::Deref;
 use std::sync::Arc;
 use strum::Display;
 use tokio::sync::mpsc::Receiver;
@@ -105,15 +104,6 @@ async fn create_robot_messages_for_agent<Content, F, OutboundMsg>(
 where
     F: FnOnce(&SessionId, &ChannelContext, Content) -> crate::Result<OutboundMsg>,
 {
-    let Some(session_id) = ctx
-        .config
-        .dingtalk_config
-        .as_ref()
-        .and_then(|cfg| SessionId::try_from((session_id.deref(), cfg)).ok())
-    else {
-        return Ok(None);
-    };
-
     let SessionSettings {
         show_start,
         show_toolcall,
