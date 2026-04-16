@@ -1,14 +1,14 @@
+use super::super::{AgentRespState, AgentRespType};
 use crate::agent::{AgentResponse, HistoryCompactResult, Notify};
 use crate::channels::wechat_channel::WechatChannel;
-use crate::channels::{ChannelContext, ChannelMessage, SessionId, SessionSettings};
+use crate::channels::{ChannelContext, ChannelMessage, create_robot_messages_for_agent};
 use anyhow::anyhow;
 use rig::completion::{AssistantContent, Message};
 use rig::message::{ReasoningContent, ToolCall, ToolFunction};
-use std::str::FromStr;
 use std::sync::Arc;
 use tokio::sync::mpsc::Receiver;
 use wechat_sdk::client::WechatClient;
-use wechat_sdk::client::message::{MessageItems, TypingTicket};
+use wechat_sdk::client::message::TypingTicket;
 
 impl WechatChannel {
     pub async fn recv_agent_message(
@@ -82,7 +82,7 @@ impl WechatChannel {
                 function: ToolFunction { name, arguments },
                 ..
             }) => {
-                if let Some(robot_message) = create_robot_messages_for_agent(
+                if let Ok(Some(robot_message)) = create_robot_messages_for_agent(
                     session_id,
                     ctx,
                     AgentRespType::ToolCall,
@@ -96,8 +96,9 @@ impl WechatChannel {
                         serde_json::to_string_pretty(arguments)
                             .unwrap_or_else(|err| format!("Error serializing arguments: {}", err))
                     ),
+                    WechatChannel::create_robot_messages,
                 )
-                .await?
+                .await
                 {
                     let _ = robot_message.send(&wechat).await;
                 }
@@ -137,6 +138,7 @@ impl WechatChannel {
                                 ctx,
                                 AgentRespType::Reasoning,
                                 content,
+                                WechatChannel::create_robot_messages,
                             )
                             .await?
                             {
@@ -185,6 +187,7 @@ impl WechatChannel {
                     ctx,
                     AgentRespType::Content,
                     content,
+                    WechatChannel::create_robot_messages,
                 )
                 .await?
                 {
@@ -198,6 +201,7 @@ impl WechatChannel {
                     ctx,
                     AgentRespType::Error,
                     format!("Agent error: {}", error),
+                    WechatChannel::create_robot_messages,
                 )
                 .await?
                 {
@@ -213,6 +217,7 @@ impl WechatChannel {
                             ctx,
                             AgentRespType::Notify,
                             text,
+                            WechatChannel::create_robot_messages,
                         )
                         .await?
                         {
@@ -225,6 +230,7 @@ impl WechatChannel {
                             ctx,
                             AgentRespType::Notify,
                             format!("{content}",),
+                            WechatChannel::create_robot_messages,
                         )
                         .await?
                         {
@@ -252,6 +258,7 @@ impl WechatChannel {
                                 val.current().total_tokens,
                                 val.compact_ratio(),
                             ),
+                            WechatChannel::create_robot_messages,
                         )
                         .await?
                         {
@@ -264,6 +271,7 @@ impl WechatChannel {
                             ctx,
                             AgentRespType::HistoryCompactErr,
                             err_msg,
+                            WechatChannel::create_robot_messages,
                         )
                         .await?
                         {
@@ -281,6 +289,7 @@ impl WechatChannel {
 {msg}
                             "#
                             ),
+                            WechatChannel::create_robot_messages,
                         )
                         .await?
                         {
@@ -293,91 +302,4 @@ impl WechatChannel {
             }
         }
     }
-}
-
-pub enum AgentRespType {
-    Start,
-    ToolCall,
-    Reasoning,
-    Content,
-    Notify,
-    HistoryCompactOk,
-    HistoryCompactErr,
-    HistoryCompactIgnore,
-    Error,
-}
-
-async fn create_robot_messages_for_agent<'a, Content: Into<MessageItems>>(
-    session_id: &'a SessionId,
-    ctx: &ChannelContext,
-    resp_type: AgentRespType,
-    content: Content,
-) -> crate::Result<Option<super::WechatRobotMessage<'a>>> {
-    let SessionSettings {
-        show_start,
-        show_toolcall,
-        show_reasoning,
-        show_notify,
-        show_compacting,
-        show_compacting_ok,
-        show_compacting_err,
-        show_compacting_ignore,
-        show_error,
-        ..
-    } = session_id.settings();
-    match resp_type {
-        AgentRespType::Start => {
-            let true = show_start else {
-                return Ok(None);
-            };
-        }
-        AgentRespType::ToolCall => {
-            let true = show_toolcall else {
-                return Ok(None);
-            };
-        }
-        AgentRespType::Reasoning => {
-            let true = show_reasoning else {
-                return Ok(None);
-            };
-        }
-        AgentRespType::Content => {}
-        AgentRespType::Notify => {
-            let true = show_notify else {
-                return Ok(None);
-            };
-        }
-        AgentRespType::HistoryCompactOk => {
-            let true = (*show_compacting && *show_compacting_ok) else {
-                return Ok(None);
-            };
-        }
-        AgentRespType::HistoryCompactErr => {
-            let true = (*show_compacting && *show_compacting_err) else {
-                return Ok(None);
-            };
-        }
-        AgentRespType::HistoryCompactIgnore => {
-            let true = (*show_compacting && *show_compacting_ignore) else {
-                return Ok(None);
-            };
-        }
-        AgentRespType::Error => {
-            let true = show_error else {
-                return Ok(None);
-            };
-        }
-    }
-    Ok(Some(
-        WechatChannel::create_robot_messages(session_id, ctx, content).await?,
-    ))
-}
-
-#[derive(Debug, Clone, Copy)]
-enum AgentRespState {
-    Wait,
-    Start,
-    Reasoning,
-    Messaging,
-    Final,
 }

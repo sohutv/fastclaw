@@ -86,16 +86,16 @@ impl CmdRunner for Start {
                 let (dingtalk, chanel_join_handle) = channel.start(main_agent).await?;
                 let heartbeat_join_handle = {
                     let channel_ctx = Arc::clone(&channel_ctx);
-                    let dingtalk_client = Arc::clone(&dingtalk);
+                    let dingtalk = Arc::clone(&dingtalk);
                     let heartbeat = Heartbeat::new(config, workspace, &history_manager).await?;
                     let join_handle = heartbeat.start(
                         heartbeat_agent,
                         move|agent, req| {
                             let channel_ctx = Arc::clone(&channel_ctx);
-                            let dingtalk_client = Arc::clone(&dingtalk_client);
+                            let dingtalk = Arc::clone(&dingtalk);
                             async move {
                                 let mut receiver = channels::dingtalk_channel::DingtalkChannel::spawn_agent_task(req, || agent, None).await?;
-                                let _ = channels::dingtalk_channel::DingtalkChannel::recv_agent_message(dingtalk_client, &channel_ctx, &mut receiver).await;
+                                let _ = channels::dingtalk_channel::DingtalkChannel::recv_agent_message(dingtalk, &channel_ctx, &mut receiver).await;
                                 Ok(())
                             }
                         },
@@ -111,9 +111,40 @@ impl CmdRunner for Start {
                 let channel =
                     channels::wechat_channel::WechatChannel::new(config, workspace).await?;
                 let channel_ctx = Arc::clone(&(channel.ctx));
+                let heartbeat_agent = Arc::new(main_agent.fork("heartbeat").await?);
                 let main_agent = Arc::new(main_agent);
                 let (wechat, chanel_join_handle) = channel.start(main_agent).await?;
+                let heartbeat_join_handle = {
+                    let channel_ctx = Arc::clone(&channel_ctx);
+                    let wechat = Arc::clone(&wechat);
+                    let heartbeat = Heartbeat::new(config, workspace, &history_manager).await?;
+                    let join_handle = heartbeat
+                        .start(heartbeat_agent, move |agent, req| {
+                            let channel_ctx = Arc::clone(&channel_ctx);
+                            let wechat = Arc::clone(&wechat);
+                            async move {
+                                let mut receiver =
+                                    channels::wechat_channel::WechatChannel::spawn_agent_task(
+                                        req,
+                                        || agent,
+                                        None,
+                                    )
+                                    .await?;
+                                let _ =
+                                    channels::wechat_channel::WechatChannel::recv_agent_message(
+                                        wechat,
+                                        &channel_ctx,
+                                        &mut receiver,
+                                    )
+                                    .await;
+                                Ok(())
+                            }
+                        })
+                        .await?;
+                    join_handle
+                };
                 let _ = chanel_join_handle.await;
+                let _ = heartbeat_join_handle.await;
             }
         };
         Ok(())

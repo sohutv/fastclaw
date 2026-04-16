@@ -340,7 +340,7 @@ impl LifecycleListener for DingTalkCallbackHandler {
             if !session_id.settings().show_connected {
                 continue;
             }
-            let Some(message) = DingtalkChannel::create_robot_messages(
+            let Ok(message) = DingtalkChannel::create_robot_messages(
                 &session_id,
                 &self.ctx,
                 MessageContentMarkdown::from((
@@ -353,9 +353,7 @@ Connected to dingtalk websocket
         "#
                     ),
                 )),
-            )
-            .await
-            else {
+            ) else {
                 return;
             };
             let _ = client.send_message(message).await;
@@ -374,19 +372,17 @@ Connected to dingtalk websocket
             }
             match result {
                 Ok(_) => {
-                    let Some(message) = DingtalkChannel::create_robot_messages(
+                    let Ok(message) = DingtalkChannel::create_robot_messages(
                         &session_id,
                         &self.ctx,
                         MessageContentText::from("disconnected from dingtalk websocket"),
-                    )
-                    .await
-                    else {
+                    ) else {
                         return;
                     };
                     let _ = client.send_message(message).await;
                 }
                 Err(err) => {
-                    let Some(message) = DingtalkChannel::create_robot_messages(
+                    let Ok(message) = DingtalkChannel::create_robot_messages(
                         &session_id,
                         &self.ctx,
                         MessageContentMarkdown::from((
@@ -399,9 +395,7 @@ Disconnected from dingtalk websocket
                 "#
                             ),
                         )),
-                    )
-                    .await
-                    else {
+                    ) else {
                         return;
                     };
                     let _ = client.send_message(message).await;

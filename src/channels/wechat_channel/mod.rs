@@ -1,6 +1,6 @@
 use crate::agent::{Agent, AgentRequest, RequestId};
 use crate::channels::console_cmd::Console;
-use crate::channels::{Channel, ChannelContext, ChannelMessage, SessionId, UserId, session_id};
+use crate::channels::{Channel, ChannelContext, ChannelMessage, SessionId};
 use crate::config::{Config, Workspace};
 use anyhow::anyhow;
 use async_trait::async_trait;
@@ -10,11 +10,12 @@ use rig::completion::Message;
 use rig::message::UserContent;
 use serde::{Deserialize, Serialize};
 use std::ops::Deref;
-use std::str::FromStr;
 use std::sync::Arc;
 use tokio::sync::mpsc::Receiver;
-use wechat_sdk::account::{WechatAccountId, WechatUserId};
-use wechat_sdk::client::message::{MessageItem, MessageItemValue, MessageItems, TextItem};
+use wechat_sdk::account::WechatAccountId;
+use wechat_sdk::client::message::{
+    MessageItem, MessageItemValue, MessageItems, TextItem, ToUserId,
+};
 use wechat_sdk::client::{WechatClient, WechatConfig as WechatInnerConfig, message::WechatMessage};
 
 mod config;
@@ -244,15 +245,16 @@ impl WechatChannel {
 }
 
 impl WechatChannel {
-    async fn create_robot_messages<'a, Content: Into<MessageItems>>(
-        session_id: &'a SessionId,
+    fn create_robot_messages<Content: Into<MessageItems>>(
+        session_id: &SessionId,
         _: &ChannelContext,
         content: Content,
-    ) -> crate::Result<WechatRobotMessage<'a>> {
+    ) -> crate::Result<WechatRobotMessage> {
         let content = content.into();
+
         let message = match &session_id {
             SessionId::Master { .. } | SessionId::Anonymous { .. } => WechatRobotMessage {
-                session_id,
+                to_user_id: session_id.to_string().into(),
                 content,
             },
             SessionId::Group { .. } => {
@@ -263,19 +265,15 @@ impl WechatChannel {
     }
 }
 
-struct WechatRobotMessage<'a> {
-    session_id: &'a SessionId,
+struct WechatRobotMessage {
+    to_user_id: ToUserId,
     content: MessageItems,
 }
 
-impl<'a> WechatRobotMessage<'a> {
+impl WechatRobotMessage {
     async fn send(self, wechat: &WechatClient) -> crate::Result<()> {
         let _ = wechat
-            .send_message(
-                WechatUserId::from_str(self.session_id.deref())?,
-                self.content,
-                None,
-            )
+            .send_message(self.to_user_id, self.content, None)
             .await?;
         Ok(())
     }

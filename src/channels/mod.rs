@@ -3,7 +3,9 @@ use crate::config::{Config, Workspace};
 use async_trait::async_trait;
 use derive_more::Deref;
 use log::{error, info};
+use std::ops::Deref;
 use std::sync::Arc;
+use strum::Display;
 use tokio::sync::mpsc::Receiver;
 
 #[cfg(feature = "channel_cli_channel")]
@@ -18,6 +20,7 @@ pub mod wechat_channel;
 pub mod a2a_channel;
 mod session_id;
 pub use session_id::*;
+
 #[async_trait]
 pub trait Channel {
     type Output;
@@ -68,4 +71,104 @@ pub struct ChannelMessage {
     pub session_id: SessionId,
     #[deref]
     pub message: AgentResponse,
+}
+
+#[derive(Debug, Copy, Clone, Display)]
+pub enum AgentRespType {
+    Start,
+    ToolCall,
+    Reasoning,
+    Content,
+    Notify,
+    HistoryCompactOk,
+    HistoryCompactErr,
+    HistoryCompactIgnore,
+    Error,
+}
+
+#[derive(Debug, Copy, Clone, Display)]
+enum AgentRespState {
+    Wait,
+    Start,
+    Reasoning,
+    Messaging,
+    Final,
+}
+
+async fn create_robot_messages_for_agent<Content, F, OutboundMsg>(
+    session_id: &SessionId,
+    ctx: &ChannelContext,
+    resp_type: AgentRespType,
+    content: Content,
+    outbound_msg_creator: F,
+) -> crate::Result<Option<OutboundMsg>>
+where
+    F: FnOnce(&SessionId, &ChannelContext, Content) -> crate::Result<OutboundMsg>,
+{
+    let Some(session_id) = ctx
+        .config
+        .dingtalk_config
+        .as_ref()
+        .and_then(|cfg| SessionId::try_from((session_id.deref(), cfg)).ok())
+    else {
+        return Ok(None);
+    };
+
+    let SessionSettings {
+        show_start,
+        show_toolcall,
+        show_reasoning,
+        show_notify,
+        show_compacting,
+        show_compacting_ok,
+        show_compacting_err,
+        show_compacting_ignore,
+        show_error,
+        ..
+    } = session_id.settings();
+    match resp_type {
+        AgentRespType::Start => {
+            let true = show_start else {
+                return Ok(None);
+            };
+        }
+        AgentRespType::ToolCall => {
+            let true = show_toolcall else {
+                return Ok(None);
+            };
+        }
+        AgentRespType::Reasoning => {
+            let true = show_reasoning else {
+                return Ok(None);
+            };
+        }
+        AgentRespType::Content => {}
+        AgentRespType::Notify => {
+            let true = show_notify else {
+                return Ok(None);
+            };
+        }
+        AgentRespType::HistoryCompactOk => {
+            let true = (*show_compacting && *show_compacting_ok) else {
+                return Ok(None);
+            };
+        }
+        AgentRespType::HistoryCompactErr => {
+            let true = (*show_compacting && *show_compacting_err) else {
+                return Ok(None);
+            };
+        }
+        AgentRespType::HistoryCompactIgnore => {
+            let true = (*show_compacting && *show_compacting_ignore) else {
+                return Ok(None);
+            };
+        }
+        AgentRespType::Error => {
+            let true = show_error else {
+                return Ok(None);
+            };
+        }
+    }
+    let msg = outbound_msg_creator(&session_id, ctx, content)?;
+    Ok(Some(msg))
 }

@@ -94,11 +94,11 @@ impl DingtalkChannel {
     }
 }
 impl DingtalkChannel {
-    async fn create_robot_messages<Content: Into<MessageContent>>(
+    fn create_robot_messages<Content: Into<MessageContent>>(
         session_id: &SessionId,
         _: &ChannelContext,
         content: Content,
-    ) -> Option<RobotMessage> {
+    ) -> crate::Result<RobotMessage> {
         let content = content.into();
         let message = match &session_id {
             SessionId::Master { .. } | SessionId::Anonymous { .. } => RobotPrivateMessage {
@@ -112,6 +112,6 @@ impl DingtalkChannel {
             }
             .into(),
         };
-        Some(message)
+        Ok(message)
     }
 }
