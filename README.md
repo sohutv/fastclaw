@@ -4,7 +4,7 @@
 
 English | [中文](./README.zh-cn.md)
 
-Fastclaw is a local AI agent built with Rust. It supports OpenAI-compatible model providers, multi-channel interaction (CLI and DingTalk), streaming output, conversation history, scheduled task execution, and tool calls.
+Fastclaw is a local AI agent built with Rust. It supports OpenAI-compatible model providers, multi-channel interaction (CLI, DingTalk, and Wechat), streaming output, conversation history, scheduled task execution, and tool calls.
 
 ## Features
 
@@ -13,12 +13,16 @@ Fastclaw is a local AI agent built with Rust. It supports OpenAI-compatible mode
 - Channels:
   - CLI channel (`--channel Cli`)
   - DingTalk channel (`--channel Dingtalk`, enabled by default feature)
+  - Wechat channel (`--channel Wechat`, enabled by default feature)
 - Streaming reasoning and final answer output
 - Built-in tools:
   - `shell`: execute shell commands in workspace
   - `current-time`: return local time in RFC3339 format
   - `task-list`, `task-create`, `task-detail-get`, `task-update`, `task-del`
   - `websearch` (only when `[websearch]` is configured)
+  - `imagegen` (only when `[imagegen]` is configured)
+  - `cloud-storage-store`, `cloud-storage-load`, `cloud-storage-del`
+    (only when `cloud_storage_tool` feature is enabled and `[storage]` is configured)
 - Session history persistence and history compaction support (`/compact`)
 - Background heartbeat scheduler for cron tasks
 - One-command onboarding for workdir, default config, and workspace templates
@@ -37,11 +41,19 @@ cd fastclaw
 cargo build
 ```
 
-If you only need CLI and want to avoid DingTalk dependency:
+If you only need CLI and want to avoid chat-platform dependencies:
 
 ```bash
 cargo build --no-default-features --features "model_provider_openai_compatible,channel_cli_channel,volcengine"
 ```
+
+Default features:
+
+- `model_provider_openai_compatible`
+- `channel_cli_channel`
+- `channel_dingtalk_channel`
+- `channel_wechat_channel`
+- `volcengine`
 
 ## CLI Commands
 
@@ -150,6 +162,32 @@ api_url = "https://<your-volcengine-endpoint>"
 api_key = "<your-token>"
 ```
 
+Optional image generation config (`volcengine` feature):
+
+```toml
+[imagegen]
+type = "volcengine"
+api_url = "https://<your-volcengine-imagegen-endpoint>"
+api_key = "<your-token>"
+model = "<volcengine-image-model>"
+```
+
+Optional cloud storage config (`volcengine` + `cloud_storage_tool` feature):
+
+```toml
+[storage]
+type = "volcengine"
+endpoint = "https://tos-cn-beijing.volces.com"
+region = "cn-beijing"
+bucket = "your-bucket"
+access_key = "AK..."
+secret_key = "SK..."
+key_prefix = "fastclaw" # optional
+connection_timeout_ms = 3000
+request_timeout_ms = 10000
+max_retry_count = 3
+```
+
 Optional DingTalk config (when `channel_dingtalk_channel` is enabled):
 
 ```toml
@@ -159,6 +197,14 @@ client_secret = "..."
 
 [dingtalk_config.allow_session_ids]
 "staff_id_or_group_key" = { Master = { val = "owner", settings = {} } }
+```
+
+Optional Wechat config (when `channel_wechat_channel` is enabled):
+
+```toml
+[wechat_config]
+account_id = "o9cq808B3iiWivLs-uzgKSmbwtXI@im.wechat"
+session_id = { Master = { val = "your-wechat-user-id", settings = {} } }
 ```
 
 ### 3. Start Agent
@@ -193,7 +239,6 @@ Per-round usage footer:
 ```text
 <workdir>/
   config.toml
-  db.sqlite
   workspace/
     AGENTS.md
     BOOTSTRAP.md
@@ -209,6 +254,8 @@ Per-round usage footer:
     skills/README.md
     state/README.md
 ```
+
+`db.sqlite` is created on first `start`, not during `onboard init-config`.
 
 ## Logging
 
@@ -232,6 +279,7 @@ cargo test --all-features
 - `/showreasoning on|off` triggers `unimplemented!()` in current code path.
 - In CLI channel, reasoning text is still printed even when `default_show_reasoning = false`; only heading/closing markers are gated.
 - `cargo test --all-features` requires `VOLCENGINE_WEBSEARCH_API_URL` and `VOLCENGINE_WEBSEARCH_API_KEY` for `volcengine` websearch test.
+- `onboard init-config` currently writes `resources/CRON_TASK.md` into `workspace/USER.md` (overwriting the previous `USER.md` content).
 
 ## Notes
 
