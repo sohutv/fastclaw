@@ -4,10 +4,11 @@ use crate::channels::{ChannelContext, ChannelMessage, SessionId, SessionSettings
 use anyhow::anyhow;
 use rig::completion::{AssistantContent, Message};
 use rig::message::{ReasoningContent, ToolCall, ToolFunction};
+use std::str::FromStr;
 use std::sync::Arc;
 use tokio::sync::mpsc::Receiver;
 use wechat_sdk::client::WechatClient;
-use wechat_sdk::client::message::{MessageItems, WechatMessage};
+use wechat_sdk::client::message::{MessageItems, TypingTicket};
 
 impl WechatChannel {
     pub async fn recv_agent_message(
@@ -17,8 +18,26 @@ impl WechatChannel {
     ) -> crate::Result<()> {
         let mut state = AgentRespState::Wait;
         let mut buff = Vec::<String>::new();
+        let config = ctx
+            .config
+            .wechat_config
+            .as_ref()
+            .expect("unexpected wechat_config");
+        let session_id = &config.session_id;
+        let typing_ticket = wechat
+            .get_config(session_id.to_string(), None)
+            .await?;
         while let Some(message) = receiver.recv().await {
-            match Self::handle_agent_message(&wechat, ctx, &message, state, &mut buff).await {
+            match Self::handle_agent_message(
+                &wechat,
+                ctx,
+                &typing_ticket,
+                &message,
+                state,
+                &mut buff,
+            )
+            .await
+            {
                 Ok(AgentRespState::Final) | Err(_) => {
                     state = AgentRespState::Wait;
                     buff.clear();
@@ -28,12 +47,16 @@ impl WechatChannel {
                 }
             }
         }
+        let _ = wechat
+            .send_typing_cannel(session_id.to_string(), &typing_ticket)
+            .await;
         Ok(())
     }
 
     async fn handle_agent_message(
         wechat: &WechatClient,
         ctx: &ChannelContext,
+        typing_ticket: &TypingTicket,
         ChannelMessage {
             session_id,
             message,
@@ -45,17 +68,9 @@ impl WechatChannel {
             AgentResponse::Start => {
                 if let AgentRespState::Wait = curr_state {
                     buff.clear();
-                    if let Some(robot_message) = create_robot_messages_for_agent(
-                        session_id,
-                        ctx,
-                        &wechat.config,
-                        AgentRespType::Start,
-                        "正在思考...",
-                    )
-                    .await?
-                    {
-                        let _ = wechat.send_message(robot_message).await;
-                    }
+                    let _ = wechat
+                        .send_typing(session_id.to_string(), &typing_ticket)
+                        .await;
                     Ok(AgentRespState::Start)
                 } else {
                     Err(anyhow!("AgentRespState must be Init when starting"))
@@ -68,7 +83,6 @@ impl WechatChannel {
                 if let Some(robot_message) = create_robot_messages_for_agent(
                     session_id,
                     ctx,
-                    &wechat.config,
                     AgentRespType::ToolCall,
                     format!(
                         r#"
@@ -83,7 +97,7 @@ impl WechatChannel {
                 )
                 .await?
                 {
-                    let _ = wechat.send_message(robot_message).await;
+                    let _ = robot_message.send(&wechat).await;
                 }
                 Ok(curr_state)
             }
@@ -119,13 +133,12 @@ impl WechatChannel {
                             if let Some(robot_message) = create_robot_messages_for_agent(
                                 session_id,
                                 ctx,
-                                &wechat.config,
                                 AgentRespType::Reasoning,
                                 content,
                             )
                             .await?
                             {
-                                let _ = wechat.send_message(robot_message).await;
+                                let _ = robot_message.send(&wechat).await;
                             }
                         }
                     }
@@ -168,13 +181,12 @@ impl WechatChannel {
                 if let Some(robot_message) = create_robot_messages_for_agent(
                     session_id,
                     ctx,
-                    &wechat.config,
                     AgentRespType::Content,
                     content,
                 )
                 .await?
                 {
-                    let _ = wechat.send_message(robot_message).await;
+                    let _ = robot_message.send(&wechat).await;
                 }
                 Ok(AgentRespState::Final)
             }
@@ -182,13 +194,12 @@ impl WechatChannel {
                 if let Some(robot_message) = create_robot_messages_for_agent(
                     session_id,
                     ctx,
-                    &wechat.config,
                     AgentRespType::Error,
                     format!("Agent error: {}", error),
                 )
                 .await?
                 {
-                    let _ = wechat.send_message(robot_message).await;
+                    let _ = robot_message.send(&wechat).await;
                 }
                 Ok(AgentRespState::Final)
             }
@@ -198,26 +209,24 @@ impl WechatChannel {
                         if let Some(robot_message) = create_robot_messages_for_agent(
                             session_id,
                             ctx,
-                            &wechat.config,
                             AgentRespType::Notify,
                             text,
                         )
                         .await?
                         {
-                            let _ = wechat.send_message(robot_message).await;
+                            let _ = robot_message.send(&wechat).await;
                         }
                     }
                     Notify::Markdown { content, .. } => {
                         if let Some(robot_message) = create_robot_messages_for_agent(
                             session_id,
                             ctx,
-                            &wechat.config,
                             AgentRespType::Notify,
                             format!("{content}",),
                         )
                         .await?
                         {
-                            let _ = wechat.send_message(robot_message).await;
+                            let _ = robot_message.send(&wechat).await;
                         }
                     }
                 }
@@ -229,7 +238,6 @@ impl WechatChannel {
                         if let Some(robot_message) = create_robot_messages_for_agent(
                             session_id,
                             ctx,
-                            &wechat.config,
                             AgentRespType::HistoryCompactOk,
                             &format!(
                                 r#"
@@ -245,27 +253,25 @@ impl WechatChannel {
                         )
                         .await?
                         {
-                            let _ = wechat.send_message(robot_message).await;
+                            let _ = robot_message.send(&wechat).await;
                         }
                     }
                     HistoryCompactResult::Err(err_msg) => {
                         if let Some(robot_message) = create_robot_messages_for_agent(
                             session_id,
                             ctx,
-                            &wechat.config,
                             AgentRespType::HistoryCompactErr,
                             err_msg,
                         )
                         .await?
                         {
-                            let _ = wechat.send_message(robot_message).await;
+                            let _ = robot_message.send(&wechat).await;
                         }
                     }
                     HistoryCompactResult::Ignore(msg) => {
                         if let Some(robot_message) = create_robot_messages_for_agent(
                             session_id,
                             ctx,
-                            &wechat.config,
                             AgentRespType::HistoryCompactIgnore,
                             format!(
                                 r#"
@@ -276,7 +282,7 @@ impl WechatChannel {
                         )
                         .await?
                         {
-                            let _ = wechat.send_message(robot_message).await;
+                            let _ = robot_message.send(&wechat).await;
                         }
                     }
                 }
@@ -299,13 +305,12 @@ pub enum AgentRespType {
     Error,
 }
 
-async fn create_robot_messages_for_agent<Content: Into<MessageItems>>(
-    session_id: &SessionId,
+async fn create_robot_messages_for_agent<'a, Content: Into<MessageItems>>(
+    session_id: &'a SessionId,
     ctx: &ChannelContext,
-    config: &super::WechatInnerConfig,
     resp_type: AgentRespType,
     content: Content,
-) -> crate::Result<Option<WechatMessage>> {
+) -> crate::Result<Option<super::WechatRobotMessage<'a>>> {
     let SessionSettings {
         show_start,
         show_toolcall,
@@ -316,6 +321,7 @@ async fn create_robot_messages_for_agent<Content: Into<MessageItems>>(
         show_compacting_err,
         show_compacting_ignore,
         show_error,
+        ..
     } = session_id.settings();
     match resp_type {
         AgentRespType::Start => {
@@ -361,7 +367,7 @@ async fn create_robot_messages_for_agent<Content: Into<MessageItems>>(
         }
     }
     Ok(Some(
-        WechatChannel::create_robot_messages(&session_id, ctx, config, content).await?,
+        WechatChannel::create_robot_messages(session_id, ctx, content).await?,
     ))
 }
 

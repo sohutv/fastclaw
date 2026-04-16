@@ -335,6 +335,7 @@ async fn create_robot_messages_for_agent<Content: Into<MessageContent>>(
         show_compacting_err,
         show_compacting_ignore,
         show_error,
+        ..
     } = session_id.settings();
     match resp_type {
         AgentRespType::Start => {

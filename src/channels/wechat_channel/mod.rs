@@ -86,6 +86,11 @@ impl Channel for WechatChannel {
             let ctx = Arc::clone(&self.ctx);
             let session_id = self.wechat_config.session_id.clone();
             tokio::spawn(async move {
+                if session_id.settings().show_connected {
+                    let _ = wechat_client
+                        .send_message(session_id.to_string(), "robot connected", None)
+                        .await;
+                }
                 loop {
                     let messages = wechat_client.get_updates().await?;
                     if let Some(message) = messages.into_iter().reduce(|mut l, mut r| {
@@ -239,27 +244,39 @@ impl WechatChannel {
 }
 
 impl WechatChannel {
-    async fn create_robot_messages<Content: Into<MessageItems>>(
-        session_id: &SessionId,
+    async fn create_robot_messages<'a, Content: Into<MessageItems>>(
+        session_id: &'a SessionId,
         _: &ChannelContext,
-        config: &WechatInnerConfig,
         content: Content,
-    ) -> crate::Result<WechatMessage> {
+    ) -> crate::Result<WechatRobotMessage<'a>> {
         let content = content.into();
         let message = match &session_id {
-            SessionId::Master { .. } | SessionId::Anonymous { .. } => {
-                WechatMessage::new(
-                    config,
-                    WechatUserId::from_str(session_id.deref())?,
-                    content,
-                    None,
-                )
-                .await?
-            }
+            SessionId::Master { .. } | SessionId::Anonymous { .. } => WechatRobotMessage {
+                session_id,
+                content,
+            },
             SessionId::Group { .. } => {
                 unreachable!("send robot message to group is not supported by wechat")
             }
         };
         Ok(message)
+    }
+}
+
+struct WechatRobotMessage<'a> {
+    session_id: &'a SessionId,
+    content: MessageItems,
+}
+
+impl<'a> WechatRobotMessage<'a> {
+    async fn send(self, wechat: &WechatClient) -> crate::Result<()> {
+        let _ = wechat
+            .send_message(
+                WechatUserId::from_str(self.session_id.deref())?,
+                self.content,
+                None,
+            )
+            .await?;
+        Ok(())
     }
 }

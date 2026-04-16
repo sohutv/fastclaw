@@ -44,6 +44,7 @@ impl SessionId {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct SessionSettings {
+    pub show_connected: bool,
     pub show_start: bool,
     pub show_toolcall: bool,
     pub show_reasoning: bool,
@@ -53,20 +54,23 @@ pub struct SessionSettings {
     pub show_compacting_err: bool,
     pub show_compacting_ignore: bool,
     pub show_error: bool,
+    pub show_disconnected: bool,
 }
 
 impl Default for SessionSettings {
     fn default() -> Self {
         Self {
+            show_connected: false,
             show_start: true,
             show_toolcall: false,
             show_reasoning: false,
             show_notify: false,
-            show_compacting: true,
-            show_compacting_ok: true,
+            show_compacting: false,
+            show_compacting_ok: false,
             show_compacting_err: true,
             show_compacting_ignore: false,
             show_error: true,
+            show_disconnected: false,
         }
     }
 }

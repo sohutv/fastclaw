@@ -337,6 +337,9 @@ impl LifecycleListener for DingTalkCallbackHandler {
     async fn on_connected(&self, client: Arc<DingTalkStream>, websocket_url: &str) {
         let master_session_ids = self.config.master_session_ids();
         for session_id in master_session_ids {
+            if !session_id.settings().show_connected {
+                continue;
+            }
             let Some(message) = DingtalkChannel::create_robot_messages(
                 &session_id,
                 &self.ctx,
@@ -366,6 +369,9 @@ Connected to dingtalk websocket
     ) {
         let master_session_ids = self.config.master_session_ids();
         for session_id in master_session_ids {
+            if !session_id.settings().show_disconnected {
+                continue;
+            }
             match result {
                 Ok(_) => {
                     let Some(message) = DingtalkChannel::create_robot_messages(
