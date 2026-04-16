@@ -24,14 +24,12 @@ impl WechatChannel {
             .as_ref()
             .expect("unexpected wechat_config");
         let session_id = &config.session_id;
-        let typing_ticket = wechat
-            .get_config(session_id.to_string(), None)
-            .await?;
+        let typing_ticket = wechat.get_config(session_id.to_string(), None).await.ok();
         while let Some(message) = receiver.recv().await {
             match Self::handle_agent_message(
                 &wechat,
                 ctx,
-                &typing_ticket,
+                typing_ticket.as_ref(),
                 &message,
                 state,
                 &mut buff,
@@ -47,16 +45,18 @@ impl WechatChannel {
                 }
             }
         }
-        let _ = wechat
-            .send_typing_cannel(session_id.to_string(), &typing_ticket)
-            .await;
+        if let Some(typing_ticket) = typing_ticket {
+            let _ = wechat
+                .send_typing_cannel(session_id.to_string(), &typing_ticket)
+                .await;
+        }
         Ok(())
     }
 
     async fn handle_agent_message(
         wechat: &WechatClient,
         ctx: &ChannelContext,
-        typing_ticket: &TypingTicket,
+        typing_ticket: Option<&TypingTicket>,
         ChannelMessage {
             session_id,
             message,
@@ -68,9 +68,11 @@ impl WechatChannel {
             AgentResponse::Start => {
                 if let AgentRespState::Wait = curr_state {
                     buff.clear();
-                    let _ = wechat
-                        .send_typing(session_id.to_string(), &typing_ticket)
-                        .await;
+                    if let Some(typing_ticket) = typing_ticket {
+                        let _ = wechat
+                            .send_typing(session_id.to_string(), &typing_ticket)
+                            .await;
+                    }
                     Ok(AgentRespState::Start)
                 } else {
                     Err(anyhow!("AgentRespState must be Init when starting"))
