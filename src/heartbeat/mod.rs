@@ -1,4 +1,5 @@
 use crate::agent::{Agent, AgentRequest, HistoryManager, LlmAgentSupplier};
+use crate::channels::SessionId;
 use crate::config::{Config, Workspace};
 use crate::model_provider::ModelProviders;
 use log::error;
@@ -6,6 +7,7 @@ use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::RwLock;
 use tokio::task::JoinHandle;
+
 mod spawn_cron_tasks;
 
 #[allow(unused)]
@@ -47,6 +49,7 @@ impl Heartbeat {
 
     pub async fn start<F, R>(
         self,
+        session_ids: Vec<SessionId>,
         agent: Arc<dyn Agent>,
         task_submitter: F,
     ) -> crate::Result<JoinHandle<()>>
@@ -56,8 +59,7 @@ impl Heartbeat {
     {
         let config = self.config;
         let workspace = self.workspace;
-        let interval_dur = self.interval;
-        let mut interval = tokio::time::interval(interval_dur);
+        let mut interval = tokio::time::interval(self.interval);
 
         let handle = {
             tokio::spawn(async move {
@@ -66,7 +68,7 @@ impl Heartbeat {
                 loop {
                     tokio::select! {
                         _ = interval.tick() => {
-                            match Self::spawn_cron_tasks(Arc::clone(&agent), config,workspace, interval_dur,task_submitter.clone()).await{
+                            match Self::spawn_cron_tasks(Arc::clone(&agent), config,workspace, &session_ids,task_submitter.clone()).await{
                                 Ok(_)=>{}
                                 Err(e)=>{error!("Failed to fetch cron tasks: {}",e)}
                             }

@@ -33,7 +33,7 @@ pub struct DingTalkConfig {
 
 pub struct DingtalkChannel {
     pub ctx: Arc<ChannelContext>,
-    dingtalk_config: DingTalkConfig,
+    pub dingtalk_config: DingTalkConfig,
 }
 
 impl DingtalkChannel {

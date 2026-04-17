@@ -13,6 +13,7 @@ use sqlx::{Arguments, QueryBuilder, Sqlite};
 use std::sync::Arc;
 use strum::IntoEnumIterator;
 use tokio_stream::StreamExt;
+use crate::channels::{Anonymous, SessionId};
 
 #[derive(Clone)]
 pub struct TaskListTool {
@@ -29,6 +30,7 @@ impl TaskListTool {
 pub struct Args {
     run_state: Option<TaskRunState>,
     enabled: TaskEnabled,
+    session_id: Anonymous,
 }
 
 #[allow(async_fn_in_trait)]
@@ -55,16 +57,27 @@ impl Tool for TaskListTool {
                         "enum": TaskEnabled::iter().map(|it|it.to_string()).collect::<Vec<_>>(),
                         "description": "The enabled state of the task",
                     },
+                    "session_id": {
+                        "type": "string",
+                        "description": "The current session-id",
+                    },
                 },
-                "required": ["enabled"],
+                "required": ["enabled", "session_id"],
             }),
         }
     }
     async fn call(&self, args: Self::Args) -> Result<Self::Output, Self::Error> {
+        let session_id = SessionId::from(&args.session_id);
+        let sql_pool = self
+            .ctx
+            .workspace
+            .sql_pool(&session_id)
+            .await
+            .map_err(|err| ToolCallError(format!("fail to get sql_pool, err: {err}")))?;
         let mut query_builder = args
             .create_sql()
             .map_err(|err| ToolCallError(format!("{err}")))?;
-        let mut stream = query_builder.build().fetch(&self.ctx.workspace.sql_pool);
+        let mut stream = query_builder.build().fetch(&*sql_pool);
         let mut tasks = vec![];
         while let Some(row) = stream.next().await {
             if let Ok(row) = row {

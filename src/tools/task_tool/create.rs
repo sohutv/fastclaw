@@ -1,4 +1,6 @@
+use std::ops::Deref;
 use crate::agent::AgentContext;
+use crate::channels::{Anonymous, SessionId};
 use crate::tools::task_tool::{TaskEnabled, TaskRunState};
 use crate::tools::{ToolCallError, ToolCallRsult};
 use log::error;
@@ -25,7 +27,7 @@ pub struct Args {
     name: String,
     cron: String,
     desc: String,
-    session_id: String,
+    session_id: Anonymous,
     agent_id: String,
 }
 
@@ -70,17 +72,20 @@ impl Tool for TaskCreateTool {
     }
 
     async fn call(&self, args: Self::Args) -> Result<Self::Output, Self::Error> {
+        let session_id = SessionId::from(&args.session_id);
+        let sql_pool = self
+            .ctx
+            .workspace
+            .sql_pool(&session_id)
+            .await
+            .map_err(|err| ToolCallError(format!("fail to get sql_pool, err: {err}")))?;
         let _ = cron::Schedule::from_str(&args.cron)
             .map_err(|err| ToolCallError(format!("Invalid cron expression: {err}")))?;
         let mut query_builder = args.create_sql();
-        let _ = query_builder
-            .build()
-            .execute(&self.ctx.workspace.sql_pool)
-            .await
-            .map_err(|err| {
-                error!("{err}");
-                ToolCallError(format!("{err}"))
-            })?;
+        let _ = query_builder.build().execute(&*sql_pool).await.map_err(|err| {
+            error!("{err}");
+            ToolCallError(format!("{err}"))
+        })?;
         Ok(ToolCallRsult::ok(format!("create task {} ok", args.name)))
     }
 }
@@ -106,7 +111,7 @@ impl Args {
             .push(", ")
             .push_bind(desc)
             .push(", ")
-            .push_bind(session_id)
+            .push_bind(session_id.deref())
             .push(", ")
             .push_bind(TaskRunState::Ready as u16)
             .push(", ")

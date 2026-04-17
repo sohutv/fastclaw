@@ -20,6 +20,20 @@ pub enum SessionId {
     },
 }
 
+impl PartialEq<Self> for SessionId {
+    fn eq(&self, other: &Self) -> bool {
+        self.deref().eq(other.deref())
+    }
+}
+
+impl Eq for SessionId {}
+
+impl Hash for SessionId {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        self.deref().hash(state)
+    }
+}
+
 impl Display for SessionId {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         let str = match self {
@@ -192,5 +206,14 @@ impl From<Anonymous> for UserId {
 impl From<&Anonymous> for UserId {
     fn from(value: &Anonymous) -> Self {
         UserId::Anonymous(value.clone())
+    }
+}
+
+impl From<&Anonymous> for SessionId {
+    fn from(value: &Anonymous) -> Self {
+        Self::Anonymous {
+            val: value.clone(),
+            settings: Default::default(),
+        }
     }
 }

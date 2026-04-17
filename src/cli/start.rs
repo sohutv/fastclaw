@@ -8,6 +8,7 @@ use crate::model_provider::ModelProviders;
 use anyhow::anyhow;
 use clap::Args;
 use derive_more::FromStr;
+use itertools::Itertools;
 use log::info;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -80,6 +81,13 @@ impl CmdRunner for Start {
                 info!("Starting Dingtalk channel");
                 let channel =
                     channels::dingtalk_channel::DingtalkChannel::new(config, workspace).await?;
+                let session_ids = channel
+                    .dingtalk_config
+                    .allow_session_ids
+                    .values()
+                    .into_iter()
+                    .map(|it| it.clone())
+                    .collect_vec();
                 let channel_ctx = Arc::clone(&(channel.ctx));
                 let heartbeat_agent = Arc::new(main_agent.fork("heartbeat").await?);
                 let main_agent = Arc::new(main_agent);
@@ -88,7 +96,9 @@ impl CmdRunner for Start {
                     let channel_ctx = Arc::clone(&channel_ctx);
                     let dingtalk = Arc::clone(&dingtalk);
                     let heartbeat = Heartbeat::new(config, workspace, &history_manager).await?;
+
                     let join_handle = heartbeat.start(
+                        session_ids,
                         heartbeat_agent,
                         move|agent, req| {
                             let channel_ctx = Arc::clone(&channel_ctx);
@@ -110,6 +120,7 @@ impl CmdRunner for Start {
                 info!("Starting Wechat channel");
                 let channel =
                     channels::wechat_channel::WechatChannel::new(config, workspace).await?;
+                let session_ids = vec![channel.wechat_config.session_id.clone()];
                 let channel_ctx = Arc::clone(&(channel.ctx));
                 let heartbeat_agent = Arc::new(main_agent.fork("heartbeat").await?);
                 let main_agent = Arc::new(main_agent);
@@ -119,7 +130,7 @@ impl CmdRunner for Start {
                     let wechat = Arc::clone(&wechat);
                     let heartbeat = Heartbeat::new(config, workspace, &history_manager).await?;
                     let join_handle = heartbeat
-                        .start(heartbeat_agent, move |agent, req| {
+                        .start(session_ids, heartbeat_agent, move |agent, req| {
                             let channel_ctx = Arc::clone(&channel_ctx);
                             let wechat = Arc::clone(&wechat);
                             async move {

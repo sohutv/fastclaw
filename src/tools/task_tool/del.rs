@@ -5,6 +5,7 @@ use rig::completion::ToolDefinition;
 use rig::tool::Tool;
 use serde_json::json;
 use std::sync::Arc;
+use crate::channels::{Anonymous, SessionId};
 
 #[derive(Clone)]
 pub struct TaskDelTool {
@@ -20,6 +21,7 @@ impl TaskDelTool {
 #[derive(Debug, Clone, serde::Deserialize)]
 pub struct Args {
     id: u64,
+    session_id: Anonymous,
 }
 
 #[allow(async_fn_in_trait)]
@@ -39,20 +41,31 @@ impl Tool for TaskDelTool {
                     "id": {
                         "type": "integer",
                         "description": "The id of task to delete",
-                    }
+                    },
+                    "session_id": {
+                        "type": "string",
+                        "description": "The current session-id",
+                    },
                 },
-                "required": ["id"],
+                "required": ["id", "session_id"],
             }),
         }
     }
 
     async fn call(&self, args: Self::Args) -> Result<Self::Output, Self::Error> {
+        let session_id = SessionId::from(&args.session_id);
+        let sql_pool = self
+            .ctx
+            .workspace
+            .sql_pool(&session_id)
+            .await
+            .map_err(|err| ToolCallError(format!("fail to get sql_pool, err: {err}")))?;
         let task_id = i64::try_from(args.id)
             .map_err(|_| ToolCallError(format!("task id {} is out of range", args.id)))?;
         let result =
             sqlx::query("update `cron_task` set `deleted` = 1, `updated_at` = CURRENT_TIMESTAMP where `id` = ? and `deleted` = 0")
                 .bind(task_id)
-                .execute(&self.ctx.workspace.sql_pool)
+                .execute(&*sql_pool)
                 .await
                 .map_err(|err| {
                     error!("{err}");
