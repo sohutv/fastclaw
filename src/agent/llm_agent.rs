@@ -86,10 +86,7 @@ where
             model_settings: model_provider
                 .model_settings(&model_name)
                 .map(|it| it.clone())
-                .ok_or(anyhow!(
-                    "model settings not found for {}",
-                    agent_id
-                ))?,
+                .ok_or(anyhow!("model settings not found for {}", agent_id))?,
             agent_settings: ctx
                 .config
                 .agent_settings(&agent_id)
@@ -102,7 +99,12 @@ where
         })
     }
 
-    pub async fn fork<ID: Into<AgentId>>(&self, agent_id: ID) -> crate::Result<Self> {
+    #[allow(unused)]
+    pub async fn fork<ID: Into<AgentId>>(&self) -> crate::Result<Self> {
+        self.fork_with(self.id.clone()).await
+    }
+
+    pub async fn fork_with<ID: Into<AgentId>>(&self, agent_id: ID) -> crate::Result<Self> {
         Ok(Self {
             id: agent_id.into(),
             model_settings: self.model_settings.clone(),
