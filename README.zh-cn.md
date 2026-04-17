@@ -203,8 +203,7 @@ client_secret = "..."
 
 ```toml
 [wechat_config]
-account_id = "o9cq808B3iiWivLs-uzgKSmbwtXI@im.wechat"
-session_id = { Master = { val = "your-wechat-user-id", settings = {} } }
+session_id = { Master = { val = "your-wechat-account", settings = {} } }
 ```
 
 ### 3. 启动 Agent

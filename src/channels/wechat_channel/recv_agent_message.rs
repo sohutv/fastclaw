@@ -18,13 +18,7 @@ impl WechatChannel {
     ) -> crate::Result<()> {
         let mut state = AgentRespState::Wait;
         let mut buff = Vec::<String>::new();
-        let config = ctx
-            .config
-            .wechat_config
-            .as_ref()
-            .expect("unexpected wechat_config");
-        let session_id = &config.session_id;
-        let typing_ticket = wechat.get_config(session_id.to_string(), None).await.ok();
+        let typing_ticket = wechat.get_config().await.ok();
         while let Some(message) = receiver.recv().await {
             match Self::handle_agent_message(
                 &wechat,
@@ -46,9 +40,7 @@ impl WechatChannel {
             }
         }
         if let Some(typing_ticket) = typing_ticket {
-            let _ = wechat
-                .send_typing_cannel(session_id.to_string(), &typing_ticket)
-                .await;
+            let _ = wechat.send_typing_cannel(&typing_ticket).await;
         }
         Ok(())
     }
@@ -69,9 +61,7 @@ impl WechatChannel {
                 if let AgentRespState::Wait = curr_state {
                     buff.clear();
                     if let Some(typing_ticket) = typing_ticket {
-                        let _ = wechat
-                            .send_typing(session_id.to_string(), &typing_ticket)
-                            .await;
+                        let _ = wechat.send_typing(&typing_ticket).await;
                     }
                     Ok(AgentRespState::Start)
                 } else {

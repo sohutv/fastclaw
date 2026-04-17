@@ -203,8 +203,7 @@ Optional Wechat config (when `channel_wechat_channel` is enabled):
 
 ```toml
 [wechat_config]
-account_id = "o9cq808B3iiWivLs-uzgKSmbwtXI@im.wechat"
-session_id = { Master = { val = "your-wechat-user-id", settings = {} } }
+session_id = { Master = { val = "your-wechat-account", settings = {} } }
 ```
 
 ### 3. Start Agent

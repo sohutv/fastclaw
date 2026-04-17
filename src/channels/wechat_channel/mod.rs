@@ -15,10 +15,7 @@ use std::ops::Deref;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::mpsc::Receiver;
-use wechat_sdk::account::WechatAccountId;
-use wechat_sdk::client::message::{
-    MessageItem, MessageItemValue, MessageItems, TextItem, ToUserId,
-};
+use wechat_sdk::client::message::{MessageItem, MessageItemValue, MessageItems, TextItem};
 use wechat_sdk::client::{WechatClient, WechatConfig as WechatInnerConfig, message::WechatMessage};
 
 mod config;
@@ -27,8 +24,6 @@ mod recv_agent_message;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct WechatConfig {
-    // o9cq808B3iiWivLs-uzgKSmbwtXI@im.wechat
-    pub account_id: WechatAccountId,
     pub session_id: SessionId,
 }
 
@@ -71,7 +66,7 @@ impl Channel for WechatChannel {
                 .parent()
                 .expect("unexpected workspace path parent")
                 .join("wechat"),
-            account_id: self.wechat_config.account_id.clone(),
+            account_id: self.wechat_config.session_id.to_string().into(),
             http_timeout: Default::default(),
             qr_login_timeout: Default::default(),
             http_api_get_updates_timeout: Default::default(),
@@ -91,9 +86,7 @@ impl Channel for WechatChannel {
             let session_id = self.wechat_config.session_id.clone();
             tokio::spawn(async move {
                 if session_id.settings().show_connected {
-                    let _ = wechat_client
-                        .send_message(session_id.to_string(), "robot connected", None)
-                        .await;
+                    let _ = wechat_client.send_message("robot connected").await;
                 }
                 loop {
                     match wechat_client.get_updates().await {
@@ -149,7 +142,9 @@ impl WechatChannel {
     ) -> crate::Result<()> {
         // wechat bot 不支持群聊, 所以不会出现未授权的会话
         let WechatMessage {
-            message_id, items, ..
+            message_id,
+            items,
+            ..
         } = data;
         let (cmd, mut user_contents) = {
             let mut cmd = None;
@@ -337,11 +332,9 @@ impl WechatChannel {
         _: &ChannelContext,
         content: Content,
     ) -> crate::Result<WechatRobotMessage> {
-        let content = content.into();
         let message = match &session_id {
             SessionId::Master { .. } | SessionId::Anonymous { .. } => WechatRobotMessage {
-                to_user_id: session_id.to_string().into(),
-                content,
+                content: content.into(),
             },
             SessionId::Group { .. } => {
                 unreachable!("send robot message to group is not supported by wechat")
@@ -352,15 +345,12 @@ impl WechatChannel {
 }
 
 struct WechatRobotMessage {
-    to_user_id: ToUserId,
     content: MessageItems,
 }
 
 impl WechatRobotMessage {
     async fn send(self, wechat: &WechatClient) -> crate::Result<()> {
-        let _ = wechat
-            .send_message(self.to_user_id, self.content, None)
-            .await?;
+        let _ = wechat.send_message(self.content).await?;
         Ok(())
     }
 }
