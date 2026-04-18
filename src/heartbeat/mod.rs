@@ -54,7 +54,7 @@ impl Heartbeat {
         task_submitter: F,
     ) -> crate::Result<JoinHandle<()>>
     where
-        R: Future<Output = crate::Result<()>> + Send + Sync,
+        R: Future<Output = crate::Result<()>> + Send,
         F: (Fn(Arc<dyn Agent>, AgentRequest) -> R) + Clone + Sync + Send + 'static,
     {
         let config = self.config;

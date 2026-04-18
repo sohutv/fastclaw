@@ -53,6 +53,7 @@ default = [
     "channel_dingtalk_channel",
     "channel_wechat_channel",
     "volcengine",
+    "cloud_storage_tool",
 ]
 
 

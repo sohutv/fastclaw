@@ -16,8 +16,8 @@ impl super::Heartbeat {
         task_submitter: F,
     ) -> crate::Result<()>
     where
-        R: Future<Output = crate::Result<()>> + Send + Sync,
-        F: (Fn(Arc<dyn Agent>, AgentRequest) -> R),
+        R: Future<Output = crate::Result<()>> + Send,
+        F: (Fn(Arc<dyn Agent>, AgentRequest) -> R)+Clone,
     {
         for session_id in session_ids {
             match Self::spawn_cron_tasks_actual(
@@ -25,7 +25,7 @@ impl super::Heartbeat {
                 config,
                 workspace,
                 session_id,
-                &task_submitter,
+                task_submitter.clone(),
             )
             .await
             {
@@ -42,10 +42,10 @@ impl super::Heartbeat {
         _: &'static Config,
         workspace: &Workspace,
         session_id: &SessionId,
-        task_submitter: &F,
+        task_submitter: F,
     ) -> crate::Result<()>
     where
-        R: Future<Output = crate::Result<()>> + Send + Sync,
+        R: Future<Output = crate::Result<()>> + Send,
         F: (Fn(Arc<dyn Agent>, AgentRequest) -> R),
     {
         let tasks = TaskTools::fetch_ready_tasks(workspace, session_id).await?;

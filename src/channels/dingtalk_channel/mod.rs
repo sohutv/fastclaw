@@ -1,5 +1,5 @@
-use crate::agent::{Agent, AgentRequest};
-use crate::channels::{Channel, ChannelContext, ChannelMessage, SessionId};
+use crate::agent::Agent;
+use crate::channels::{Channel, ChannelContext, SessionId};
 use crate::config::{Config, Workspace};
 use anyhow::anyhow;
 use async_trait::async_trait;
@@ -18,7 +18,6 @@ use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::ops::Deref;
 use std::sync::Arc;
-use tokio::sync::mpsc::Receiver;
 use tokio::task::JoinHandle;
 
 mod callback_handler;
@@ -81,18 +80,7 @@ impl Channel for DingtalkChannel {
         Ok((dingtalk, dingtalk_stream_handle))
     }
 }
-impl DingtalkChannel {
-    pub async fn spawn_agent_task<F>(
-        req: AgentRequest,
-        agent_supplier: F,
-        addi_system_prompt: Option<String>,
-    ) -> crate::Result<Receiver<ChannelMessage>>
-    where
-        F: FnOnce() -> Arc<dyn Agent>,
-    {
-        super::spawn_agent_task(req, agent_supplier, addi_system_prompt).await
-    }
-}
+
 impl DingtalkChannel {
     fn create_robot_messages<Content: Into<MessageContent>>(
         session_id: &SessionId,

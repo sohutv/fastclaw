@@ -1,6 +1,6 @@
 use crate::agent::{Agent, AgentRequest, RequestId};
 use crate::channels::console_cmd::Console;
-use crate::channels::{Channel, ChannelContext, ChannelMessage, SessionId};
+use crate::channels::{Channel, ChannelContext, SessionId};
 use crate::config::{Config, Workspace};
 use anyhow::anyhow;
 use async_trait::async_trait;
@@ -14,7 +14,6 @@ use std::io::Cursor;
 use std::ops::Deref;
 use std::sync::Arc;
 use std::time::Duration;
-use tokio::sync::mpsc::Receiver;
 use wechat_sdk::client::message::{MessageItem, MessageItemValue, MessageItems, TextItem};
 use wechat_sdk::client::{WechatClient, WechatConfig as WechatInnerConfig, message::WechatMessage};
 
@@ -120,17 +119,6 @@ impl Channel for WechatChannel {
 }
 
 impl WechatChannel {
-    pub async fn spawn_agent_task<F>(
-        req: AgentRequest,
-        agent_supplier: F,
-        addi_system_prompt: Option<String>,
-    ) -> crate::Result<Receiver<ChannelMessage>>
-    where
-        F: FnOnce() -> Arc<dyn Agent>,
-    {
-        super::spawn_agent_task(req, agent_supplier, addi_system_prompt).await
-    }
-
     /// ### handle_wechat_message
     /// - wechat-bot 不支持群聊, 所以不会出现未授权的会话
     async fn handle_wechat_message(
@@ -142,9 +130,7 @@ impl WechatChannel {
     ) -> crate::Result<()> {
         // wechat bot 不支持群聊, 所以不会出现未授权的会话
         let WechatMessage {
-            message_id,
-            items,
-            ..
+            message_id, items, ..
         } = data;
         let (cmd, mut user_contents) = {
             let mut cmd = None;
@@ -293,7 +279,7 @@ impl WechatChannel {
                     content: user_content,
                 },
             },
-            move || agent,
+            agent,
             None,
         )
         .await

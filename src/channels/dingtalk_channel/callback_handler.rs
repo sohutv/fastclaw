@@ -1,7 +1,7 @@
 use crate::agent::{Agent, AgentRequest, RequestId};
 use crate::channels::console_cmd::Console;
 use crate::channels::dingtalk_channel::{DingTalkConfig, DingtalkChannel};
-use crate::channels::{ChannelContext, SessionId, UserId, session_id};
+use crate::channels::{Channel, ChannelContext, SessionId, UserId, session_id};
 use async_trait::async_trait;
 use base64::Engine;
 use dingtalk_stream::{
@@ -288,7 +288,7 @@ impl dingtalk_stream::handlers::CallbackHandler for DingTalkCallbackHandler {
                     content: user_content,
                 },
             },
-            move || agent,
+            agent,
             Some(addi_system_prompt),
         )
         .await

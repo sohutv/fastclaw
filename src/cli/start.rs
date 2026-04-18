@@ -166,9 +166,7 @@ async fn start_with_dingtalk(
                 async move {
                     let mut receiver =
                         channels::dingtalk_channel::DingtalkChannel::spawn_agent_task(
-                            req,
-                            || agent,
-                            None,
+                            req, agent, None,
                         )
                         .await?;
                     let _ = channels::dingtalk_channel::DingtalkChannel::recv_agent_message(
@@ -212,12 +210,9 @@ async fn start_with_wechat(
                 let channel_ctx = Arc::clone(&channel_ctx);
                 let wechat = Arc::clone(&wechat);
                 async move {
-                    let mut receiver = channels::wechat_channel::WechatChannel::spawn_agent_task(
-                        req,
-                        || agent,
-                        None,
-                    )
-                    .await?;
+                    let mut receiver =
+                        channels::wechat_channel::WechatChannel::spawn_agent_task(req, agent, None)
+                            .await?;
                     let _ = channels::wechat_channel::WechatChannel::recv_agent_message(
                         wechat,
                         &channel_ctx,
