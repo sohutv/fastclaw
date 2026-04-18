@@ -22,11 +22,17 @@ pub use session_id::*;
 
 #[async_trait]
 pub trait Channel {
-    type Output;
+    type Client;
 
-    async fn start(self, agent: Arc<dyn Agent>) -> crate::Result<Self::Output>;
+    type JoinHandle;
+
+    async fn start(
+        self,
+        agent: Arc<dyn Agent>,
+    ) -> crate::Result<(Arc<Self>, Arc<Self::Client>, Self::JoinHandle)>;
 
     async fn spawn_agent_task(
+        &self,
         req: AgentRequest,
         agent: Arc<dyn Agent>,
         addi_system_prompt: Option<String>,
@@ -52,6 +58,12 @@ pub trait Channel {
         });
         Ok(channel_message_receiver)
     }
+
+    async fn recv_agent_message(
+        &self,
+        client: Arc<Self::Client>,
+        receiver: &mut Receiver<ChannelMessage>,
+    ) -> crate::Result<()>;
 }
 
 #[allow(unused)]

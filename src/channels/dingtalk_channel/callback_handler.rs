@@ -1,7 +1,7 @@
 use crate::agent::{Agent, AgentRequest, RequestId};
 use crate::channels::console_cmd::Console;
-use crate::channels::dingtalk_channel::{DingTalkConfig, DingtalkChannel};
-use crate::channels::{Channel, ChannelContext, SessionId, UserId, session_id};
+use crate::channels::dingtalk_channel::DingtalkChannel;
+use crate::channels::{Channel, SessionId, UserId, session_id};
 use async_trait::async_trait;
 use base64::Engine;
 use dingtalk_stream::{
@@ -33,8 +33,7 @@ use tokio::sync::mpsc::Sender;
 
 #[allow(unused)]
 pub(super) struct DingTalkCallbackHandler {
-    pub(super) ctx: Arc<ChannelContext>,
-    pub(super) config: DingTalkConfig,
+    pub(super) channel: Arc<DingtalkChannel>,
     pub(super) dingtalk_bot_topic: MessageTopic,
     pub(super) agent: Arc<dyn Agent>,
 }
@@ -82,7 +81,8 @@ impl dingtalk_stream::handlers::CallbackHandler for DingTalkCallbackHandler {
             });
         };
 
-        let Ok(session_id) = SessionId::try_from((&sender_id, &self.config)) else {
+        let Ok(session_id) = SessionId::try_from((&sender_id, &self.channel.dingtalk_config))
+        else {
             if let Some(cb_msg_sender) = cb_msg_sender {
                 let _ = cb_msg_sender
                     .send(WebhookMessage {
@@ -111,7 +111,7 @@ impl dingtalk_stream::handlers::CallbackHandler for DingTalkCallbackHandler {
                 )
             }
             MessagePayload::Picture { content: picture } => {
-                let downloads_dir = self.ctx.workspace.downloads_path().to_path_buf();
+                let downloads_dir = self.channel.ctx.workspace.downloads_path().to_path_buf();
                 match picture.fetch(&dingtalk_client, downloads_dir).await {
                     Ok((filepath, image)) => {
                         (None, None, Some(vec![(1usize, filepath, image)]), None)
@@ -120,7 +120,7 @@ impl dingtalk_stream::handlers::CallbackHandler for DingTalkCallbackHandler {
                 }
             }
             MessagePayload::File { content } => {
-                let downloads_dir = self.ctx.workspace.downloads_path().to_path_buf();
+                let downloads_dir = self.channel.ctx.workspace.downloads_path().to_path_buf();
                 match content.fetch(&dingtalk_client, downloads_dir).await {
                     Ok((filepath, _)) => (None, None, None, Some(vec![filepath])),
                     Err(e) => (
@@ -132,7 +132,7 @@ impl dingtalk_stream::handlers::CallbackHandler for DingTalkCallbackHandler {
                 }
             }
             MessagePayload::RichText { content } => {
-                let downloads_dir = self.ctx.workspace.downloads_path().to_path_buf();
+                let downloads_dir = self.channel.ctx.workspace.downloads_path().to_path_buf();
                 let mut texts = vec![];
                 let mut pictures = vec![];
                 let mut img_idx = 0;
@@ -164,13 +164,14 @@ impl dingtalk_stream::handlers::CallbackHandler for DingTalkCallbackHandler {
             }
         };
         if let Some(cmd_val) = &cmd {
-            match Console::handle_console_cmd(&self.ctx, &cmd_val, &self.agent, &session_id).await {
+            match Console::handle_console_cmd(&self.channel.ctx, &cmd_val, &self.agent, &session_id)
+                .await
+            {
                 Ok(mut receiver) => {
+                    let channel = Arc::clone(&self.channel);
                     let client = Arc::clone(&dingtalk_client);
-                    let ctx = Arc::clone(&self.ctx);
                     let _ = tokio::spawn(async move {
-                        let _ =
-                            DingtalkChannel::recv_agent_message(client, &ctx, &mut receiver).await;
+                        let _ = channel.recv_agent_message(client, &mut receiver).await;
                     });
                     return Ok(HandlerResp::Text("cmd submitted".to_string()));
                 }
@@ -280,18 +281,20 @@ impl dingtalk_stream::handlers::CallbackHandler for DingTalkCallbackHandler {
         info!("Submit task to agent, msg_id: {}", msg_id);
         let task_id = RequestId::default();
         let agent = Arc::clone(&self.agent);
-        match DingtalkChannel::spawn_agent_task(
-            AgentRequest {
-                id: task_id.clone(),
-                session_id,
-                message: Message::User {
-                    content: user_content,
+        match self
+            .channel
+            .spawn_agent_task(
+                AgentRequest {
+                    id: task_id.clone(),
+                    session_id,
+                    message: Message::User {
+                        content: user_content,
+                    },
                 },
-            },
-            agent,
-            Some(addi_system_prompt),
-        )
-        .await
+                agent,
+                Some(addi_system_prompt),
+            )
+            .await
         {
             Ok(receiver) => {
                 let msg = format!(
@@ -301,11 +304,10 @@ impl dingtalk_stream::handlers::CallbackHandler for DingTalkCallbackHandler {
                 info!("{msg}");
                 {
                     let mut receiver = receiver;
+                    let channel = Arc::clone(&self.channel);
                     let client = Arc::clone(&dingtalk_client);
-                    let ctx = Arc::clone(&self.ctx);
                     let _ = tokio::spawn(async move {
-                        let _ =
-                            DingtalkChannel::recv_agent_message(client, &ctx, &mut receiver).await;
+                        let _ = channel.recv_agent_message(client, &mut receiver).await;
                     });
                 }
                 Ok(HandlerResp::Text(msg))
@@ -331,14 +333,14 @@ impl dingtalk_stream::handlers::CallbackHandler for DingTalkCallbackHandler {
 #[async_trait]
 impl LifecycleListener for DingTalkCallbackHandler {
     async fn on_connected(&self, client: Arc<DingTalkStream>, websocket_url: &str) {
-        let master_session_ids = self.config.master_session_ids();
+        let master_session_ids = self.channel.dingtalk_config.master_session_ids();
         for session_id in master_session_ids {
             if !session_id.settings().show_connected {
                 continue;
             }
             let Ok(message) = DingtalkChannel::create_robot_messages(
                 &session_id,
-                &self.ctx,
+                &self.channel.ctx,
                 MessageContentMarkdown::from((
                     "Connected",
                     format!(
@@ -361,7 +363,7 @@ Connected to dingtalk websocket
         client: Arc<DingTalkStream>,
         result: &dingtalk_stream::Result<()>,
     ) {
-        let master_session_ids = self.config.master_session_ids();
+        let master_session_ids = self.channel.dingtalk_config.master_session_ids();
         for session_id in master_session_ids {
             if !session_id.settings().show_disconnected {
                 continue;
@@ -370,7 +372,7 @@ Connected to dingtalk websocket
                 Ok(_) => {
                     let Ok(message) = DingtalkChannel::create_robot_messages(
                         &session_id,
-                        &self.ctx,
+                        &self.channel.ctx,
                         MessageContentText::from("disconnected from dingtalk websocket"),
                     ) else {
                         return;
@@ -380,7 +382,7 @@ Connected to dingtalk websocket
                 Err(err) => {
                     let Ok(message) = DingtalkChannel::create_robot_messages(
                         &session_id,
-                        &self.ctx,
+                        &self.channel.ctx,
                         MessageContentMarkdown::from((
                             "Disconnected",
                             format!(

@@ -6,20 +6,24 @@ use anyhow::anyhow;
 use async_trait::async_trait;
 use rig::completion::Message;
 use rig::message::{AssistantContent, ReasoningContent, ToolCall, ToolFunction};
-use rustyline::DefaultEditor;
 use rustyline::error::ReadlineError;
-use std::io::{Write, stdout};
+use rustyline::DefaultEditor;
+use std::io::{stdout, Write};
 use std::sync::Arc;
 use std::thread::JoinHandle;
 use tokio::sync::mpsc::Receiver;
 
+#[derive(Clone)]
 pub struct CliChannel {
     ctx: Arc<ChannelContext>,
     session_id: SessionId,
 }
 
 impl CliChannel {
-    pub async fn new(config: &'static Config, workspace: &'static Workspace) -> crate::Result<Self> {
+    pub async fn new(
+        config: &'static Config,
+        workspace: &'static Workspace,
+    ) -> crate::Result<Self> {
         Ok(CliChannel {
             ctx: Arc::new(ChannelContext {
                 config: config.clone(),
@@ -35,73 +39,83 @@ impl CliChannel {
 
 #[async_trait]
 impl Channel for CliChannel {
-    type Output = JoinHandle<()>;
+    type Client = ();
+    type JoinHandle = JoinHandle<()>;
 
-    async fn start(self, agent: Arc<dyn Agent>) -> crate::Result<Self::Output> {
-        let Self { ctx, session_id } = self;
-        let ctx = Arc::clone(&ctx);
+    async fn start(
+        self,
+        agent: Arc<dyn Agent>,
+    ) -> crate::Result<(Arc<Self>, Arc<Self::Client>, Self::JoinHandle)> {
+        let self_ = Arc::new(self);
         let (message_sender, mut message_receiver) = tokio::sync::mpsc::channel(32);
-        let join_handle = std::thread::spawn(move || {
-            let rt = tokio::runtime::Builder::new_current_thread()
-                .enable_all()
-                .build()
-                .expect("unexpected err");
-            let mut rl = DefaultEditor::new().expect("unexpected err");
-            let _ = rt.block_on(async move {
-                loop {
-                    let readline = rl.readline(">> ");
-                    match readline {
-                        Ok(line) => {
-                            let line = line.trim();
-                            if !line.is_empty() {
-                                if line.starts_with('/') {
-                                    match Console::handle_console_cmd(
-                                        &ctx,
-                                        &line,
-                                        &agent,
-                                        &session_id,
-                                    )
-                                    .await
-                                    {
-                                        Ok(_) => {
-                                            continue;
+        let join_handle = {
+            let self_ = Arc::clone(&self_);
+            let join_handle = std::thread::spawn(move || {
+                let rt = tokio::runtime::Builder::new_current_thread()
+                    .enable_all()
+                    .build()
+                    .expect("unexpected err");
+                let mut rl = DefaultEditor::new().expect("unexpected err");
+                let _ = rt.block_on(async move {
+                    loop {
+                        let readline = rl.readline(">> ");
+                        match readline {
+                            Ok(line) => {
+                                let line = line.trim();
+                                if !line.is_empty() {
+                                    if line.starts_with('/') {
+                                        match Console::handle_console_cmd(
+                                            &self_.ctx,
+                                            &line,
+                                            &agent,
+                                            &self_.session_id,
+                                        )
+                                            .await
+                                        {
+                                            Ok(_) => {
+                                                continue;
+                                            }
+                                            Err(_) => {}
                                         }
-                                        Err(_) => {}
                                     }
-                                }
-                                let message = Message::user(line);
-                                let _ = agent
-                                    .run(
-                                        AgentRequest {
-                                            id: Default::default(),
-                                            session_id: session_id.clone(),
-                                            message,
-                                        },
-                                        message_sender.clone(),
-                                        None,
+                                    let message = Message::user(line);
+                                    let _ = agent
+                                        .run(
+                                            AgentRequest {
+                                                id: Default::default(),
+                                                session_id: self_.session_id.clone(),
+                                                message,
+                                            },
+                                            message_sender.clone(),
+                                            None,
+                                        )
+                                        .await;
+                                    let _ = self_.recv_agent_message(
+                                        Arc::new(()),
+                                        &mut message_receiver,
                                     )
-                                    .await;
-                                let _ = Self::poll_agent_message(&ctx, &mut message_receiver).await;
+                                        .await;
+                                }
+                            }
+                            Err(ReadlineError::Interrupted) => {
+                                println!("CTRL-C");
+                                break;
+                            }
+                            Err(err) => {
+                                eprintln!("Error: {:?}", err);
                             }
                         }
-                        Err(ReadlineError::Interrupted) => {
-                            println!("CTRL-C");
-                            break;
-                        }
-                        Err(err) => {
-                            eprintln!("Error: {:?}", err);
-                        }
                     }
-                }
+                });
             });
-        });
-        Ok(join_handle)
+            join_handle
+        };
+        Ok((self_, Default::default(), join_handle))
     }
-}
 
-impl CliChannel {
-    async fn poll_agent_message(
-        ctx: &Arc<ChannelContext>,
+    async fn recv_agent_message(
+        &self,
+        _: Arc<Self::Client>,
         receiver: &mut Receiver<ChannelMessage>,
     ) -> crate::Result<()> {
         let mut state = AgentRespState::Init;
@@ -110,7 +124,7 @@ impl CliChannel {
             tokio::select! {
                 message = receiver.recv() => {
                     if let Some(message) = message {
-                        match  Self::handle_agent_message(&ctx, &message, state).await{
+                        match  Self::handle_agent_message(&self.ctx, &message, state).await{
                             Ok(AgentRespState::Final) | Err( _)=> {
                                 return Ok(());
                             },
@@ -138,7 +152,9 @@ impl CliChannel {
             }
         }
     }
+}
 
+impl CliChannel {
     async fn handle_agent_message(
         ctx: &ChannelContext,
         agent_response: &AgentResponse,
@@ -153,9 +169,9 @@ impl CliChannel {
                 }
             }
             AgentResponse::ToolCall(ToolCall {
-                function: ToolFunction { name, arguments },
-                ..
-            }) => {
+                                        function: ToolFunction { name, arguments },
+                                        ..
+                                    }) => {
                 println!(
                     r#"
 //////// ToolCall: {name}

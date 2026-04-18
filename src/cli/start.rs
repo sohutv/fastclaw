@@ -92,7 +92,7 @@ impl CmdRunner for Start {
                 ChannelType::Cli => {
                     info!("Starting CLI channel");
                     let channel = channels::cli_channel::CliChannel::new(config, workspace).await?;
-                    let join_handle = channel.start(Arc::clone(&main_agent)).await?;
+                    let (_, _, join_handle) = channel.start(Arc::clone(&main_agent)).await?;
                     join_handles.push(JoinHandle::Std(join_handle));
                 }
                 #[cfg(feature = "channel_dingtalk_channel")]
@@ -152,29 +152,19 @@ async fn start_with_dingtalk(
         .into_iter()
         .map(|it| it.clone())
         .collect_vec();
-    let channel_ctx = Arc::clone(&(channel.ctx));
-    let (dingtalk, chanel_join_handle) = channel.start(main_agent).await?;
+    let (channel, dingtalk, chanel_join_handle) = channel.start(main_agent).await?;
     let heartbeat_join_handle = {
-        let channel_ctx = Arc::clone(&channel_ctx);
+        let channel = Arc::clone(&channel);
         let dingtalk = Arc::clone(&dingtalk);
         let heartbeat = Heartbeat::new(config, workspace, &history_manager).await?;
 
         let join_handle = heartbeat
             .start(session_ids, heartbeat_agent, move |agent, req| {
-                let channel_ctx = Arc::clone(&channel_ctx);
+                let channel = Arc::clone(&channel);
                 let dingtalk = Arc::clone(&dingtalk);
                 async move {
-                    let mut receiver =
-                        channels::dingtalk_channel::DingtalkChannel::spawn_agent_task(
-                            req, agent, None,
-                        )
-                        .await?;
-                    let _ = channels::dingtalk_channel::DingtalkChannel::recv_agent_message(
-                        dingtalk,
-                        &channel_ctx,
-                        &mut receiver,
-                    )
-                    .await;
+                    let mut receiver = channel.spawn_agent_task(req, agent, None).await?;
+                    let _ = channel.recv_agent_message(dingtalk, &mut receiver).await;
                     Ok(())
                 }
             })
@@ -199,26 +189,18 @@ async fn start_with_wechat(
     info!("Starting Wechat channel");
     let channel = channels::wechat_channel::WechatChannel::new(config, workspace).await?;
     let session_ids = vec![channel.wechat_config.session_id.clone()];
-    let channel_ctx = Arc::clone(&(channel.ctx));
-    let (wechat, chanel_join_handle) = channel.start(main_agent).await?;
+    let (channel, wechat, chanel_join_handle) = channel.start(main_agent).await?;
     let heartbeat_join_handle = {
-        let channel_ctx = Arc::clone(&channel_ctx);
+        let channel = Arc::clone(&channel);
         let wechat = Arc::clone(&wechat);
         let heartbeat = Heartbeat::new(config, workspace, &history_manager).await?;
         let join_handle = heartbeat
             .start(session_ids, heartbeat_agent, move |agent, req| {
-                let channel_ctx = Arc::clone(&channel_ctx);
+                let channel = Arc::clone(&channel);
                 let wechat = Arc::clone(&wechat);
                 async move {
-                    let mut receiver =
-                        channels::wechat_channel::WechatChannel::spawn_agent_task(req, agent, None)
-                            .await?;
-                    let _ = channels::wechat_channel::WechatChannel::recv_agent_message(
-                        wechat,
-                        &channel_ctx,
-                        &mut receiver,
-                    )
-                    .await;
+                    let mut receiver = channel.spawn_agent_task(req, agent, None).await?;
+                    let _ = channel.recv_agent_message(wechat, &mut receiver).await;
                     Ok(())
                 }
             })

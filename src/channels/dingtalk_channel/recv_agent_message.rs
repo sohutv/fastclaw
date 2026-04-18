@@ -8,34 +8,11 @@ use dingtalk_stream::frames::up_message::{MessageContentMarkdown, MessageContent
 use rig::completion::{AssistantContent, Message};
 use rig::message::{ReasoningContent, ToolCall, ToolFunction};
 use std::ops::Deref;
-use std::sync::Arc;
-use tokio::sync::mpsc::Receiver;
 
 impl DingtalkChannel {
-    pub async fn recv_agent_message(
-        dingtalk: Arc<DingTalkStream>,
-        ctx: &ChannelContext,
-        receiver: &mut Receiver<ChannelMessage>,
-    ) -> crate::Result<()> {
-        let mut state = AgentRespState::Wait;
-        let mut buff = Vec::<String>::new();
-        while let Some(message) = receiver.recv().await {
-            match Self::handle_agent_message(&dingtalk, &*ctx, &message, state, &mut buff).await {
-                Ok(AgentRespState::Final) | Err(_) => {
-                    state = AgentRespState::Wait;
-                    buff.clear();
-                }
-                Ok(next) => {
-                    state = next;
-                }
-            }
-        }
-        Ok(())
-    }
-
-    async fn handle_agent_message(
+    pub(super) async fn handle_agent_message(
+        &self,
         dingtalk: &DingTalkStream,
-        ctx: &ChannelContext,
         ChannelMessage {
             session_id,
             message,
@@ -49,7 +26,7 @@ impl DingtalkChannel {
                     buff.clear();
                     if let Ok(Some(robot_message)) = create_robot_messages_for_agent(
                         session_id,
-                        ctx,
+                        &self.ctx,
                         AgentRespType::Start,
                         MessageContentText::from("正在思考..."),
                         DingtalkChannel::create_robot_messages,
@@ -69,7 +46,7 @@ impl DingtalkChannel {
             }) => {
                 if let Ok(Some(robot_message)) = create_robot_messages_for_agent(
                     session_id,
-                    ctx,
+                    &self.ctx,
                     AgentRespType::ToolCall,
                     MessageContentMarkdown::from((
                         format!("工具调用: {name}..."),
@@ -96,7 +73,7 @@ impl DingtalkChannel {
             }
             AgentResponse::ReasoningStream(reasoning) => {
                 match curr_state {
-                    AgentRespState::Start => if ctx.config.default_show_reasoning {},
+                    AgentRespState::Start => if self.ctx.config.default_show_reasoning {},
                     _ => {}
                 }
                 for content in reasoning.content.iter() {
@@ -112,7 +89,7 @@ impl DingtalkChannel {
                 match curr_state {
                     AgentRespState::Start => {}
                     AgentRespState::Reasoning => {
-                        if ctx.config.default_show_reasoning {
+                        if self.ctx.config.default_show_reasoning {
                             let content = {
                                 let content = buff.join("");
                                 buff.clear();
@@ -128,7 +105,7 @@ impl DingtalkChannel {
                             };
                             if let Ok(Some(robot_message)) = create_robot_messages_for_agent(
                                 session_id,
-                                ctx,
+                                &self.ctx,
                                 AgentRespType::Reasoning,
                                 content,
                                 DingtalkChannel::create_robot_messages,
@@ -180,7 +157,7 @@ impl DingtalkChannel {
                 };
                 if let Ok(Some(robot_message)) = create_robot_messages_for_agent(
                     session_id,
-                    ctx,
+                    &self.ctx,
                     AgentRespType::Content,
                     content,
                     DingtalkChannel::create_robot_messages,
@@ -194,7 +171,7 @@ impl DingtalkChannel {
             AgentResponse::Error(error) => {
                 if let Ok(Some(robot_message)) = create_robot_messages_for_agent(
                     session_id,
-                    ctx,
+                    &self.ctx,
                     AgentRespType::Error,
                     MessageContentText::from(format!("Agent error: {}", error)),
                     DingtalkChannel::create_robot_messages,
@@ -210,7 +187,7 @@ impl DingtalkChannel {
                     Notify::Text(text) => {
                         if let Ok(Some(robot_message)) = create_robot_messages_for_agent(
                             session_id,
-                            ctx,
+                            &self.ctx,
                             AgentRespType::Notify,
                             MessageContentText::from(text),
                             DingtalkChannel::create_robot_messages,
@@ -223,7 +200,7 @@ impl DingtalkChannel {
                     Notify::Markdown { title, content } => {
                         if let Ok(Some(robot_message)) = create_robot_messages_for_agent(
                             session_id,
-                            ctx,
+                            &self.ctx,
                             AgentRespType::Notify,
                             MessageContentMarkdown::from((title, &format!("{content}",))),
                             DingtalkChannel::create_robot_messages,
@@ -241,7 +218,7 @@ impl DingtalkChannel {
                     HistoryCompactResult::Ok(val) => {
                         if let Ok(Some(robot_message)) = create_robot_messages_for_agent(
                             session_id,
-                            ctx,
+                            &self.ctx,
                             AgentRespType::HistoryCompactOk,
                             MessageContentMarkdown::from((
                                 "压缩上下文完成",
@@ -267,7 +244,7 @@ impl DingtalkChannel {
                     HistoryCompactResult::Err(err_msg) => {
                         if let Ok(Some(robot_message)) = create_robot_messages_for_agent(
                             session_id,
-                            ctx,
+                            &self.ctx,
                             AgentRespType::HistoryCompactErr,
                             MessageContentText::from(err_msg),
                             DingtalkChannel::create_robot_messages,
@@ -280,7 +257,7 @@ impl DingtalkChannel {
                     HistoryCompactResult::Ignore(msg) => {
                         if let Ok(Some(robot_message)) = create_robot_messages_for_agent(
                             session_id,
-                            ctx,
+                            &self.ctx,
                             AgentRespType::HistoryCompactIgnore,
                             MessageContentMarkdown::from((
                                 "压缩请求被忽略",
