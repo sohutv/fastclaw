@@ -171,7 +171,7 @@ impl dingtalk_stream::handlers::CallbackHandler for DingTalkCallbackHandler {
                     let channel = Arc::clone(&self.channel);
                     let client = Arc::clone(&dingtalk_client);
                     let _ = tokio::spawn(async move {
-                        let _ = channel.recv_agent_message(client, &mut receiver).await;
+                        let _ = channel.handle_agent_message(client, &mut receiver).await;
                     });
                     return Ok(HandlerResp::Text("cmd submitted".to_string()));
                 }
@@ -280,10 +280,11 @@ impl dingtalk_stream::handlers::CallbackHandler for DingTalkCallbackHandler {
         let msg_id = msg_id.clone();
         info!("Submit task to agent, msg_id: {}", msg_id);
         let task_id = RequestId::default();
-        let agent = Arc::clone(&self.agent);
-        match self
-            .channel
-            .spawn_agent_task(
+        match Arc::clone(&self.channel)
+            .submit_agent_task(
+                Arc::clone(&dingtalk_client),
+                Arc::clone(&self.agent),
+                Some(addi_system_prompt),
                 AgentRequest {
                     id: task_id.clone(),
                     session_id,
@@ -291,25 +292,15 @@ impl dingtalk_stream::handlers::CallbackHandler for DingTalkCallbackHandler {
                         content: user_content,
                     },
                 },
-                agent,
-                Some(addi_system_prompt),
             )
             .await
         {
-            Ok(receiver) => {
+            Ok(_) => {
                 let msg = format!(
                     "Submit agent task ok, msg_id: {}, task_id: {}",
                     msg_id, task_id
                 );
                 info!("{msg}");
-                {
-                    let mut receiver = receiver;
-                    let channel = Arc::clone(&self.channel);
-                    let client = Arc::clone(&dingtalk_client);
-                    let _ = tokio::spawn(async move {
-                        let _ = channel.recv_agent_message(client, &mut receiver).await;
-                    });
-                }
                 Ok(HandlerResp::Text(msg))
             }
             Err(err) => {

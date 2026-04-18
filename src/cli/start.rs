@@ -97,10 +97,14 @@ impl CmdRunner for Start {
                 }
                 #[cfg(feature = "channel_dingtalk_channel")]
                 ChannelType::Dingtalk => {
-                    let join_handle = start_with_dingtalk(
+                    info!("Starting Dingtalk channel");
+                    let channel =
+                        channels::dingtalk_channel::DingtalkChannel::new(config, workspace).await?;
+                    let join_handle = start_channel(
                         config,
                         workspace,
                         Arc::clone(&history_manager),
+                        channel,
                         Arc::clone(&main_agent),
                         Arc::clone(&heartbeat_agent),
                     )
@@ -109,10 +113,13 @@ impl CmdRunner for Start {
                 }
                 #[cfg(feature = "channel_wechat_channel")]
                 ChannelType::Wechat => {
-                    let join_handle = start_with_wechat(
+                    let channel =
+                        channels::wechat_channel::WechatChannel::new(config, workspace).await?;
+                    let join_handle = start_channel(
                         config,
                         workspace,
                         Arc::clone(&history_manager),
+                        channel,
                         Arc::clone(&main_agent),
                         Arc::clone(&heartbeat_agent),
                     )
@@ -135,78 +142,29 @@ impl CmdRunner for Start {
     }
 }
 
-#[cfg(feature = "channel_dingtalk_channel")]
-async fn start_with_dingtalk(
+async fn start_channel<C>(
     config: &'static Config,
     workspace: &'static Workspace,
     history_manager: Arc<RwLock<dyn HistoryManager>>,
+    channel: C,
     main_agent: Arc<dyn Agent>,
     heartbeat_agent: Arc<dyn Agent>,
-) -> crate::Result<tokio::task::JoinHandle<()>> {
-    info!("Starting Dingtalk channel");
-    let channel = channels::dingtalk_channel::DingtalkChannel::new(config, workspace).await?;
-    let session_ids = channel
-        .dingtalk_config
-        .allow_session_ids
-        .values()
-        .into_iter()
-        .map(|it| it.clone())
-        .collect_vec();
-    let (channel, dingtalk, chanel_join_handle) = channel.start(main_agent).await?;
-    let heartbeat_join_handle = {
-        let channel = Arc::clone(&channel);
-        let dingtalk = Arc::clone(&dingtalk);
-        let heartbeat = Heartbeat::new(config, workspace, &history_manager).await?;
-
-        let join_handle = heartbeat
-            .start(session_ids, heartbeat_agent, move |agent, req| {
-                let channel = Arc::clone(&channel);
-                let dingtalk = Arc::clone(&dingtalk);
-                async move {
-                    let mut receiver = channel.spawn_agent_task(req, agent, None).await?;
-                    let _ = channel.recv_agent_message(dingtalk, &mut receiver).await;
-                    Ok(())
-                }
-            })
-            .await?;
-        join_handle
-    };
-    let join_handle = tokio::spawn(async {
-        let _ = chanel_join_handle.await;
-        let _ = heartbeat_join_handle.await;
-    });
-    Ok(join_handle)
-}
-
-#[cfg(feature = "channel_wechat_channel")]
-async fn start_with_wechat(
-    config: &'static Config,
-    workspace: &'static Workspace,
-    history_manager: Arc<RwLock<dyn HistoryManager>>,
-    main_agent: Arc<dyn Agent>,
-    heartbeat_agent: Arc<dyn Agent>,
-) -> crate::Result<tokio::task::JoinHandle<()>> {
-    info!("Starting Wechat channel");
-    let channel = channels::wechat_channel::WechatChannel::new(config, workspace).await?;
-    let session_ids = vec![channel.wechat_config.session_id.clone()];
-    let (channel, wechat, chanel_join_handle) = channel.start(main_agent).await?;
-    let heartbeat_join_handle = {
-        let channel = Arc::clone(&channel);
-        let wechat = Arc::clone(&wechat);
-        let heartbeat = Heartbeat::new(config, workspace, &history_manager).await?;
-        let join_handle = heartbeat
-            .start(session_ids, heartbeat_agent, move |agent, req| {
-                let channel = Arc::clone(&channel);
-                let wechat = Arc::clone(&wechat);
-                async move {
-                    let mut receiver = channel.spawn_agent_task(req, agent, None).await?;
-                    let _ = channel.recv_agent_message(wechat, &mut receiver).await;
-                    Ok(())
-                }
-            })
-            .await?;
-        join_handle
-    };
+) -> crate::Result<tokio::task::JoinHandle<()>>
+where
+    C: Channel,
+    <C as Channel>::JoinHandle: Future + Sync + Send,
+{
+    let (channel, client, chanel_join_handle) = channel.start(main_agent).await?;
+    let (_, heartbeat_join_handle) = Heartbeat::new(
+        config,
+        workspace,
+        &history_manager,
+        Arc::clone(&channel),
+        Arc::clone(&client),
+        heartbeat_agent,
+    )?
+    .start()
+    .await?;
     let join_handle = tokio::spawn(async {
         let _ = chanel_join_handle.await;
         let _ = heartbeat_join_handle.await;

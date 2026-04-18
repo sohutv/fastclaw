@@ -1,34 +1,19 @@
-use crate::agent::{Agent, AgentRequest};
-use crate::channels::{Anonymous, SessionId};
-use crate::config::{Config, Workspace};
+use crate::agent::AgentRequest;
+use crate::channels::{Anonymous, Channel, SessionId};
 use crate::tools::{TaskSchedule, TaskTools};
 use log::{error, info, warn};
 use rig::completion::Message;
 use std::str::FromStr;
 use std::sync::Arc;
 
-impl super::Heartbeat {
-    pub(super) async fn spawn_cron_tasks<F, R>(
-        agent: Arc<dyn Agent>,
-        config: &'static Config,
-        workspace: &Workspace,
-        session_ids: &[SessionId],
-        task_submitter: F,
-    ) -> crate::Result<()>
-    where
-        R: Future<Output = crate::Result<()>> + Send,
-        F: (Fn(Arc<dyn Agent>, AgentRequest) -> R)+Clone,
-    {
+impl<C, Client> super::Heartbeat<C, Client>
+where
+    C: Channel<Client = Client>,
+{
+    pub(super) async fn spawn_cron_tasks(&self) -> crate::Result<()> {
+        let session_ids = self.channel.allow_session_ids()?;
         for session_id in session_ids {
-            match Self::spawn_cron_tasks_actual(
-                Arc::clone(&agent),
-                config,
-                workspace,
-                session_id,
-                task_submitter.clone(),
-            )
-            .await
-            {
+            match self.spawn_cron_tasks_actual(session_id).await {
                 Ok(_) => {}
                 Err(err) => {
                     warn!("spawn_cron_tasks failed, err: {err}");
@@ -37,18 +22,8 @@ impl super::Heartbeat {
         }
         Ok(())
     }
-    async fn spawn_cron_tasks_actual<F, R>(
-        agent: Arc<dyn Agent>,
-        _: &'static Config,
-        workspace: &Workspace,
-        session_id: &SessionId,
-        task_submitter: F,
-    ) -> crate::Result<()>
-    where
-        R: Future<Output = crate::Result<()>> + Send,
-        F: (Fn(Arc<dyn Agent>, AgentRequest) -> R),
-    {
-        let tasks = TaskTools::fetch_ready_tasks(workspace, session_id).await?;
+    async fn spawn_cron_tasks_actual(&self, session_id: &SessionId) -> crate::Result<()> {
+        let tasks = TaskTools::fetch_ready_tasks(&self.workspace, session_id).await?;
         let now = chrono::Local::now();
         for task in tasks {
             // Parse cron expression and check if current time matches
@@ -88,7 +63,7 @@ impl super::Heartbeat {
                 };
                 // To optimize the problem of repeated task execution, the task status will be marked first.
                 if let Err(err) = TaskTools::mark_task_executed(
-                    workspace,
+                    &self.workspace,
                     &session_id,
                     task.id,
                     &task.task_schedule,
@@ -100,13 +75,16 @@ impl super::Heartbeat {
                         task.name, task.id, err
                     );
                 }
-                match task_submitter(
-                    Arc::clone(&agent),
-                    AgentRequest {
-                        id: Default::default(),
-                        session_id: session_id.clone(),
-                        message: Message::user(format!(
-                            r#"
+                match Arc::clone(&self.channel)
+                    .submit_agent_task(
+                        Arc::clone(&self.client),
+                        Arc::clone(&self.agent),
+                        None,
+                        AgentRequest {
+                            id: Default::default(),
+                            session_id: session_id.clone(),
+                            message: Message::user(format!(
+                                r#"
 **Execute task immediately**: task_id: {}
 - **CurrentTime**: {}
 - **Task Detail**:
@@ -115,13 +93,13 @@ impl super::Heartbeat {
 ```
 - **Tips**: If the task fails, you are authorized to retry or ignore it at your discretion.
                                             "#,
-                            &task.id,
-                            now.to_rfc3339(),
-                            task.full_desc()
-                        )),
-                    },
-                )
-                .await
+                                &task.id,
+                                now.to_rfc3339(),
+                                task.full_desc()
+                            )),
+                        },
+                    )
+                    .await
                 {
                     Ok(_) => {
                         info!(

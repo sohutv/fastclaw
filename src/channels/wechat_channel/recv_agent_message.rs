@@ -1,7 +1,7 @@
 use super::super::{AgentRespState, AgentRespType};
 use crate::agent::{AgentResponse, HistoryCompactResult, Notify};
 use crate::channels::wechat_channel::WechatChannel;
-use crate::channels::{ChannelContext, ChannelMessage, create_robot_messages_for_agent};
+use crate::channels::{ChannelMessage, create_robot_messages_for_agent};
 use anyhow::anyhow;
 use rig::completion::{AssistantContent, Message};
 use rig::message::{ReasoningContent, ToolCall, ToolFunction};
@@ -9,9 +9,9 @@ use wechat_sdk::client::WechatClient;
 use wechat_sdk::client::message::TypingTicket;
 
 impl WechatChannel {
-    pub(super) async fn handle_agent_message(
+    pub(super) async fn handle_agent_message_actual(
+        &self,
         wechat: &WechatClient,
-        ctx: &ChannelContext,
         typing_ticket: Option<&TypingTicket>,
         ChannelMessage {
             session_id,
@@ -38,7 +38,7 @@ impl WechatChannel {
             }) => {
                 if let Ok(Some(robot_message)) = create_robot_messages_for_agent(
                     session_id,
-                    ctx,
+                    &self.ctx,
                     AgentRespType::ToolCall,
                     format!(
                         r#"
@@ -60,7 +60,7 @@ impl WechatChannel {
             }
             AgentResponse::ReasoningStream(reasoning) => {
                 match curr_state {
-                    AgentRespState::Start => if ctx.config.default_show_reasoning {},
+                    AgentRespState::Start => if self.ctx.config.default_show_reasoning {},
                     _ => {}
                 }
                 for content in reasoning.content.iter() {
@@ -76,7 +76,7 @@ impl WechatChannel {
                 match curr_state {
                     AgentRespState::Start => {}
                     AgentRespState::Reasoning => {
-                        if ctx.config.default_show_reasoning {
+                        if self.ctx.config.default_show_reasoning {
                             let content = {
                                 let content = buff.join("");
                                 buff.clear();
@@ -89,7 +89,7 @@ impl WechatChannel {
                             };
                             if let Some(robot_message) = create_robot_messages_for_agent(
                                 session_id,
-                                ctx,
+                                &self.ctx,
                                 AgentRespType::Reasoning,
                                 content,
                                 WechatChannel::create_robot_messages,
@@ -138,7 +138,7 @@ impl WechatChannel {
                 };
                 if let Some(robot_message) = create_robot_messages_for_agent(
                     session_id,
-                    ctx,
+                    &self.ctx,
                     AgentRespType::Content,
                     content,
                     WechatChannel::create_robot_messages,
@@ -152,7 +152,7 @@ impl WechatChannel {
             AgentResponse::Error(error) => {
                 if let Some(robot_message) = create_robot_messages_for_agent(
                     session_id,
-                    ctx,
+                    &self.ctx,
                     AgentRespType::Error,
                     format!("Agent error: {}", error),
                     WechatChannel::create_robot_messages,
@@ -168,7 +168,7 @@ impl WechatChannel {
                     Notify::Text(text) => {
                         if let Some(robot_message) = create_robot_messages_for_agent(
                             session_id,
-                            ctx,
+                            &self.ctx,
                             AgentRespType::Notify,
                             text,
                             WechatChannel::create_robot_messages,
@@ -181,7 +181,7 @@ impl WechatChannel {
                     Notify::Markdown { content, .. } => {
                         if let Some(robot_message) = create_robot_messages_for_agent(
                             session_id,
-                            ctx,
+                            &self.ctx,
                             AgentRespType::Notify,
                             format!("{content}",),
                             WechatChannel::create_robot_messages,
@@ -199,7 +199,7 @@ impl WechatChannel {
                     HistoryCompactResult::Ok(val) => {
                         if let Some(robot_message) = create_robot_messages_for_agent(
                             session_id,
-                            ctx,
+                            &self.ctx,
                             AgentRespType::HistoryCompactOk,
                             &format!(
                                 r#"
@@ -222,7 +222,7 @@ impl WechatChannel {
                     HistoryCompactResult::Err(err_msg) => {
                         if let Some(robot_message) = create_robot_messages_for_agent(
                             session_id,
-                            ctx,
+                            &self.ctx,
                             AgentRespType::HistoryCompactErr,
                             err_msg,
                             WechatChannel::create_robot_messages,
@@ -235,7 +235,7 @@ impl WechatChannel {
                     HistoryCompactResult::Ignore(msg) => {
                         if let Some(robot_message) = create_robot_messages_for_agent(
                             session_id,
-                            ctx,
+                            &self.ctx,
                             AgentRespType::HistoryCompactIgnore,
                             format!(
                                 r#"

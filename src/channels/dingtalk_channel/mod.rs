@@ -14,6 +14,7 @@ use dingtalk_stream::{
         },
     },
 };
+use itertools::Itertools;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::ops::Deref;
@@ -81,7 +82,7 @@ impl Channel for DingtalkChannel {
         Ok((self_, dingtalk, dingtalk_stream_handle))
     }
 
-    async fn recv_agent_message(
+    async fn handle_agent_message(
         &self,
         dingtalk: Arc<DingTalkStream>,
         receiver: &mut Receiver<ChannelMessage>,
@@ -90,7 +91,7 @@ impl Channel for DingtalkChannel {
         let mut buff = Vec::<String>::new();
         while let Some(message) = receiver.recv().await {
             match self
-                .handle_agent_message(&dingtalk, &message, state, &mut buff)
+                .handle_agent_message_actual(&dingtalk, &message, state, &mut buff)
                 .await
             {
                 Ok(AgentRespState::Final) | Err(_) => {
@@ -103,6 +104,15 @@ impl Channel for DingtalkChannel {
             }
         }
         Ok(())
+    }
+
+    fn allow_session_ids(&self) -> crate::Result<Vec<&SessionId>> {
+        let arr = self
+            .dingtalk_config
+            .allow_session_ids
+            .values()
+            .collect_vec();
+        Ok(arr)
     }
 }
 

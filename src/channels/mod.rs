@@ -6,6 +6,7 @@ use log::{error, info};
 use std::sync::Arc;
 use strum::Display;
 use tokio::sync::mpsc::Receiver;
+use tokio::task::JoinHandle;
 
 #[cfg(feature = "channel_cli_channel")]
 pub mod cli_channel;
@@ -21,10 +22,13 @@ mod session_id;
 pub use session_id::*;
 
 #[async_trait]
-pub trait Channel {
-    type Client;
+pub trait Channel: Sync + Send
+where
+    Self: 'static,
+{
+    type Client: Sync + Send;
 
-    type JoinHandle;
+    type JoinHandle: Sync + Send;
 
     async fn start(
         self,
@@ -59,11 +63,35 @@ pub trait Channel {
         Ok(channel_message_receiver)
     }
 
-    async fn recv_agent_message(
+    async fn handle_agent_message(
         &self,
         client: Arc<Self::Client>,
         receiver: &mut Receiver<ChannelMessage>,
     ) -> crate::Result<()>;
+
+    /// handle_agent_task
+    /// spawn_agent_task -> spawn(handle_agent_message)
+    async fn submit_agent_task(
+        self: Arc<Self>,
+        client: Arc<Self::Client>,
+        agent: Arc<dyn Agent>,
+        addi_system_prompt: Option<String>,
+        req: AgentRequest,
+    ) -> crate::Result<JoinHandle<crate::Result<()>>> {
+        let mut receiver = Arc::clone(&self)
+            .spawn_agent_task(req, agent, addi_system_prompt)
+            .await?;
+        let self_ = Arc::clone(&self);
+        let join_handle = tokio::spawn(async move {
+            let _ = self_.handle_agent_message(client, &mut receiver).await?;
+            Ok(())
+        });
+        Ok(join_handle)
+    }
+
+    fn allow_session_ids(&self) -> crate::Result<Vec<&SessionId>> {
+        Ok(vec![])
+    }
 }
 
 #[allow(unused)]

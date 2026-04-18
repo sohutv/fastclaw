@@ -117,7 +117,7 @@ impl Channel for WechatChannel {
         Ok((self_, wechat_client, join_handle))
     }
 
-    async fn recv_agent_message(
+    async fn handle_agent_message(
         &self,
         wechat: Arc<WechatClient>,
         receiver: &mut Receiver<ChannelMessage>,
@@ -126,15 +126,15 @@ impl Channel for WechatChannel {
         let mut buff = Vec::<String>::new();
         let typing_ticket = wechat.get_config().await.ok();
         while let Some(message) = receiver.recv().await {
-            match Self::handle_agent_message(
-                &wechat,
-                &self.ctx,
-                typing_ticket.as_ref(),
-                &message,
-                state,
-                &mut buff,
-            )
-            .await
+            match self
+                .handle_agent_message_actual(
+                    &wechat,
+                    typing_ticket.as_ref(),
+                    &message,
+                    state,
+                    &mut buff,
+                )
+                .await
             {
                 Ok(AgentRespState::Final) | Err(_) => {
                     state = AgentRespState::Wait;
@@ -149,6 +149,10 @@ impl Channel for WechatChannel {
             let _ = wechat.send_typing_cannel(&typing_ticket).await;
         }
         Ok(())
+    }
+
+    fn allow_session_ids(&self) -> crate::Result<Vec<&SessionId>> {
+        Ok(vec![&self.wechat_config.session_id])
     }
 }
 
@@ -288,7 +292,7 @@ impl WechatChannel {
                     let self_ = Arc::clone(&self);
                     let client = Arc::clone(&wechat_client);
                     let _ = tokio::spawn(async move {
-                        let _ = self_.recv_agent_message(client, &mut receiver).await;
+                        let _ = self_.handle_agent_message(client, &mut receiver).await;
                     });
                     return Ok(());
                 }
@@ -310,9 +314,11 @@ impl WechatChannel {
         let msg_id = message_id.clone();
         info!("Submit task to agent, msg_id: {}", msg_id);
         let task_id = RequestId::default();
-        let agent = Arc::clone(&agent);
-        match self
-            .spawn_agent_task(
+        match Arc::clone(&self)
+            .submit_agent_task(
+                Arc::clone(&wechat_client),
+                Arc::clone(&agent),
+                None,
                 AgentRequest {
                     id: task_id.clone(),
                     session_id: self.wechat_config.session_id.clone(),
@@ -320,25 +326,15 @@ impl WechatChannel {
                         content: user_content,
                     },
                 },
-                agent,
-                None,
             )
             .await
         {
-            Ok(receiver) => {
+            Ok(_) => {
                 let msg = format!(
                     "Submit agent task ok, msg_id: {}, task_id: {}",
                     msg_id, task_id
                 );
                 info!("{msg}");
-                {
-                    let mut receiver = receiver;
-                    let client = Arc::clone(&wechat_client);
-                    let _ = tokio::spawn(async move {
-                        let _ =
-                            self.recv_agent_message(client, &mut receiver).await;
-                    });
-                }
                 Ok(())
             }
             Err(err) => {

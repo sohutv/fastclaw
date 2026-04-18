@@ -10,7 +10,7 @@ use rig::message::{ReasoningContent, ToolCall, ToolFunction};
 use std::ops::Deref;
 
 impl DingtalkChannel {
-    pub(super) async fn handle_agent_message(
+    pub(super) async fn handle_agent_message_actual(
         &self,
         dingtalk: &DingTalkStream,
         ChannelMessage {

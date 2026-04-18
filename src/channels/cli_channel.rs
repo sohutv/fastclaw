@@ -6,9 +6,9 @@ use anyhow::anyhow;
 use async_trait::async_trait;
 use rig::completion::Message;
 use rig::message::{AssistantContent, ReasoningContent, ToolCall, ToolFunction};
-use rustyline::error::ReadlineError;
 use rustyline::DefaultEditor;
-use std::io::{stdout, Write};
+use rustyline::error::ReadlineError;
+use std::io::{Write, stdout};
 use std::sync::Arc;
 use std::thread::JoinHandle;
 use tokio::sync::mpsc::Receiver;
@@ -70,7 +70,7 @@ impl Channel for CliChannel {
                                             &agent,
                                             &self_.session_id,
                                         )
-                                            .await
+                                        .await
                                         {
                                             Ok(_) => {
                                                 continue;
@@ -90,10 +90,8 @@ impl Channel for CliChannel {
                                             None,
                                         )
                                         .await;
-                                    let _ = self_.recv_agent_message(
-                                        Arc::new(()),
-                                        &mut message_receiver,
-                                    )
+                                    let _ = self_
+                                        .handle_agent_message(Arc::new(()), &mut message_receiver)
                                         .await;
                                 }
                             }
@@ -113,7 +111,7 @@ impl Channel for CliChannel {
         Ok((self_, Default::default(), join_handle))
     }
 
-    async fn recv_agent_message(
+    async fn handle_agent_message(
         &self,
         _: Arc<Self::Client>,
         receiver: &mut Receiver<ChannelMessage>,
@@ -169,9 +167,9 @@ impl CliChannel {
                 }
             }
             AgentResponse::ToolCall(ToolCall {
-                                        function: ToolFunction { name, arguments },
-                                        ..
-                                    }) => {
+                function: ToolFunction { name, arguments },
+                ..
+            }) => {
                 println!(
                     r#"
 //////// ToolCall: {name}
