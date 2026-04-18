@@ -55,8 +55,8 @@ impl super::Heartbeat {
             let time_to_exec = match &task.task_schedule {
                 TaskSchedule::Cron(cron) => match cron::Schedule::from_str(&cron) {
                     Ok(schedule) => {
-                        let last_exe_at = task.last_exe_at.unwrap_or(task.created_at);
-                        if let Some(next) = schedule.after(&last_exe_at).next() {
+                        let last_exe_at = task.last_exe_at.as_ref().unwrap_or(&task.created_at);
+                        if let Some(next) = schedule.after(last_exe_at).next() {
                             next < now
                         } else {
                             false
@@ -65,7 +65,7 @@ impl super::Heartbeat {
                     Err(err) => {
                         error!(
                             "Failed to parse cron expression '{}' for task {}: {}",
-                            cron, task.id, err
+                            cron, &task.id, err
                         );
                         false
                     }
@@ -73,7 +73,7 @@ impl super::Heartbeat {
                 TaskSchedule::Datetime(dt) => {
                     if let (Some(dt), None) = (
                         dt.and_local_timezone(now.timezone()).single(),
-                        task.last_exe_at,
+                        &task.last_exe_at,
                     ) {
                         dt < now
                     } else {
@@ -86,6 +86,20 @@ impl super::Heartbeat {
                     val: Anonymous(task.session_id.clone()),
                     settings: Default::default(),
                 };
+                // To optimize the problem of repeated task execution, the task status will be marked first.
+                if let Err(err) = TaskTools::mark_task_executed(
+                    workspace,
+                    &session_id,
+                    task.id,
+                    &task.task_schedule,
+                )
+                .await
+                {
+                    error!(
+                        "Failed to update last_exe_at for task '{}' (id: {}): {}",
+                        task.name, task.id, err
+                    );
+                }
                 match task_submitter(
                     Arc::clone(&agent),
                     AgentRequest {
@@ -95,10 +109,15 @@ impl super::Heartbeat {
                             r#"
 **Execute task immediately**: task_id: {}
 - **CurrentTime**: {}
+- **Task Detail**:
+```markdown
+{}
+```
 - **Tips**: If the task fails, you are authorized to retry or ignore it at your discretion.
                                             "#,
-                            task.id,
+                            &task.id,
                             now.to_rfc3339(),
+                            task.full_desc()
                         )),
                     },
                 )
@@ -109,14 +128,6 @@ impl super::Heartbeat {
                             "Task '{}' (id: {}) is ready to execute based on cron schedule: {}",
                             task.name, task.id, &task.task_schedule
                         );
-                        if let Err(err) =
-                            TaskTools::mark_task_executed(workspace, &session_id, task.id, &task.task_schedule).await
-                        {
-                            error!(
-                                "Failed to update last_exe_at for task '{}' (id: {}): {}",
-                                task.name, task.id, err
-                            );
-                        }
                     }
                     Err(err) => {
                         error!(
