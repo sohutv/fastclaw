@@ -68,35 +68,6 @@ impl Tool for TaskDetailGetTool {
             return Ok(ToolCallRsult::error(format!("task {} not found", args.id)));
         };
         let task = TaskInfo::try_from(row).map_err(|err| ToolCallError(format!("{err}")))?;
-        Ok(ToolCallRsult::ok(format!(
-            r#"
-## {}
-- **id**: {},
-- **cron**: {},
-- **session_id**: {},
-- **run_state**: {},
-- **enabled**: {},
-- **created_at**: {},
-- **updated_at**: {},
-- **last_exe_at**: {},
-- **creator**: {}
-- **desc**:
-```
-{}
-```                    "#,
-            task.name,
-            task.id,
-            task.task_schedule,
-            task.session_id,
-            task.run_state,
-            task.enabled,
-            task.created_at.format("%Y-%m-%d %H:%M:%S"),
-            task.updated_at.format("%Y-%m-%d %H:%M:%S"),
-            task.last_exe_at
-                .map(|it| it.format("%Y-%m-%d %H:%M:%S").to_string())
-                .unwrap_or_else(|| "never".to_string()),
-            task.creator,
-            task.desc,
-        )))
+        Ok(ToolCallRsult::ok(task.full_desc()))
     }
 }

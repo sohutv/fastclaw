@@ -71,7 +71,10 @@ impl super::Heartbeat {
                     }
                 },
                 TaskSchedule::Datetime(dt) => {
-                    if let Some(dt) = dt.and_local_timezone(now.timezone()).single() {
+                    if let (Some(dt), None) = (
+                        dt.and_local_timezone(now.timezone()).single(),
+                        task.last_exe_at,
+                    ) {
                         dt < now
                     } else {
                         false
@@ -107,7 +110,7 @@ impl super::Heartbeat {
                             task.name, task.id, &task.task_schedule
                         );
                         if let Err(err) =
-                            TaskTools::mark_task_executed(workspace, &session_id, task.id).await
+                            TaskTools::mark_task_executed(workspace, &session_id, task.id, &task.task_schedule).await
                         {
                             error!(
                                 "Failed to update last_exe_at for task '{}' (id: {}): {}",

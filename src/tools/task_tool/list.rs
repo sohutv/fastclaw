@@ -78,26 +78,7 @@ impl Tool for TaskListTool {
                     error!("{err}");
                     ToolCallError(format!("{err}"))
                 })?;
-                tasks.push(format!(
-                    r#"
-## {}
-- **id**: {},
-- **cron**: {},
-- **session_id**: {},
-- **run_state**: {},
-- **enabled**: {},
-- **last_exe_at**: {},
-"#,
-                    task.name,
-                    task.id,
-                    task.task_schedule,
-                    task.session_id,
-                    task.run_state,
-                    task.enabled,
-                    task.last_exe_at
-                        .map(|it| it.format("%Y-%m-%d %H:%M:%S").to_string())
-                        .unwrap_or_else(|| "never".to_string()),
-                ));
+                tasks.push(task.brief_desc());
             }
         }
         let output = format!(

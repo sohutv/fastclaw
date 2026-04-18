@@ -1,6 +1,5 @@
 use crate::tools::ToolContext;
 use anyhow::anyhow;
-use chrono::Local;
 use derive_more::Display;
 use rig::tool::ToolDyn;
 use sqlx::Row;
@@ -42,14 +41,17 @@ pub struct TaskInfo {
     pub session_id: String,
     pub run_state: TaskRunState,
     pub enabled: TaskEnabled,
-    pub created_at: chrono::DateTime<Local>,
-    pub updated_at: chrono::DateTime<Local>,
-    pub last_exe_at: Option<chrono::DateTime<Local>>,
+    pub created_at: Datetime,
+    pub updated_at: Datetime,
+    pub last_exe_at: Option<Datetime>,
     pub creator: String,
 }
 
 mod task_schedule;
 pub use task_schedule::TaskSchedule;
+
+mod datetime;
+pub use datetime::Datetime;
 
 impl TryFrom<SqliteRow> for TaskInfo {
     type Error = anyhow::Error;
@@ -78,23 +80,15 @@ impl TryFrom<SqliteRow> for TaskInfo {
             },
             created_at: {
                 let ts: String = row.try_get("created_at")?;
-                chrono::NaiveDateTime::parse_from_str(&ts, DATETIME_FORMAT)?
-                    .and_utc()
-                    .with_timezone(&Local)
+                Datetime::from_str(&ts)?
             },
             updated_at: {
                 let ts: String = row.try_get("updated_at")?;
-                chrono::NaiveDateTime::parse_from_str(&ts, DATETIME_FORMAT)?
-                    .and_utc()
-                    .with_timezone(&Local)
+                Datetime::from_str(&ts)?
             },
             last_exe_at: {
                 let ts: Option<String> = row.try_get("last_exe_at")?;
-                ts.map(|ts| {
-                    chrono::NaiveDateTime::parse_from_str(&ts, DATETIME_FORMAT)
-                        .map(|dt| dt.and_utc().with_timezone(&Local))
-                })
-                .transpose()?
+                ts.map(|ts| Datetime::from_str(&ts)).transpose()?
             },
             creator: row.try_get("creator")?,
         })
@@ -134,3 +128,62 @@ create table if not exists cron_task
     creator      TEXT NOT NULL
 );
 "#;
+
+impl TaskInfo {
+    pub fn brief_desc(&self) -> String {
+        format!(
+            r#"
+## {}
+- **id**: {},
+- **cron**: {},
+- **session_id**: {},
+- **run_state**: {},
+- **enabled**: {},
+- **last_exe_at**: {},
+"#,
+            self.name,
+            self.id,
+            self.task_schedule,
+            self.session_id,
+            self.run_state,
+            self.enabled,
+            self.last_exe_at
+                .as_ref()
+                .map(|it| it.to_string())
+                .unwrap_or_else(|| "never".to_string()),
+        )
+    }
+    pub fn full_desc(&self) -> String {
+        format!(
+            r#"
+## {}
+- **id**: {},
+- **cron**: {},
+- **session_id**: {},
+- **run_state**: {},
+- **enabled**: {},
+- **created_at**: {},
+- **updated_at**: {},
+- **last_exe_at**: {},
+- **creator**: {}
+- **desc**:
+```
+{}
+```                    "#,
+            self.name,
+            self.id,
+            self.task_schedule,
+            self.session_id,
+            self.run_state,
+            self.enabled,
+            self.created_at,
+            self.updated_at,
+            self.last_exe_at
+                .as_ref()
+                .map(|it| it.to_string())
+                .unwrap_or_else(|| "never".to_string()),
+            self.creator,
+            self.desc,
+        )
+    }
+}
