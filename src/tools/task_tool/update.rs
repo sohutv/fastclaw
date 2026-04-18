@@ -1,24 +1,16 @@
 use super::TaskEnabled;
-use crate::agent::AgentContext;
 use crate::channels::{Anonymous, SessionId};
-use crate::tools::{ToolCallError, ToolCallRsult};
+use crate::tools::{ToolCallError, ToolCallRsult, ToolContext};
 use log::error;
 use rig::completion::ToolDefinition;
 use rig::tool::Tool;
 use serde_json::json;
 use sqlx::{QueryBuilder, Sqlite};
-use std::sync::Arc;
 use strum::IntoEnumIterator;
 
 #[derive(Clone)]
 pub struct TaskUpdateTool {
-    ctx: Arc<AgentContext>,
-}
-
-impl TaskUpdateTool {
-    pub fn new(ctx: Arc<AgentContext>) -> crate::Result<Self> {
-        Ok(Self { ctx })
-    }
+    pub ctx: ToolContext,
 }
 
 #[derive(Debug, Clone, serde::Deserialize)]
@@ -80,6 +72,7 @@ impl Tool for TaskUpdateTool {
         let session_id = SessionId::from(&args.session_id);
         let sql_pool = self
             .ctx
+            .agent_context
             .workspace
             .sql_pool(&session_id)
             .await

@@ -1,11 +1,10 @@
-use crate::agent::AgentContext;
+use crate::tools::ToolContext;
 use anyhow::anyhow;
 use chrono::Local;
 use derive_more::Display;
 use rig::tool::ToolDyn;
 use sqlx::Row;
 use sqlx::sqlite::SqliteRow;
-use std::sync::Arc;
 use strum::{EnumIter, IntoEnumIterator};
 
 mod create;
@@ -20,13 +19,13 @@ pub mod task_api;
 pub struct TaskTools;
 
 impl TaskTools {
-    pub async fn create(ctx: Arc<AgentContext>) -> crate::Result<Vec<Box<dyn ToolDyn>>> {
+    pub async fn create(ctx: ToolContext) -> crate::Result<Vec<Box<dyn ToolDyn>>> {
         Ok(vec![
-            Box::new(list::TaskListTool::new(Arc::clone(&ctx))?),
-            Box::new(create::TaskCreateTool::new(Arc::clone(&ctx))?),
-            Box::new(detail::TaskDetailGetTool::new(Arc::clone(&ctx))?),
-            Box::new(update::TaskUpdateTool::new(Arc::clone(&ctx))?),
-            Box::new(del::TaskDelTool::new(Arc::clone(&ctx))?),
+            Box::new(list::TaskListTool { ctx: ctx.clone() }),
+            Box::new(create::TaskCreateTool { ctx: ctx.clone() }),
+            Box::new(detail::TaskDetailGetTool { ctx: ctx.clone() }),
+            Box::new(update::TaskUpdateTool { ctx: ctx.clone() }),
+            Box::new(del::TaskDelTool { ctx: ctx.clone() }),
         ])
     }
 }

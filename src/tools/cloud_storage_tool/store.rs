@@ -1,21 +1,13 @@
-use crate::agent::AgentContext;
 use crate::service_provider::{Content, StoreArgs};
-use crate::tools::{ToolCallError, ToolCallRsult};
+use crate::tools::{ToolCallError, ToolCallRsult, ToolContext};
 use rig::completion::ToolDefinition;
 use rig::tool::Tool;
 use serde_json::json;
-use std::sync::Arc;
 use url::Url;
 
 #[derive(Clone)]
 pub struct CloudStorageStoreTool {
-    ctx: Arc<AgentContext>,
-}
-
-impl CloudStorageStoreTool {
-    pub fn new(ctx: Arc<AgentContext>) -> crate::Result<Self> {
-        Ok(Self { ctx })
-    }
+    pub ctx: ToolContext,
 }
 
 #[derive(Debug, Clone, serde::Deserialize)]
@@ -88,7 +80,7 @@ Store content into configured cloud storage.
             base64_content,
         }: Self::Args,
     ) -> Result<Self::Output, Self::Error> {
-        let Some(storage_config) = &self.ctx.config.storage else {
+        let Some(storage_config) = &self.ctx.agent_context.config.storage else {
             return Ok(ToolCallRsult::error("storage not configured"));
         };
         let storage = match storage_config.try_into_storage().await {
@@ -124,7 +116,7 @@ Store content into configured cloud storage.
             } else if let Some(it) = file_path {
                 let path = std::path::PathBuf::from(&it);
                 let path = if path.is_relative() {
-                    self.ctx.workspace.path.join(path)
+                    self.ctx.agent_context.workspace.path.join(path)
                 } else {
                     path
                 };
@@ -158,7 +150,7 @@ Store content into configured cloud storage.
 
         match storage
             .store(
-                self.ctx.workspace,
+                self.ctx.agent_context.workspace,
                 StoreArgs {
                     key: key.into(),
                     mime,

@@ -61,7 +61,7 @@ impl Console {
                                 ),
                             })
                             .await;
-                        let result = agent.session_compact(&session_id, ratio).await;
+                        let result = agent.session_compact(tx.clone(), &session_id, ratio).await;
                         let _ = tx
                             .send(ChannelMessage {
                                 session_id,

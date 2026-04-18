@@ -29,6 +29,7 @@ pub trait Agent: Send + Sync {
 
     async fn session_compact(
         &self,
+        channel_message_sender: Sender<ChannelMessage>,
         session_id: &SessionId,
         compact_ratio: f32,
     ) -> HistoryCompactResult;

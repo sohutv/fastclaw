@@ -1,7 +1,7 @@
 use super::{TaskEnabled, TaskInfo, TaskRunState};
-use crate::agent::AgentContext;
+use crate::channels::{Anonymous, SessionId};
 use crate::tools::task_tool::detail::TaskDetailGetTool;
-use crate::tools::{ToolCallError, ToolCallRsult};
+use crate::tools::{ToolCallError, ToolCallRsult, ToolContext};
 use anyhow::anyhow;
 use itertools::Itertools;
 use log::error;
@@ -10,20 +10,12 @@ use rig::tool::Tool;
 use serde_json::json;
 use sqlx::sqlite::SqliteArguments;
 use sqlx::{Arguments, QueryBuilder, Sqlite};
-use std::sync::Arc;
 use strum::IntoEnumIterator;
 use tokio_stream::StreamExt;
-use crate::channels::{Anonymous, SessionId};
 
 #[derive(Clone)]
 pub struct TaskListTool {
-    ctx: Arc<AgentContext>,
-}
-
-impl TaskListTool {
-    pub fn new(ctx: Arc<AgentContext>) -> crate::Result<Self> {
-        Ok(Self { ctx })
-    }
+    pub ctx: ToolContext,
 }
 
 #[derive(Debug, Clone, serde::Deserialize)]
@@ -70,6 +62,7 @@ impl Tool for TaskListTool {
         let session_id = SessionId::from(&args.session_id);
         let sql_pool = self
             .ctx
+            .agent_context
             .workspace
             .sql_pool(&session_id)
             .await

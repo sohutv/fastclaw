@@ -1,16 +1,14 @@
-use crate::agent::AgentContext;
-use crate::tools::ToolCallRsult;
+use crate::tools::{ToolCallRsult, ToolContext};
 use log::info;
 use rig::completion::ToolDefinition;
 use rig::tool::Tool;
 use serde_json::json;
-use std::sync::Arc;
 use std::time::Duration;
 use tokio::process::Command;
 
 #[derive(Clone)]
-pub(super) struct ShellTool {
-    ctx: Arc<AgentContext>,
+pub struct ShellTool {
+    pub ctx: ToolContext,
 }
 
 #[derive(Debug, Clone, serde::Deserialize)]
@@ -22,12 +20,6 @@ pub struct Args {
     relation_paths: Vec<String>,
     risk_level: super::RiskLevel,
     timeout: u64,
-}
-
-impl ShellTool {
-    pub fn new(ctx: Arc<AgentContext>) -> crate::Result<Self> {
-        Ok(Self { ctx })
-    }
 }
 
 #[allow(async_fn_in_trait)]
@@ -100,7 +92,7 @@ impl Tool for ShellTool {
             Command::new("sh")
                 .arg("-c")
                 .arg(command)
-                .current_dir(&self.ctx.workspace.path)
+                .current_dir(&self.ctx.agent_context.workspace.path)
                 .output(),
         )
         .await;

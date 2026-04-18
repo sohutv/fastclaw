@@ -1,25 +1,17 @@
-use std::ops::Deref;
-use crate::agent::AgentContext;
 use crate::channels::{Anonymous, SessionId};
 use crate::tools::task_tool::{TaskEnabled, TaskRunState};
-use crate::tools::{ToolCallError, ToolCallRsult};
+use crate::tools::{ToolCallError, ToolCallRsult, ToolContext};
 use log::error;
 use rig::completion::ToolDefinition;
 use rig::tool::Tool;
 use serde_json::json;
 use sqlx::{QueryBuilder, Sqlite};
+use std::ops::Deref;
 use std::str::FromStr;
-use std::sync::Arc;
 
 #[derive(Clone)]
 pub struct TaskCreateTool {
-    ctx: Arc<AgentContext>,
-}
-
-impl TaskCreateTool {
-    pub fn new(ctx: Arc<AgentContext>) -> crate::Result<Self> {
-        Ok(Self { ctx })
-    }
+    pub ctx: ToolContext,
 }
 
 #[derive(Debug, Clone, serde::Deserialize)]
@@ -75,6 +67,7 @@ impl Tool for TaskCreateTool {
         let session_id = SessionId::from(&args.session_id);
         let sql_pool = self
             .ctx
+            .agent_context
             .workspace
             .sql_pool(&session_id)
             .await
@@ -82,10 +75,14 @@ impl Tool for TaskCreateTool {
         let _ = cron::Schedule::from_str(&args.cron)
             .map_err(|err| ToolCallError(format!("Invalid cron expression: {err}")))?;
         let mut query_builder = args.create_sql();
-        let _ = query_builder.build().execute(&*sql_pool).await.map_err(|err| {
-            error!("{err}");
-            ToolCallError(format!("{err}"))
-        })?;
+        let _ = query_builder
+            .build()
+            .execute(&*sql_pool)
+            .await
+            .map_err(|err| {
+                error!("{err}");
+                ToolCallError(format!("{err}"))
+            })?;
         Ok(ToolCallRsult::ok(format!("create task {} ok", args.name)))
     }
 }

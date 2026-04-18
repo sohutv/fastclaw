@@ -1,15 +1,16 @@
 use crate::agent::AgentContext;
+use crate::channels::ChannelMessage;
 use crate::tools::imagegen_tool::ImageGenTool;
 use crate::tools::websearch_tool::WebSearchTool;
 use derive_more::From;
 use rig::tool::ToolDyn;
 use serde::Serialize;
 use std::sync::Arc;
-
-mod memory_tool;
+use tokio::sync::mpsc::Sender;
 mod shell_tool;
 mod task_tool;
-pub(crate) use task_tool::TaskTools;
+pub use task_tool::TaskTools;
+
 mod time_tool;
 
 mod websearch_tool;
@@ -29,6 +30,12 @@ pub enum RiskLevel {
 #[derive(Debug, thiserror::Error, From)]
 #[error("{0}")]
 pub struct ToolCallError(String);
+
+#[derive(Clone)]
+pub struct ToolContext {
+    pub agent_context: Arc<AgentContext>,
+    pub channel_message_sender: Sender<ChannelMessage>,
+}
 
 #[derive(Debug, Clone, Serialize)]
 pub struct ToolCallRsult {
@@ -58,27 +65,27 @@ impl ToolCallRsult {
 pub struct FunctionTool;
 
 impl FunctionTool {
-    pub async fn required_tools(ctx: Arc<AgentContext>) -> crate::Result<Vec<Box<dyn ToolDyn>>> {
+    pub async fn required_tools(ctx: ToolContext) -> crate::Result<Vec<Box<dyn ToolDyn>>> {
         let tools: Vec<Vec<Box<dyn ToolDyn>>> = vec![
-            vec![Box::new(shell_tool::ShellTool::new(Arc::clone(&ctx))?)],
-            vec![Box::new(time_tool::CurrentTimeTool)],
-            if let Some(_) = ctx.config.websearch {
-                vec![Box::new(WebSearchTool::new(Arc::clone(&ctx))?)]
+            vec![Box::new(shell_tool::ShellTool { ctx: ctx.clone() })],
+            vec![Box::new(time_tool::CurrentTimeTool { ctx: ctx.clone() })],
+            if let Some(_) = ctx.agent_context.config.websearch {
+                vec![Box::new(WebSearchTool { ctx: ctx.clone() })]
             } else {
                 vec![]
             },
-            if let Some(_) = ctx.config.imagegen {
-                vec![Box::new(ImageGenTool::new(Arc::clone(&ctx))?)]
+            if let Some(_) = ctx.agent_context.config.imagegen {
+                vec![Box::new(ImageGenTool { ctx: ctx.clone() })]
             } else {
                 vec![]
             },
             #[cfg(feature = "cloud_storage_tool")]
-            if let Some(_) = ctx.config.storage {
-                cloud_storage_tool::CloudStorageTools::create(Arc::clone(&ctx)).await?
+            if let Some(_) = ctx.agent_context.config.storage {
+                cloud_storage_tool::CloudStorageTools::create(ctx.clone()).await?
             } else {
                 vec![]
             },
-            TaskTools::create(Arc::clone(&ctx)).await?,
+            TaskTools::create(ctx.clone()).await?,
         ];
         Ok(tools.into_iter().flatten().collect())
     }

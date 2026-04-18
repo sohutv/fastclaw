@@ -1,21 +1,13 @@
-use crate::agent::AgentContext;
-use crate::tools::{ToolCallError, ToolCallRsult};
+use crate::channels::{Anonymous, SessionId};
+use crate::tools::{ToolCallError, ToolCallRsult, ToolContext};
 use log::error;
 use rig::completion::ToolDefinition;
 use rig::tool::Tool;
 use serde_json::json;
-use std::sync::Arc;
-use crate::channels::{Anonymous, SessionId};
 
 #[derive(Clone)]
 pub struct TaskDelTool {
-    ctx: Arc<AgentContext>,
-}
-
-impl TaskDelTool {
-    pub fn new(ctx: Arc<AgentContext>) -> crate::Result<Self> {
-        Ok(Self { ctx })
-    }
+    pub ctx: ToolContext,
 }
 
 #[derive(Debug, Clone, serde::Deserialize)]
@@ -56,6 +48,7 @@ impl Tool for TaskDelTool {
         let session_id = SessionId::from(&args.session_id);
         let sql_pool = self
             .ctx
+            .agent_context
             .workspace
             .sql_pool(&session_id)
             .await

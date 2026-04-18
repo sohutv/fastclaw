@@ -1,10 +1,13 @@
-use crate::tools::ToolCallRsult;
+use crate::tools::{ToolCallRsult, ToolContext};
 use rig::completion::ToolDefinition;
 use rig::tool::Tool;
 use serde_json::json;
 
 #[derive(Clone)]
-pub(super) struct CurrentTimeTool;
+pub(super) struct CurrentTimeTool {
+    #[allow(unused)]
+    pub ctx: ToolContext,
+}
 
 #[derive(Debug, Clone, serde::Deserialize)]
 pub struct Args {}

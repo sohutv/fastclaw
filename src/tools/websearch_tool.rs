@@ -1,23 +1,16 @@
-use crate::agent::AgentContext;
 use crate::service_provider::{Timerange, WebsearchQueryArgs};
-use crate::tools::{ToolCallError, ToolCallRsult};
+use crate::tools::{ToolCallError, ToolCallRsult, ToolContext};
 use chrono::Duration;
 use itertools::Itertools;
 use rig::completion::ToolDefinition;
 use rig::tool::Tool;
 use serde_json::json;
-use std::sync::Arc;
 
 #[derive(Clone)]
 pub(super) struct WebSearchTool {
-    ctx: Arc<AgentContext>,
+    pub ctx: ToolContext,
 }
 
-impl WebSearchTool {
-    pub fn new(ctx: Arc<AgentContext>) -> crate::Result<Self> {
-        Ok(Self { ctx })
-    }
-}
 #[derive(Debug, Clone, serde::Deserialize)]
 pub struct Args {
     pub query: String,
@@ -76,7 +69,7 @@ impl Tool for WebSearchTool {
             timerange_to,
         }: Self::Args,
     ) -> Result<Self::Output, Self::Error> {
-        let Some(websearch_config) = &self.ctx.config.websearch else {
+        let Some(websearch_config) = &self.ctx.agent_context.config.websearch else {
             return Ok(ToolCallRsult::error("websearch not configured"));
         };
         let websearch = match websearch_config.try_into_websearch().await {
@@ -85,7 +78,7 @@ impl Tool for WebSearchTool {
         };
         let search_result = websearch
             .search(
-                self.ctx.workspace,
+                self.ctx.agent_context.workspace,
                 WebsearchQueryArgs {
                     query: query.into(),
                     count: top_k.unwrap_or(5),

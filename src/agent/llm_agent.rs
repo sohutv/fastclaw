@@ -6,6 +6,7 @@ use crate::agent::{
 use crate::channels::{ChannelMessage, SessionId};
 use crate::config::Config;
 use crate::model_provider::{ModelProvider, ModelSettings, ReasoningEffort};
+use crate::tools::ToolContext;
 use anyhow::anyhow;
 use async_trait::async_trait;
 use itertools::Itertools;
@@ -119,6 +120,7 @@ where
         &self,
         reasoning_effort: ReasoningEffort,
         addi_system_prompt: Option<&str>,
+        channel_message_sender: Sender<ChannelMessage>,
     ) -> crate::Result<Agent<C::CompletionModel>>
     where
         P: ModelProvider<Client = C>,
@@ -143,7 +145,13 @@ where
                 &self.id
             ))
             .append_preamble(addi_system_prompt.unwrap_or_default())
-            .tools(crate::tools::FunctionTool::required_tools(Arc::clone(&self.ctx)).await?)
+            .tools(
+                crate::tools::FunctionTool::required_tools(ToolContext {
+                    agent_context: Arc::clone(&self.ctx),
+                    channel_message_sender,
+                })
+                .await?,
+            )
             .temperature(self.agent_settings.temperature)
             .default_max_turns(self.agent_settings.max_turns)
             .max_tokens(
@@ -181,6 +189,7 @@ where
 
     async fn session_compact(
         &self,
+        channel_message_sender: Sender<ChannelMessage>,
         session_id: &SessionId,
         compact_ratio: f32,
     ) -> HistoryCompactResult {
@@ -199,7 +208,14 @@ where
             }
         };
         let result = self
-            .history_compact(&history_manager, session_id, compact_ratio, &history, usage)
+            .history_compact(
+                &history_manager,
+                channel_message_sender,
+                session_id,
+                compact_ratio,
+                &history,
+                usage,
+            )
             .await;
         result
     }
@@ -242,7 +258,11 @@ where
             (vec![], Default::default())
         };
         let agent = self
-            .create_agent(self.agent_settings.reasoning_effort, addi_system_prompt)
+            .create_agent(
+                self.agent_settings.reasoning_effort,
+                addi_system_prompt,
+                channel_message_sender.clone(),
+            )
             .await?;
 
         let message = match message {
@@ -387,6 +407,7 @@ where
             let result = self
                 .history_compact(
                     &history_manager,
+                    channel_message_sender.clone(),
                     session_id,
                     self.agent_settings.compact_threshold,
                     &history,
@@ -416,6 +437,7 @@ where
     async fn history_compact(
         &self,
         history_manager: &Arc<RwLock<dyn HistoryManager>>,
+        channel_message_sender: Sender<ChannelMessage>,
         session_id: &SessionId,
         compact_ratio: f32,
         original_history: &[Message],
@@ -435,7 +457,10 @@ where
             let tail_tokens = original_usage.total_tokens - head_tokens;
             ((head.to_vec(), head_tokens), (tail.to_vec(), tail_tokens))
         };
-        let agent = match self.create_agent(ReasoningEffort::Minimal, None).await {
+        let agent = match self
+            .create_agent(ReasoningEffort::Minimal, None, channel_message_sender)
+            .await
+        {
             Ok(agent) => agent,
             Err(err) => return HistoryCompactResult::Err(format!("创建agent失败, err: {err}")),
         };

@@ -1,20 +1,12 @@
-use crate::agent::AgentContext;
 use crate::service_provider::DelArgs;
-use crate::tools::{ToolCallError, ToolCallRsult};
+use crate::tools::{ToolCallError, ToolCallRsult, ToolContext};
 use rig::completion::ToolDefinition;
 use rig::tool::Tool;
 use serde_json::json;
-use std::sync::Arc;
 
 #[derive(Clone)]
 pub struct CloudStorageDelTool {
-    ctx: Arc<AgentContext>,
-}
-
-impl CloudStorageDelTool {
-    pub fn new(ctx: Arc<AgentContext>) -> crate::Result<Self> {
-        Ok(Self { ctx })
-    }
+    pub ctx: ToolContext,
 }
 
 #[derive(Debug, Clone, serde::Deserialize)]
@@ -47,14 +39,17 @@ impl Tool for CloudStorageDelTool {
     }
 
     async fn call(&self, Args { key }: Self::Args) -> Result<Self::Output, Self::Error> {
-        let Some(storage_config) = &self.ctx.config.storage else {
+        let Some(storage_config) = &self.ctx.agent_context.config.storage else {
             return Ok(ToolCallRsult::error("storage not configured"));
         };
         let storage = match storage_config.try_into_storage().await {
             Ok(it) => it,
             Err(err) => return Ok(ToolCallRsult::error(err.to_string())),
         };
-        match storage.del(self.ctx.workspace, DelArgs::from(key)).await {
+        match storage
+            .del(self.ctx.agent_context.workspace, DelArgs::from(key))
+            .await
+        {
             Ok(result) => Ok(ToolCallRsult::ok(format!(
                 "deleted object key: {}",
                 result.key.as_str()

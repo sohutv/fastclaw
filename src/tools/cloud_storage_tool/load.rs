@@ -1,21 +1,13 @@
-use crate::agent::AgentContext;
 use crate::service_provider::LoadArgs;
-use crate::tools::{ToolCallError, ToolCallRsult};
+use crate::tools::{ToolCallError, ToolCallRsult, ToolContext};
 use base64::Engine;
 use rig::completion::ToolDefinition;
 use rig::tool::Tool;
 use serde_json::json;
-use std::sync::Arc;
 
 #[derive(Clone)]
 pub struct CloudStorageLoadTool {
-    ctx: Arc<AgentContext>,
-}
-
-impl CloudStorageLoadTool {
-    pub fn new(ctx: Arc<AgentContext>) -> crate::Result<Self> {
-        Ok(Self { ctx })
-    }
+    pub ctx: ToolContext,
 }
 
 #[derive(Debug, Clone, serde::Deserialize)]
@@ -58,14 +50,17 @@ Load content from cloud storage.
     }
 
     async fn call(&self, Args { key, save_to }: Self::Args) -> Result<Self::Output, Self::Error> {
-        let Some(storage_config) = &self.ctx.config.storage else {
+        let Some(storage_config) = &self.ctx.agent_context.config.storage else {
             return Ok(ToolCallRsult::error("storage not configured"));
         };
         let storage = match storage_config.try_into_storage().await {
             Ok(it) => it,
             Err(err) => return Ok(ToolCallRsult::error(err.to_string())),
         };
-        let result = match storage.load(self.ctx.workspace, LoadArgs::from(key)).await {
+        let result = match storage
+            .load(self.ctx.agent_context.workspace, LoadArgs::from(key))
+            .await
+        {
             Ok(it) => it,
             Err(err) => return Ok(ToolCallRsult::error(err.to_string())),
         };
@@ -73,7 +68,7 @@ Load content from cloud storage.
         if let Some(path) = save_to {
             let path = std::path::PathBuf::from(path);
             let path = if path.is_relative() {
-                self.ctx.workspace.path.join(path)
+                self.ctx.agent_context.workspace.path.join(path)
             } else {
                 path
             };

@@ -1,21 +1,13 @@
-use crate::agent::AgentContext;
 use crate::service_provider::{Content, Image, ImageGenArgs, Images, StoreArgs, StoreResult};
-use crate::tools::{ToolCallError, ToolCallRsult};
+use crate::tools::{ToolCallError, ToolCallRsult, ToolContext};
 use itertools::Itertools;
 use rig::completion::ToolDefinition;
 use rig::tool::Tool;
 use serde_json::json;
-use std::sync::Arc;
 
 #[derive(Clone)]
 pub(super) struct ImageGenTool {
-    ctx: Arc<AgentContext>,
-}
-
-impl ImageGenTool {
-    pub fn new(ctx: Arc<AgentContext>) -> crate::Result<Self> {
-        Ok(Self { ctx })
-    }
+    pub ctx: ToolContext,
 }
 
 #[derive(Debug, Clone, serde::Deserialize)]
@@ -65,7 +57,7 @@ Generate images from a text prompt.
     }
 
     async fn call(&self, Args { prompt, images }: Self::Args) -> Result<Self::Output, Self::Error> {
-        let Some(image_gen_config) = &self.ctx.config.imagegen else {
+        let Some(image_gen_config) = &self.ctx.agent_context.config.imagegen else {
             return Ok(ToolCallRsult::error("imagegen not configured"));
         };
         let imagegen = match image_gen_config.try_into_imagegen().await {
@@ -75,7 +67,7 @@ Generate images from a text prompt.
 
         match imagegen
             .generate(
-                self.ctx.workspace,
+                self.ctx.agent_context.workspace,
                 ImageGenArgs {
                     prompt: prompt.into(),
                     images: if let Some(images) = images {
@@ -95,7 +87,7 @@ Generate images from a text prompt.
                 if result.images.is_empty() {
                     return Ok(ToolCallRsult::error("no images generated"));
                 }
-                let images = if let Some(storage_config) = &self.ctx.config.storage {
+                let images = if let Some(storage_config) = &self.ctx.agent_context.config.storage {
                     let storage = storage_config
                         .try_into_storage()
                         .await
@@ -107,7 +99,7 @@ Generate images from a text prompt.
                             Image::File { path, format } => {
                                 let StoreResult { signed_url, .. } = storage
                                     .store(
-                                        self.ctx.workspace,
+                                        self.ctx.agent_context.workspace,
                                         StoreArgs {
                                             key: format!("{}.{}", uuid::Uuid::new_v4(), format)
                                                 .into(),
@@ -122,7 +114,7 @@ Generate images from a text prompt.
                             Image::Raw { bytes, format } => {
                                 let StoreResult { signed_url, .. } = storage
                                     .store(
-                                        self.ctx.workspace,
+                                        self.ctx.agent_context.workspace,
                                         StoreArgs {
                                             key: format!("{}.{}", uuid::Uuid::new_v4(), format)
                                                 .into(),
@@ -145,11 +137,12 @@ Generate images from a text prompt.
                             Image::Url { url, .. } => url.to_string(),
                             Image::File { path, .. } => path.display().to_string(),
                             Image::Raw { bytes, format } => {
-                                let path = self.ctx.workspace.downloads_path.join(format!(
-                                    "{}.{}",
-                                    uuid::Uuid::new_v4(),
-                                    format
-                                ));
+                                let path = self
+                                    .ctx
+                                    .agent_context
+                                    .workspace
+                                    .downloads_path
+                                    .join(format!("{}.{}", uuid::Uuid::new_v4(), format));
                                 let _ = tokio::fs::write(&path, bytes)
                                     .await
                                     .map_err(|err| ToolCallError(format!("{err}")))?;

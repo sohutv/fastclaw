@@ -1,6 +1,5 @@
-use crate::agent::AgentContext;
+use crate::tools::ToolContext;
 use rig::tool::ToolDyn;
-use std::sync::Arc;
 
 mod del;
 mod load;
@@ -10,11 +9,11 @@ mod store;
 pub struct CloudStorageTools;
 
 impl CloudStorageTools {
-    pub async fn create(ctx: Arc<AgentContext>) -> crate::Result<Vec<Box<dyn ToolDyn>>> {
+    pub async fn create(ctx: ToolContext) -> crate::Result<Vec<Box<dyn ToolDyn>>> {
         Ok(vec![
-            Box::new(store::CloudStorageStoreTool::new(Arc::clone(&ctx))?),
-            Box::new(load::CloudStorageLoadTool::new(Arc::clone(&ctx))?),
-            Box::new(del::CloudStorageDelTool::new(Arc::clone(&ctx))?),
+            Box::new(store::CloudStorageStoreTool { ctx: ctx.clone() }),
+            Box::new(load::CloudStorageLoadTool { ctx: ctx.clone() }),
+            Box::new(del::CloudStorageDelTool { ctx: ctx.clone() }),
         ])
     }
 }
