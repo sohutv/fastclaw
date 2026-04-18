@@ -1,13 +1,12 @@
 use crate::channels::{Anonymous, SessionId};
-use crate::tools::task_tool::{TaskEnabled, TaskRunState};
-use crate::tools::{ToolCallError, ToolCallRsult, ToolContext};
+use crate::tools::task_tool::{DATETIME_FORMAT, TaskEnabled, TaskRunState};
+use crate::tools::{TaskSchedule, ToolCallError, ToolCallRsult, ToolContext};
 use log::error;
 use rig::completion::ToolDefinition;
 use rig::tool::Tool;
 use serde_json::json;
 use sqlx::{QueryBuilder, Sqlite};
 use std::ops::Deref;
-use std::str::FromStr;
 
 #[derive(Clone)]
 pub struct TaskCreateTool {
@@ -17,7 +16,7 @@ pub struct TaskCreateTool {
 #[derive(Debug, Clone, serde::Deserialize)]
 pub struct Args {
     name: String,
-    cron: String,
+    task_schedule: TaskSchedule,
     desc: String,
     session_id: Anonymous,
     agent_id: String,
@@ -41,9 +40,13 @@ impl Tool for TaskCreateTool {
                         "type": "string",
                         "description": "The name of the task to create",
                     },
-                    "cron": {
+                    "task_schedule": {
                         "type": "string",
-                        "description": "The standard cron expression for the task schedule, e.g. '0 0 9-18 * * * ?'",
+                        "description": format!(r#"
+### Task scheduling configuration supports the following formats:
+- 1 **Cyclic timed scheduling task**: The standard task_schedule expression for the task schedule, e.g. `0 0 9-18 * * * ?` .
+- 2 **Single scheduling task**: Specify the absolute trigger time {DATETIME_FORMAT} , e.g. `2026-04-18 14:00:00`
+                        "#),
                     },
                     "desc": {
                         "type": "string",
@@ -72,8 +75,6 @@ impl Tool for TaskCreateTool {
             .sql_pool(&session_id)
             .await
             .map_err(|err| ToolCallError(format!("fail to get sql_pool, err: {err}")))?;
-        let _ = cron::Schedule::from_str(&args.cron)
-            .map_err(|err| ToolCallError(format!("Invalid cron expression: {err}")))?;
         let mut query_builder = args.create_sql();
         let _ = query_builder
             .build()
@@ -91,7 +92,7 @@ impl Args {
     fn create_sql(&self) -> QueryBuilder<'_, Sqlite> {
         let Self {
             name,
-            cron,
+            task_schedule,
             desc,
             session_id,
             agent_id,
@@ -104,7 +105,7 @@ impl Args {
             .push("(")
             .push_bind(name)
             .push(", ")
-            .push_bind(cron)
+            .push_bind(task_schedule.to_string())
             .push(", ")
             .push_bind(desc)
             .push(", ")

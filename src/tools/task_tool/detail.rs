@@ -86,7 +86,7 @@ impl Tool for TaskDetailGetTool {
 ```                    "#,
             task.name,
             task.id,
-            task.cron,
+            task.task_schedule,
             task.session_id,
             task.run_state,
             task.enabled,

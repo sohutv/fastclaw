@@ -90,7 +90,7 @@ impl Tool for TaskListTool {
 "#,
                     task.name,
                     task.id,
-                    task.cron,
+                    task.task_schedule,
                     task.session_id,
                     task.run_state,
                     task.enabled,

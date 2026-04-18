@@ -9,7 +9,7 @@ use std::sync::Arc;
 use tokio::sync::mpsc::Sender;
 mod shell_tool;
 mod task_tool;
-pub use task_tool::TaskTools;
+pub use task_tool::{TaskTools, TaskSchedule};
 
 mod time_tool;
 

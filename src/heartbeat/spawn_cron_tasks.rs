@@ -1,7 +1,7 @@
 use crate::agent::{Agent, AgentRequest};
 use crate::channels::{Anonymous, SessionId};
 use crate::config::{Config, Workspace};
-use crate::tools::TaskTools;
+use crate::tools::{TaskSchedule, TaskTools};
 use log::{error, info, warn};
 use rig::completion::Message;
 use std::str::FromStr;
@@ -51,68 +51,76 @@ impl super::Heartbeat {
         let tasks = TaskTools::fetch_ready_tasks(workspace, session_id).await?;
         let now = chrono::Local::now();
         for task in tasks {
-            let cron = task.cron;
             // Parse cron expression and check if current time matches
-            match cron::Schedule::from_str(&cron) {
-                Ok(schedule) => {
-                    let last_exe_at = task.last_exe_at.unwrap_or(task.created_at);
-                    if let Some(next) = schedule.after(&last_exe_at).next() {
-                        if next < now {
-                            let session_id = SessionId::Anonymous {
-                                val: Anonymous(task.session_id.clone()),
-                                settings: Default::default(),
-                            };
-                            match task_submitter(
-                                Arc::clone(&agent),
-                                AgentRequest {
-                                    id: Default::default(),
-                                    session_id: session_id.clone(),
-                                    message: Message::user(format!(
-                                        r#"
+            let time_to_exec = match &task.task_schedule {
+                TaskSchedule::Cron(cron) => match cron::Schedule::from_str(&cron) {
+                    Ok(schedule) => {
+                        let last_exe_at = task.last_exe_at.unwrap_or(task.created_at);
+                        if let Some(next) = schedule.after(&last_exe_at).next() {
+                            next < now
+                        } else {
+                            false
+                        }
+                    }
+                    Err(err) => {
+                        error!(
+                            "Failed to parse cron expression '{}' for task {}: {}",
+                            cron, task.id, err
+                        );
+                        false
+                    }
+                },
+                TaskSchedule::Datetime(dt) => {
+                    if let Some(dt) = dt.and_local_timezone(now.timezone()).single() {
+                        dt < now
+                    } else {
+                        false
+                    }
+                }
+            };
+            if time_to_exec {
+                let session_id = SessionId::Anonymous {
+                    val: Anonymous(task.session_id.clone()),
+                    settings: Default::default(),
+                };
+                match task_submitter(
+                    Arc::clone(&agent),
+                    AgentRequest {
+                        id: Default::default(),
+                        session_id: session_id.clone(),
+                        message: Message::user(format!(
+                            r#"
 **Execute task immediately**: task_id: {}
 - **CurrentTime**: {}
 - **Tips**: If the task fails, you are authorized to retry or ignore it at your discretion.
                                             "#,
-                                        task.id,
-                                        now.to_rfc3339(),
-                                    )),
-                                },
-                            )
-                            .await
-                            {
-                                Ok(_) => {
-                                    info!(
-                                        "Task '{}' (id: {}) is ready to execute based on cron schedule: {}, next trigger: {}",
-                                        task.name, task.id, cron, next
-                                    );
-                                    if let Err(err) = TaskTools::mark_task_executed(
-                                        workspace,
-                                        &session_id,
-                                        task.id,
-                                    )
-                                    .await
-                                    {
-                                        error!(
-                                            "Failed to update last_exe_at for task '{}' (id: {}): {}",
-                                            task.name, task.id, err
-                                        );
-                                    }
-                                }
-                                Err(err) => {
-                                    error!(
-                                        "Failed to send agent request for task '{}': {}",
-                                        task.name, err
-                                    );
-                                }
-                            }
+                            task.id,
+                            now.to_rfc3339(),
+                        )),
+                    },
+                )
+                .await
+                {
+                    Ok(_) => {
+                        info!(
+                            "Task '{}' (id: {}) is ready to execute based on cron schedule: {}",
+                            task.name, task.id, &task.task_schedule
+                        );
+                        if let Err(err) =
+                            TaskTools::mark_task_executed(workspace, &session_id, task.id).await
+                        {
+                            error!(
+                                "Failed to update last_exe_at for task '{}' (id: {}): {}",
+                                task.name, task.id, err
+                            );
                         }
                     }
-                }
-                Err(e) => {
-                    error!(
-                        "Failed to parse cron expression '{}' for task {}: {}",
-                        cron, task.id, e
-                    );
+                    Err(err) => {
+                        error!(
+                            "Failed to send agent request for task '{}': {}",
+                            task.name, err
+                        );
+                    }
                 }
             }
         }

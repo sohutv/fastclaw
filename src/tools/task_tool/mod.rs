@@ -5,6 +5,7 @@ use derive_more::Display;
 use rig::tool::ToolDyn;
 use sqlx::Row;
 use sqlx::sqlite::SqliteRow;
+use std::str::FromStr;
 use strum::{EnumIter, IntoEnumIterator};
 
 mod create;
@@ -14,6 +15,8 @@ mod list;
 mod update;
 
 pub mod task_api;
+
+const DATETIME_FORMAT: &str = "%Y-%m-%d %H:%M:%S";
 
 #[derive(Clone)]
 pub struct TaskTools;
@@ -34,7 +37,7 @@ impl TaskTools {
 pub struct TaskInfo {
     pub id: u64,
     pub name: String,
-    pub cron: String,
+    pub task_schedule: TaskSchedule,
     pub desc: String,
     pub session_id: String,
     pub run_state: TaskRunState,
@@ -45,6 +48,9 @@ pub struct TaskInfo {
     pub creator: String,
 }
 
+mod task_schedule;
+pub use task_schedule::TaskSchedule;
+
 impl TryFrom<SqliteRow> for TaskInfo {
     type Error = anyhow::Error;
 
@@ -52,7 +58,10 @@ impl TryFrom<SqliteRow> for TaskInfo {
         Ok(Self {
             id: row.try_get("id")?,
             name: row.try_get("name")?,
-            cron: row.try_get("cron")?,
+            task_schedule: {
+                let s: &str = row.try_get("cron")?;
+                TaskSchedule::from_str(s)?
+            },
             desc: row.try_get("desc")?,
             session_id: row.try_get("session_id")?,
             run_state: {
@@ -69,20 +78,20 @@ impl TryFrom<SqliteRow> for TaskInfo {
             },
             created_at: {
                 let ts: String = row.try_get("created_at")?;
-                chrono::NaiveDateTime::parse_from_str(&ts, "%Y-%m-%d %H:%M:%S")?
+                chrono::NaiveDateTime::parse_from_str(&ts, DATETIME_FORMAT)?
                     .and_utc()
                     .with_timezone(&Local)
             },
             updated_at: {
                 let ts: String = row.try_get("updated_at")?;
-                chrono::NaiveDateTime::parse_from_str(&ts, "%Y-%m-%d %H:%M:%S")?
+                chrono::NaiveDateTime::parse_from_str(&ts, DATETIME_FORMAT)?
                     .and_utc()
                     .with_timezone(&Local)
             },
             last_exe_at: {
                 let ts: Option<String> = row.try_get("last_exe_at")?;
                 ts.map(|ts| {
-                    chrono::NaiveDateTime::parse_from_str(&ts, "%Y-%m-%d %H:%M:%S")
+                    chrono::NaiveDateTime::parse_from_str(&ts, DATETIME_FORMAT)
                         .map(|dt| dt.and_utc().with_timezone(&Local))
                 })
                 .transpose()?
