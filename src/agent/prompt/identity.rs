@@ -2,6 +2,7 @@ use crate::agent::AgentContext;
 use crate::agent::prompt::Prompt;
 use itertools::Itertools;
 use std::path::Path;
+use log::error;
 
 pub struct IdentityPrompt;
 
@@ -15,7 +16,6 @@ const IDENTITY_MD_FILES: &[&str] = &[
     "BOOTSTRAP.md",
     "MEMORY.md",
     "CRON_TASK.md",
-    "cron/README.md",
 ];
 impl IdentityPrompt {
     pub async fn build(
@@ -30,7 +30,10 @@ impl IdentityPrompt {
         let mut vec = Vec::with_capacity(IDENTITY_MD_FILES.len());
         for &filename in IDENTITY_MD_FILES {
             let filepath = workspace_dir.join(filename);
-            let content = tokio::fs::read_to_string(filepath).await?;
+            let content = tokio::fs::read_to_string(&filepath).await.map_err(|err|{
+                error!("Read file: {} failed, {err}", filepath.display());
+                err
+            })?;
             vec.push((filename, content))
         }
         let prompt = vec

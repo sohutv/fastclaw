@@ -79,10 +79,6 @@ async fn init_config_workspace(config_dir: &Path) -> crate::Result<()> {
     let workspace = config_dir.join("workspace");
     tokio::fs::create_dir_all(&workspace).await?;
 
-    let cron = workspace.join("cron");
-    tokio::fs::create_dir_all(&cron).await?;
-    tokio::fs::write(&cron.join("README.md"), "#Cron").await?;
-
     let memory = workspace.join("memory");
     tokio::fs::create_dir_all(&memory).await?;
     tokio::fs::write(memory.join("README.md"), "#Memories").await?;
@@ -94,10 +90,6 @@ async fn init_config_workspace(config_dir: &Path) -> crate::Result<()> {
     let skills = workspace.join("skills");
     tokio::fs::create_dir_all(&skills).await?;
     tokio::fs::write(skills.join("README.md"), "#Skills").await?;
-
-    let state = workspace.join("state");
-    tokio::fs::create_dir_all(&state).await?;
-    tokio::fs::write(state.join("README.md"), "#State").await?;
 
     tokio::fs::write(
         workspace.join("AGENTS.md"),

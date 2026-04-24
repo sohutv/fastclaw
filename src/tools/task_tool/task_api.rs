@@ -7,12 +7,12 @@ use itertools::Itertools;
 use sqlx::SqlitePool;
 
 impl TaskTools {
-    pub async fn init_cron_task(sql_pool: &SqlitePool) -> crate::Result<()> {
+    pub async fn init_cron_task(sql_pool: SqlitePool) -> crate::Result<SqlitePool> {
         let _ = sqlx::query(CREATE_TASK_TABLE)
-            .execute(&*sql_pool)
+            .execute(&sql_pool)
             .await
             .map_err(|err| ToolCallError(format!("{err}")))?;
-        Ok(())
+        Ok(sql_pool)
     }
 
     pub async fn fetch_ready_tasks(

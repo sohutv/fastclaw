@@ -1,5 +1,4 @@
 use super::TaskEnabled;
-use crate::channels::{Anonymous, SessionId};
 use crate::tools::{ToolCallError, ToolCallRsult, ToolContext};
 use log::error;
 use rig::completion::ToolDefinition;
@@ -20,7 +19,6 @@ pub struct Args {
     cron: Option<String>,
     desc: Option<String>,
     enabled: Option<TaskEnabled>,
-    session_id: Anonymous,
 }
 
 #[allow(async_fn_in_trait)]
@@ -58,23 +56,18 @@ impl Tool for TaskUpdateTool {
                         "enum": TaskEnabled::iter().map(|it| it.to_string()).collect::<Vec<_>>(),
                         "description": "The enabled state of task",
                     },
-                    "session_id": {
-                        "type": "string",
-                        "description": "The current session-id",
-                    },
                 },
-                "required": ["id", "session_id"],
+                "required": ["id"],
             }),
         }
     }
 
     async fn call(&self, args: Self::Args) -> Result<Self::Output, Self::Error> {
-        let session_id = SessionId::from(&args.session_id);
         let sql_pool = self
             .ctx
-            .agent_context
+            .agent_context()
             .workspace
-            .sql_pool(&session_id)
+            .sql_pool(&self.ctx.session_id)
             .await
             .map_err(|err| ToolCallError(format!("fail to get sql_pool, err: {err}")))?;
         let task_id = i64::try_from(args.id)

@@ -1,10 +1,12 @@
 use crate::ModelName;
+use crate::agent::session_history::HistoryMessage;
 use crate::agent::{
     AgentContext, AgentId, AgentRequest, AgentResponse, AgentSettings, HistoryCompactResult,
     HistoryCompactVal, HistoryManager, LlmAgentSupplier, Workspace,
 };
 use crate::channels::{ChannelMessage, SessionId};
 use crate::config::Config;
+use crate::memory::MemoryManager;
 use crate::model_provider::{ModelProvider, ModelSettings, ReasoningEffort};
 use crate::tools::ToolContext;
 use anyhow::anyhow;
@@ -19,7 +21,6 @@ use rig::message::UserContent;
 use rig::streaming::{StreamedAssistantContent, StreamingChat};
 use serde_json::json;
 use std::sync::Arc;
-use tokio::sync::RwLock;
 use tokio::sync::mpsc::Sender;
 use tokio_stream::StreamExt;
 
@@ -33,7 +34,7 @@ where
     ctx: Arc<AgentContext>,
     model_provider: P,
     model_name: ModelName,
-    model_settings: ModelSettings,
+    pub model_settings: ModelSettings,
     agent_settings: AgentSettings,
 }
 
@@ -50,7 +51,8 @@ where
         agent_id: ID,
         config: &'static Config,
         model: ModelName,
-        history_manager: Option<Arc<RwLock<dyn HistoryManager>>>,
+        history_manager: Arc<dyn HistoryManager>,
+        memory_manager: Arc<MemoryManager>,
         workspace: &'static Workspace,
     ) -> crate::Result<Self::A> {
         Ok(LlmAgent::new(
@@ -59,6 +61,7 @@ where
             self.clone(),
             model,
             history_manager,
+            memory_manager,
             workspace,
         )
         .await?)
@@ -67,21 +70,23 @@ where
 
 impl<C, P> LlmAgent<C, P>
 where
-    C: CompletionClient,
-    P: ModelProvider<Client = C>,
+    C: CompletionClient + 'static + Send + Sync,
+    P: ModelProvider<Client = C> + 'static + Send + Sync,
 {
     async fn new(
         agent_id: AgentId,
         config: &'static Config,
         model_provider: P,
         model_name: ModelName,
-        history_manager: Option<Arc<RwLock<dyn HistoryManager>>>,
+        history_manager: Arc<dyn HistoryManager>,
+        memory_manager: Arc<MemoryManager>,
         workspace: &'static Workspace,
     ) -> crate::Result<Self> {
         let ctx = Arc::new(AgentContext {
             config,
             workspace,
             history_manager,
+            memory_manager,
         });
         Ok(Self {
             model_settings: model_provider
@@ -118,6 +123,7 @@ where
 
     async fn create_agent(
         &self,
+        session_id: &SessionId,
         reasoning_effort: ReasoningEffort,
         addi_system_prompt: Option<&str>,
         channel_message_sender: Sender<ChannelMessage>,
@@ -147,7 +153,8 @@ where
             .append_preamble(addi_system_prompt.unwrap_or_default())
             .tools(
                 crate::tools::FunctionTool::required_tools(ToolContext {
-                    agent_context: Arc::clone(&self.ctx),
+                    session_id: session_id.clone(),
+                    agent: Arc::new(self.fork_with("tool-call").await?),
                     channel_message_sender,
                 })
                 .await?,
@@ -165,7 +172,6 @@ where
                 }
             }))
             .build();
-
         Ok(agent)
     }
 }
@@ -193,31 +199,18 @@ where
         session_id: &SessionId,
         compact_ratio: f32,
     ) -> HistoryCompactResult {
-        let Some(history_manager) = self.ctx.history_manager.as_ref() else {
-            return HistoryCompactResult::Ignore("history_manager not found!!!".into());
-        };
-        let (history, usage) = {
-            let mgr = history_manager.read().await;
-            match mgr.load(session_id, &self.id).await {
-                Ok(result) => result,
-                Err(err) => {
-                    return HistoryCompactResult::Err(format!(
-                        "history compact failed, err: {err}"
-                    ));
-                }
-            }
-        };
         let result = self
-            .history_compact(
-                &history_manager,
-                channel_message_sender,
-                session_id,
-                compact_ratio,
-                &history,
-                usage,
-            )
+            .history_compact(channel_message_sender, session_id, compact_ratio)
             .await;
         result
+    }
+
+    fn context(&self) -> &AgentContext {
+        &self.ctx
+    }
+
+    fn model_settings(&self) -> &ModelSettings {
+        &self.model_settings
     }
 }
 
@@ -248,17 +241,18 @@ where
                 message: AgentResponse::Start,
             })
             .await;
-        let (history, _) = if let Some(mgr) = &self.ctx.history_manager {
-            mgr.read()
-                .await
+        let history: Vec<Message> = {
+            let (history, _) = self
+                .ctx
+                .history_manager
                 .load(session_id, &self.id)
                 .await
-                .unwrap_or_default()
-        } else {
-            (vec![], Default::default())
+                .unwrap_or_default();
+            history.into_iter().map(|it| it.into()).collect_vec()
         };
         let agent = self
             .create_agent(
+                &request.session_id,
                 self.agent_settings.reasoning_effort,
                 addi_system_prompt,
                 channel_message_sender.clone(),
@@ -305,17 +299,14 @@ where
                 Ok(MultiTurnStreamItem::StreamUserItem(_)) => None,
                 Ok(MultiTurnStreamItem::FinalResponse(final_resp)) => {
                     let usage = final_resp.usage();
-                    let history = final_resp.history().expect("unexpected empty history!!!");
-                    if let Some(mgr) = &self.ctx.history_manager {
-                        self.handle_history(
-                            channel_message_sender.clone(),
-                            mgr,
-                            &request.session_id,
-                            &usage,
-                            history,
-                        )
-                        .await;
-                    }
+                    let append_history = final_resp.history().expect("unexpected empty history!!!");
+                    self.handle_history(
+                        channel_message_sender.clone(),
+                        &request.session_id,
+                        &usage,
+                        append_history,
+                    )
+                    .await;
                     Some(AgentResponse::Final(usage))
                 }
                 Ok(_) => None,
@@ -368,28 +359,32 @@ where
     async fn handle_history(
         &self,
         channel_message_sender: Sender<ChannelMessage>,
-        history_manager: &Arc<RwLock<dyn HistoryManager>>,
         session_id: &SessionId,
         usage: &Usage,
-        history: &[Message],
+        append_history: &[Message],
     ) {
+        match self
+            .ctx
+            .history_manager
+            .append(
+                session_id,
+                &self.id,
+                &usage,
+                append_history
+                    .iter()
+                    .map(|it| HistoryMessage::message(it.clone()))
+                    .collect_vec(),
+            )
+            .await
         {
-            match history_manager
-                .write()
-                .await
-                .store(session_id, &self.id, &usage, history)
-                .await
-            {
-                Ok(_) => {}
-                Err(err) => {
-                    warn!(
-                        "Store history failed, session_id: {}, agent: {}, err: {}",
-                        session_id, self.id, err
-                    );
-                }
+            Ok(_) => {}
+            Err(err) => {
+                warn!(
+                    "Store history failed, session_id: {}, agent: {}, err: {}",
+                    session_id, self.id, err
+                );
             }
         }
-
         let max_tokens = self
             .agent_settings
             .max_tokens
@@ -406,12 +401,9 @@ where
 
             let result = self
                 .history_compact(
-                    &history_manager,
                     channel_message_sender.clone(),
                     session_id,
                     self.agent_settings.compact_threshold,
-                    &history,
-                    *usage,
                 )
                 .await;
             match &result {
@@ -436,13 +428,17 @@ where
 
     async fn history_compact(
         &self,
-        history_manager: &Arc<RwLock<dyn HistoryManager>>,
         channel_message_sender: Sender<ChannelMessage>,
         session_id: &SessionId,
         compact_ratio: f32,
-        original_history: &[Message],
-        original_usage: Usage,
     ) -> HistoryCompactResult {
+        let (original_history, original_usage) =
+            match self.ctx.history_manager.load(session_id, &self.id).await {
+                Ok((messages, usage)) => (messages.into_iter().collect_vec(), usage),
+                Err(err) => {
+                    return HistoryCompactResult::Err(format!("{err}"));
+                }
+            };
         let ((head, _), (tail, tail_tokens)) = {
             let len = original_history.len();
             let ratio = 0.2f32.max(compact_ratio.min(1.));
@@ -458,7 +454,12 @@ where
             ((head.to_vec(), head_tokens), (tail.to_vec(), tail_tokens))
         };
         let agent = match self
-            .create_agent(ReasoningEffort::Minimal, None, channel_message_sender)
+            .create_agent(
+                session_id,
+                ReasoningEffort::Minimal,
+                None,
+                channel_message_sender,
+            )
             .await
         {
             Ok(agent) => agent,
@@ -468,13 +469,13 @@ where
             format!(
                 r#"
 **current session_id**: {}
-Execute the 'slimming' maintenance of the conversation history immediately: back up the history and generate a refined summary of the context.
+Execute the 'slimming' maintenance of the conversation history immediately, generate a refined summary of the context.
 {}
                             "#,
                 session_id,
                 include_str!("./prompt/history_compact_prompt.md")
             ),
-            head,
+            head.clone(),
         )
             .await;
         while let Some(item) = stream.next().await {
@@ -495,20 +496,28 @@ Execute the 'slimming' maintenance of the conversation history immediately: back
                             ..Default::default()
                         };
                         {
-                            let mut history_manager = history_manager.write().await;
-                            let (history_backup_path, backup_timestamp) = match history_manager
-                                .backup(session_id, &self.id)
-                                .await
-                                .map_err(|err| anyhow!(err))
-                            {
-                                Ok(it) => it,
-                                Err(err) => return HistoryCompactResult::Err(err.to_string()),
-                            };
                             let Message::Assistant { id, content } = compacted else {
                                 return HistoryCompactResult::Err(
                                     "unexpected non-assistant message in compacted history"
                                         .to_string(),
                                 );
+                            };
+                            let history_backup_path = match self
+                                .ctx
+                                .memory_manager
+                                .create_index(
+                                    session_id,
+                                    &head
+                                        .into_iter()
+                                        .filter(|it| it.is_message())
+                                        .map(|it| it.into())
+                                        .collect_vec(),
+                                )
+                                .await
+                                .map_err(|err| anyhow!(err))
+                            {
+                                Ok(it) => it,
+                                Err(err) => return HistoryCompactResult::Err(err.to_string()),
                             };
                             let compacted = Message::Assistant {
                                 id: id.clone(),
@@ -523,18 +532,21 @@ Execute the 'slimming' maintenance of the conversation history immediately: back
 
                                     "#,
                                         history_backup_path.display(),
-                                        backup_timestamp,
+                                        chrono::Local::now().format("%Y-%m-%d %H:%M:%S")
                                     )));
                                     content
                                 },
                             };
-                            let _ = history_manager
-                                .store(
-                                    session_id,
-                                    &self.id,
-                                    &compacted_usage,
-                                    &[&[compacted], tail.as_slice()].concat(),
-                                )
+                            let messages = {
+                                let mut messages = vec![HistoryMessage::summary(compacted)];
+                                let mut tail = tail.into_iter().collect_vec();
+                                messages.append(&mut tail);
+                                messages
+                            };
+                            let _ = self
+                                .ctx
+                                .history_manager
+                                .append(session_id, &self.id, &compacted_usage, messages)
                                 .await;
                         }
                         compacted_usage

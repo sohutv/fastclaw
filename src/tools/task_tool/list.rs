@@ -1,5 +1,4 @@
 use super::{TaskEnabled, TaskInfo, TaskRunState};
-use crate::channels::{Anonymous, SessionId};
 use crate::tools::task_tool::detail::TaskDetailGetTool;
 use crate::tools::{ToolCallError, ToolCallRsult, ToolContext};
 use anyhow::anyhow;
@@ -22,7 +21,6 @@ pub struct TaskListTool {
 pub struct Args {
     run_state: Option<TaskRunState>,
     enabled: TaskEnabled,
-    session_id: Anonymous,
 }
 
 #[allow(async_fn_in_trait)]
@@ -49,22 +47,17 @@ impl Tool for TaskListTool {
                         "enum": TaskEnabled::iter().map(|it|it.to_string()).collect::<Vec<_>>(),
                         "description": "The enabled state of the task",
                     },
-                    "session_id": {
-                        "type": "string",
-                        "description": "The current session-id",
-                    },
                 },
-                "required": ["enabled", "session_id"],
+                "required": ["enabled"],
             }),
         }
     }
     async fn call(&self, args: Self::Args) -> Result<Self::Output, Self::Error> {
-        let session_id = SessionId::from(&args.session_id);
         let sql_pool = self
             .ctx
-            .agent_context
+            .agent_context()
             .workspace
-            .sql_pool(&session_id)
+            .sql_pool(&self.ctx.session_id)
             .await
             .map_err(|err| ToolCallError(format!("fail to get sql_pool, err: {err}")))?;
         let mut query_builder = args

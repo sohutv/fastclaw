@@ -4,6 +4,7 @@ use crate::channels::Channel;
 use crate::cli::CmdRunner;
 use crate::config::{Config, Workspace};
 use crate::heartbeat::Heartbeat;
+use crate::memory::MemoryManager;
 use crate::model_provider::ModelProviders;
 use anyhow::anyhow;
 use clap::Args;
@@ -12,7 +13,6 @@ use itertools::Itertools;
 use log::info;
 use std::path::PathBuf;
 use std::sync::Arc;
-use tokio::sync::RwLock;
 
 #[derive(Args)]
 pub struct Start {
@@ -55,10 +55,9 @@ impl CmdRunner for Start {
         };
         let _ = config.init_logger()?;
         let workspace = { Box::leak(Box::new(Workspace::init(workdir).await?)) };
-        let history_manager: Arc<RwLock<dyn HistoryManager>> = {
-            let mgr = JsonlHistoryManager::new(workspace).await?;
-            Arc::new(RwLock::new(mgr))
-        };
+        let history_manager: Arc<dyn HistoryManager> =
+            Arc::new(JsonlHistoryManager::new(config, workspace).await?);
+        let memory_manager = Arc::new(MemoryManager::new(config, workspace).await?);
         let (main_agent, heartbeat_agent) = {
             let main_agent = match config.default_model_provider()? {
                 ModelProviders::OpenaiCompatible(model_provider) => {
@@ -67,7 +66,8 @@ impl CmdRunner for Start {
                             "main",
                             config,
                             config.default_model().clone(),
-                            Some(Arc::clone(&history_manager)),
+                            Arc::clone(&history_manager),
+                            Arc::clone(&memory_manager),
                             workspace,
                         )
                         .await?
@@ -103,7 +103,6 @@ impl CmdRunner for Start {
                     let join_handle = start_channel(
                         config,
                         workspace,
-                        Arc::clone(&history_manager),
                         channel,
                         Arc::clone(&main_agent),
                         Arc::clone(&heartbeat_agent),
@@ -118,7 +117,6 @@ impl CmdRunner for Start {
                     let join_handle = start_channel(
                         config,
                         workspace,
-                        Arc::clone(&history_manager),
                         channel,
                         Arc::clone(&main_agent),
                         Arc::clone(&heartbeat_agent),
@@ -145,7 +143,6 @@ impl CmdRunner for Start {
 async fn start_channel<C>(
     config: &'static Config,
     workspace: &'static Workspace,
-    history_manager: Arc<RwLock<dyn HistoryManager>>,
     channel: C,
     main_agent: Arc<dyn Agent>,
     heartbeat_agent: Arc<dyn Agent>,
@@ -158,7 +155,6 @@ where
     let (_, heartbeat_join_handle) = Heartbeat::new(
         config,
         workspace,
-        &history_manager,
         Arc::clone(&channel),
         Arc::clone(&client),
         heartbeat_agent,

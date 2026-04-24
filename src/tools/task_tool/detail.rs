@@ -1,5 +1,4 @@
 use super::TaskInfo;
-use crate::channels::{Anonymous, SessionId};
 use crate::tools::{ToolCallError, ToolCallRsult, ToolContext};
 use log::error;
 use rig::completion::ToolDefinition;
@@ -14,7 +13,6 @@ pub struct TaskDetailGetTool {
 #[derive(Debug, Clone, serde::Deserialize)]
 pub struct Args {
     id: u64,
-    session_id: Anonymous,
 }
 
 #[allow(async_fn_in_trait)]
@@ -35,23 +33,18 @@ impl Tool for TaskDetailGetTool {
                         "type": "integer",
                         "description": "The task id",
                     },
-                    "session_id": {
-                        "type": "string",
-                        "description": "The current session-id",
-                    },
                 },
-                "required": ["id", "session_id"],
+                "required": ["id"],
             }),
         }
     }
 
     async fn call(&self, args: Self::Args) -> Result<Self::Output, Self::Error> {
-        let session_id = SessionId::from(&args.session_id);
         let sql_pool = self
             .ctx
-            .agent_context
+            .agent_context()
             .workspace
-            .sql_pool(&session_id)
+            .sql_pool(&self.ctx.session_id)
             .await
             .map_err(|err| ToolCallError(format!("fail to get sql_pool, err: {err}")))?;
         let task_id = i64::try_from(args.id)

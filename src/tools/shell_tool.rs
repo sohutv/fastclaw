@@ -92,7 +92,7 @@ impl Tool for ShellTool {
             Command::new("sh")
                 .arg("-c")
                 .arg(command)
-                .current_dir(&self.ctx.agent_context.workspace.path)
+                .current_dir(&self.ctx.agent_context().workspace.path)
                 .output(),
         )
         .await;

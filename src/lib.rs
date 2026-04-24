@@ -22,7 +22,7 @@ macro_rules! btree_map {
             std::collections::BTreeMap::new()
         }
     };
-    ( $($key:expr => $value:expr),* )=>{
+    ( $($key:expr => $value:expr,)* )=>{
         {
             std::collections::BTreeMap::from_iter([$(($key, $value)),*])
         }
@@ -36,9 +36,9 @@ macro_rules! hash_map {
             std::collections::HashMap::new()
         }
     };
-    ( $($key:expr => $value:expr),* )=>{
+    ( $($key:expr => $value:expr,)* )=>{
         {
-            std::collections::HashMap::from_iter([($(($key, $value)),*)])
+            std::collections::HashMap::from_iter([$(($key, $value)),*])
         }
     }
 }

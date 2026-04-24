@@ -7,7 +7,9 @@ use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
 mod r#type;
-use crate::service_provider::{ImageGenConfigs, StorageConfigs, WebsearchConfigs};
+use crate::service_provider::{
+    EmbeddingConfigs, ImageEnhancerConfigs, ImageGenConfigs, StorageConfigs, WebsearchConfigs,
+};
 pub use r#type::*;
 
 mod config_;
@@ -29,7 +31,9 @@ pub struct Config {
     pub heartbeat_config: HeartbeatConfig,
     pub websearch: Option<WebsearchConfigs>,
     pub imagegen: Option<ImageGenConfigs>,
+    pub image_enhancer: Option<ImageEnhancerConfigs>,
     pub storage: Option<StorageConfigs>,
+    pub embedding: Option<EmbeddingConfigs>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

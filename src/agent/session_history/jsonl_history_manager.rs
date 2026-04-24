@@ -1,11 +1,14 @@
-use crate::agent::session_history::BackupTimestamp;
+use crate::agent::session_history::HistoryMessage;
 use crate::agent::{AgentId, HistoryManager, Workspace};
 use crate::channels::SessionId;
+use crate::config::Config;
 use async_trait::async_trait;
-use itertools::Itertools;
-use rig::completion::{Message, Usage};
-use std::ops::Deref;
+use rig::completion::Usage;
+use std::ops::{Deref, DerefMut};
 use std::path::PathBuf;
+use std::sync::Arc;
+use tokio::io::AsyncWriteExt;
+use tokio::sync::RwLock;
 use tokio::{
     fs,
     io::{AsyncBufReadExt, BufReader},
@@ -13,37 +16,75 @@ use tokio::{
 
 #[derive(Clone)]
 pub struct JsonlHistoryManager {
+    #[allow(unused)]
+    config: &'static Config,
     workspace: &'static Workspace,
+    histories: Arc<RwLock<Option<(Vec<HistoryMessage>, Usage)>>>,
 }
 
 impl JsonlHistoryManager {
-    pub async fn new(workspace: &'static Workspace) -> crate::Result<Self> {
-        Ok(Self { workspace })
+    pub async fn new(
+        config: &'static Config,
+        workspace: &'static Workspace,
+    ) -> crate::Result<Self> {
+        Ok(Self {
+            config,
+            workspace,
+            histories: Default::default(),
+        })
     }
 }
 
 #[async_trait]
 impl HistoryManager for JsonlHistoryManager {
-    async fn store(
-        &mut self,
+    async fn append(
+        &self,
         session_id: &SessionId,
         agent: &AgentId,
         usage: &Usage,
-        messages: &[Message],
+        new_messages: Vec<HistoryMessage>,
     ) -> crate::Result<()> {
-        let dir = self.history_dir(session_id, agent).await?;
-        let usage_filepath = dir.join("usage.json");
-        fs::write(
-            &usage_filepath,
-            serde_json::to_string_pretty(usage).unwrap_or_default(),
-        )
-        .await?;
-        let history_filepath = dir.join("history.jsonl");
-        let lines = messages
-            .iter()
-            .flat_map(|it| serde_json::to_string(&it).ok())
-            .join("\n");
-        fs::write(&history_filepath, lines).await?;
+        let mut histories = self.histories.write().await;
+
+        {
+            // dump to file
+            let dir = self.history_dir(session_id, agent).await?;
+            let usage_filepath = dir.join("usage.json");
+            fs::write(
+                &usage_filepath,
+                serde_json::to_string_pretty(usage).unwrap_or_default(),
+            )
+            .await?;
+            let history_filepath = dir.join("history.jsonl");
+            let file = fs::File::options()
+                .append(true)
+                .create(true)
+                .open(&history_filepath)
+                .await?;
+            let mut writer = tokio::io::BufWriter::new(file);
+            for message in &new_messages {
+                let line = serde_json::to_string(message)?;
+                let _ = writer.write(line.as_bytes()).await?;
+                let _ = writer.write(b"\n").await?;
+            }
+            let _ = writer.flush().await?;
+        }
+
+        if let Some((messages, usage)) = histories.deref_mut() {
+            for new_message in new_messages {
+                match new_message {
+                    HistoryMessage::Message(_) => {
+                        messages.push(new_message);
+                    }
+                    HistoryMessage::Summary(_) => {
+                        *messages = vec![];
+                        messages.push(new_message);
+                    }
+                }
+            }
+            *usage = *usage;
+        }
+
         Ok(())
     }
 
@@ -51,30 +92,52 @@ impl HistoryManager for JsonlHistoryManager {
         &self,
         session_id: &SessionId,
         agent: &AgentId,
-    ) -> crate::Result<(Vec<Message>, Usage)> {
-        let dir = self.history_dir(session_id, agent).await?;
-        let filepath = dir.join("history.jsonl");
-        if !filepath.exists() {
-            return Ok((Default::default(), Default::default()));
-        }
-        let file = fs::File::open(&filepath).await?;
-        let reader = BufReader::new(file);
-        let mut lines = reader.lines();
-        let mut messages = Vec::new();
-        while let Some(line) = lines.next_line().await? {
-            if let Ok(message) = serde_json::from_str::<Message>(&line) {
-                messages.push(message);
+    ) -> crate::Result<(Vec<HistoryMessage>, Usage)> {
+        {
+            let histories = self.histories.read().await;
+            if let Some((messages, usage)) = histories.as_ref() {
+                return Ok((messages.clone(), *usage));
             }
         }
-        let usage_filepath = dir.join("usage.json");
-        let usage: Usage = if !usage_filepath.exists() {
-            None
-        } else {
-            let json = fs::read_to_string(&usage_filepath).await?;
-            serde_json::from_str::<Usage>(&json).ok()
+        {
+            let mut histories = self.histories.write().await;
+            *histories = {
+                let dir = self.history_dir(session_id, agent).await?;
+                let reader = {
+                    let filepath = dir.join("history.jsonl");
+                    if !filepath.exists() {
+                        return Ok((Default::default(), Default::default()));
+                    }
+                    let file = fs::File::open(&filepath).await?;
+                    BufReader::new(file)
+                };
+                let mut messages = Vec::new();
+                let mut lines = reader.lines();
+                while let Some(line) = lines.next_line().await? {
+                    if let Ok(message) = serde_json::from_str::<HistoryMessage>(&line) {
+                        match message {
+                            HistoryMessage::Message(_) => {
+                                messages.push(message);
+                            }
+                            HistoryMessage::Summary(_) => {
+                                messages = vec![];
+                                messages.push(message);
+                            }
+                        }
+                    }
+                }
+                let usage_filepath = dir.join("usage.json");
+                let usage: Usage = if !usage_filepath.exists() {
+                    None
+                } else {
+                    let json = fs::read_to_string(&usage_filepath).await?;
+                    serde_json::from_str::<Usage>(&json).ok()
+                }
+                .unwrap_or_default();
+                Some((messages, usage))
+            };
         }
-        .unwrap_or_default();
-        Ok((messages.into_iter().collect(), usage))
+        self.load(session_id, agent).await
     }
 
     async fn usage(&self, session_id: &SessionId, agent: &AgentId) -> crate::Result<Usage> {
@@ -86,39 +149,11 @@ impl HistoryManager for JsonlHistoryManager {
         let json = fs::read_to_string(&usage_filepath).await?;
         Ok(serde_json::from_str(&json).unwrap_or_default())
     }
-
-    async fn backup(
-        &mut self,
-        session_id: &SessionId,
-        agent: &AgentId,
-    ) -> crate::Result<(PathBuf, BackupTimestamp)> {
-        let dir = self.history_dir(session_id, agent).await?;
-        let timestamp = chrono::Local::now().format("%Y%m%d%H%M%S");
-        let history_backup_path = dir.join(format!("history_{timestamp}.jsonl"));
-        // backup usage
-        let _ = tokio::fs::rename(
-            &dir.join("usage.json"),
-            &dir.join(format!("usage_{timestamp}.json")),
-        )
-        .await;
-        let _ = tokio::fs::rename(&dir.join("history.jsonl"), &history_backup_path).await;
-        Ok((
-            history_backup_path
-                .strip_prefix(&self.workspace.path)?
-                .to_owned(),
-            BackupTimestamp(timestamp.to_string()),
-        ))
-    }
 }
 
 impl JsonlHistoryManager {
     async fn history_dir(&self, session_id: &SessionId, agent: &AgentId) -> crate::Result<PathBuf> {
-        let dir = self
-            .workspace
-            .path
-            .join("sessions")
-            .join(session_id.deref())
-            .join(agent.deref());
+        let dir = self.workspace.session_path(session_id).join(agent.deref());
         if !dir.exists() {
             fs::create_dir_all(&dir).await?;
         }

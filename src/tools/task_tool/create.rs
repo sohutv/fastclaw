@@ -1,4 +1,4 @@
-use crate::channels::{Anonymous, SessionId};
+use crate::channels::SessionId;
 use crate::tools::task_tool::{DATETIME_FORMAT, TaskEnabled, TaskRunState};
 use crate::tools::{TaskSchedule, ToolCallError, ToolCallRsult, ToolContext};
 use log::error;
@@ -6,7 +6,6 @@ use rig::completion::ToolDefinition;
 use rig::tool::Tool;
 use serde_json::json;
 use sqlx::{QueryBuilder, Sqlite};
-use std::ops::Deref;
 
 #[derive(Clone)]
 pub struct TaskCreateTool {
@@ -18,7 +17,6 @@ pub struct Args {
     name: String,
     task_schedule: TaskSchedule,
     desc: String,
-    session_id: Anonymous,
     agent_id: String,
 }
 
@@ -52,30 +50,25 @@ impl Tool for TaskCreateTool {
                         "type": "string",
                         "description": "The description of the task",
                     },
-                    "session_id": {
-                        "type": "string",
-                        "description": "The current session-id",
-                    },
                     "agent_id": {
                         "type": "string",
                         "description": "The current agent-id",
                     },
                 },
-                "required": ["name","cron", "desc","session_id","agent_id"],
+                "required": ["name","cron", "desc","agent_id"],
             }),
         }
     }
 
     async fn call(&self, args: Self::Args) -> Result<Self::Output, Self::Error> {
-        let session_id = SessionId::from(&args.session_id);
         let sql_pool = self
             .ctx
-            .agent_context
+            .agent_context()
             .workspace
-            .sql_pool(&session_id)
+            .sql_pool(&self.ctx.session_id)
             .await
             .map_err(|err| ToolCallError(format!("fail to get sql_pool, err: {err}")))?;
-        let mut query_builder = args.create_sql();
+        let mut query_builder = args.create_sql(&self.ctx.session_id);
         let _ = query_builder
             .build()
             .execute(&*sql_pool)
@@ -89,12 +82,11 @@ impl Tool for TaskCreateTool {
 }
 
 impl Args {
-    fn create_sql(&self) -> QueryBuilder<'_, Sqlite> {
+    fn create_sql(&self, session_id: &SessionId) -> QueryBuilder<'_, Sqlite> {
         let Self {
             name,
             task_schedule,
             desc,
-            session_id,
             agent_id,
             ..
         } = self;
@@ -109,7 +101,7 @@ impl Args {
             .push(", ")
             .push_bind(desc)
             .push(", ")
-            .push_bind(session_id.deref())
+            .push_bind(session_id.to_string())
             .push(", ")
             .push_bind(TaskRunState::Ready as u16)
             .push(", ")

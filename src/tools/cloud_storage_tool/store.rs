@@ -80,7 +80,7 @@ Store content into configured cloud storage.
             base64_content,
         }: Self::Args,
     ) -> Result<Self::Output, Self::Error> {
-        let Some(storage_config) = &self.ctx.agent_context.config.storage else {
+        let Some(storage_config) = &self.ctx.agent_context().config.storage else {
             return Ok(ToolCallRsult::error("storage not configured"));
         };
         let storage = match storage_config.try_into_storage().await {
@@ -116,7 +116,7 @@ Store content into configured cloud storage.
             } else if let Some(it) = file_path {
                 let path = std::path::PathBuf::from(&it);
                 let path = if path.is_relative() {
-                    self.ctx.agent_context.workspace.path.join(path)
+                    self.ctx.agent_context().workspace.path.join(path)
                 } else {
                     path
                 };
@@ -150,7 +150,7 @@ Store content into configured cloud storage.
 
         match storage
             .store(
-                self.ctx.agent_context.workspace,
+                self.ctx.agent_context().workspace,
                 StoreArgs {
                     key: key.into(),
                     mime,

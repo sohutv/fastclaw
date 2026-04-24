@@ -1,12 +1,11 @@
 use crate::channels::{ChannelMessage, SessionId};
 use async_trait::async_trait;
-use derive_more::{Deref, Display, Into};
+use derive_more::{Deref, Display, From, FromStr, Into};
 use rig::completion::Usage;
 use rig::message::{Message, Reasoning, ToolCall};
 use serde::{Deserialize, Serialize};
 use std::fmt::Display;
 use std::sync::Arc;
-use tokio::sync::RwLock;
 use tokio::sync::mpsc::Sender;
 
 mod llm_agent;
@@ -17,7 +16,8 @@ pub use session_history::{HistoryManager, JsonlHistoryManager};
 
 use crate::ModelName;
 use crate::config::{Config, Workspace};
-use crate::model_provider::{ModelProviderName, ReasoningEffort};
+use crate::memory::MemoryManager;
+use crate::model_provider::{ModelProviderName, ModelSettings, ReasoningEffort};
 #[async_trait]
 pub trait Agent: Send + Sync {
     async fn run(
@@ -33,6 +33,11 @@ pub trait Agent: Send + Sync {
         session_id: &SessionId,
         compact_ratio: f32,
     ) -> HistoryCompactResult;
+
+    fn context(&self) -> &AgentContext;
+
+    #[allow(unused)]
+    fn model_settings(&self) -> &ModelSettings;
 }
 
 #[allow(unused)]
@@ -40,7 +45,8 @@ pub trait Agent: Send + Sync {
 pub struct AgentContext {
     pub config: &'static Config,
     pub workspace: &'static Workspace,
-    pub history_manager: Option<Arc<RwLock<dyn HistoryManager>>>,
+    pub history_manager: Arc<dyn HistoryManager>,
+    pub memory_manager: Arc<MemoryManager>,
 }
 
 #[derive(Debug, Clone, Deref, Eq, PartialEq, Ord, PartialOrd, Display, Serialize, Deserialize)]
@@ -60,7 +66,8 @@ pub trait LlmAgentSupplier {
         name: N,
         config: &'static Config,
         model: ModelName,
-        history_manager: Option<Arc<RwLock<dyn HistoryManager>>>,
+        history_manager: Arc<dyn HistoryManager>,
+        memory_manager: Arc<MemoryManager>,
         workspace: &'static Workspace,
     ) -> crate::Result<Self::A>;
 }
@@ -74,8 +81,15 @@ pub struct AgentRequest {
     pub message: Message,
 }
 
-#[derive(Debug, Clone, Deref, Display)]
+#[derive(Debug, Clone, Deref, Display, From, FromStr)]
 pub struct RequestId(String);
+
+impl From<uuid::Uuid> for RequestId {
+    fn from(value: uuid::Uuid) -> Self {
+        value.to_string().into()
+    }
+}
+
 impl Default for RequestId {
     fn default() -> Self {
         Self(uuid::Uuid::new_v4().to_string())

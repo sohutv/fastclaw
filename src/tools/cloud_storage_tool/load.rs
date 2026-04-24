@@ -50,7 +50,7 @@ Load content from cloud storage.
     }
 
     async fn call(&self, Args { key, save_to }: Self::Args) -> Result<Self::Output, Self::Error> {
-        let Some(storage_config) = &self.ctx.agent_context.config.storage else {
+        let Some(storage_config) = &self.ctx.agent_context().config.storage else {
             return Ok(ToolCallRsult::error("storage not configured"));
         };
         let storage = match storage_config.try_into_storage().await {
@@ -58,7 +58,7 @@ Load content from cloud storage.
             Err(err) => return Ok(ToolCallRsult::error(err.to_string())),
         };
         let result = match storage
-            .load(self.ctx.agent_context.workspace, LoadArgs::from(key))
+            .load(self.ctx.agent_context().workspace, LoadArgs::from(key))
             .await
         {
             Ok(it) => it,
@@ -68,7 +68,7 @@ Load content from cloud storage.
         if let Some(path) = save_to {
             let path = std::path::PathBuf::from(path);
             let path = if path.is_relative() {
-                self.ctx.agent_context.workspace.path.join(path)
+                self.ctx.agent_context().workspace.path.join(path)
             } else {
                 path
             };

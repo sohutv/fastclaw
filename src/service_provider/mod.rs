@@ -7,6 +7,11 @@ pub use websearch::*;
 mod imagegen;
 pub use imagegen::*;
 
-mod storage;
+pub mod image_enhancer;
+pub use image_enhancer::*;
 
+mod storage;
 pub use storage::*;
+
+mod embedding;
+pub use embedding::*;

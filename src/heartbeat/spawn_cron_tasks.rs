@@ -1,6 +1,7 @@
 use crate::agent::AgentRequest;
 use crate::channels::{Anonymous, Channel, SessionId};
 use crate::tools::{TaskSchedule, TaskTools};
+use chrono::Duration;
 use log::{error, info, warn};
 use rig::completion::Message;
 use std::str::FromStr;
@@ -25,6 +26,7 @@ where
     async fn spawn_cron_tasks_actual(&self, session_id: &SessionId) -> crate::Result<()> {
         let tasks = TaskTools::fetch_ready_tasks(&self.workspace, session_id).await?;
         let now = chrono::Local::now();
+        let (down, up) = (now - Duration::hours(1), now);
         for task in tasks {
             // Parse cron expression and check if current time matches
             let time_to_exec = match &task.task_schedule {
@@ -32,7 +34,7 @@ where
                     Ok(schedule) => {
                         let last_exe_at = task.last_exe_at.as_ref().unwrap_or(&task.created_at);
                         if let Some(next) = schedule.after(last_exe_at).next() {
-                            next < now
+                            down < next && next < up
                         } else {
                             false
                         }
@@ -50,7 +52,7 @@ where
                         dt.and_local_timezone(now.timezone()).single(),
                         &task.last_exe_at,
                     ) {
-                        dt < now
+                        down < dt && dt < up
                     } else {
                         false
                     }

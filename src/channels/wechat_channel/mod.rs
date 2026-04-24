@@ -1,4 +1,4 @@
-use crate::agent::{Agent, AgentRequest, RequestId};
+use crate::agent::{Agent, AgentRequest};
 use crate::channels::console_cmd::Console;
 use crate::channels::{AgentRespState, Channel, ChannelContext, ChannelMessage, SessionId};
 use crate::config::{Config, Workspace};
@@ -313,14 +313,13 @@ impl WechatChannel {
         };
         let msg_id = message_id.clone();
         info!("Submit task to agent, msg_id: {}", msg_id);
-        let task_id = RequestId::default();
         match Arc::clone(&self)
             .submit_agent_task(
                 Arc::clone(&wechat_client),
                 Arc::clone(&agent),
                 None,
                 AgentRequest {
-                    id: task_id.clone(),
+                    id: msg_id.to_string().into(),
                     session_id: self.wechat_config.session_id.clone(),
                     message: Message::User {
                         content: user_content,
@@ -330,18 +329,12 @@ impl WechatChannel {
             .await
         {
             Ok(_) => {
-                let msg = format!(
-                    "Submit agent task ok, msg_id: {}, task_id: {}",
-                    msg_id, task_id
-                );
+                let msg = format!("Submit agent task ok, msg_id: {}", msg_id);
                 info!("{msg}");
                 Ok(())
             }
             Err(err) => {
-                warn!(
-                    "Agent run failed, msg_id: {}, task_id: {}, error: {}",
-                    msg_id, task_id, err
-                );
+                warn!("Agent run failed, msg_id: {}, error: {}", msg_id, err);
                 Ok(())
             }
         }

@@ -69,7 +69,7 @@ impl Tool for WebSearchTool {
             timerange_to,
         }: Self::Args,
     ) -> Result<Self::Output, Self::Error> {
-        let Some(websearch_config) = &self.ctx.agent_context.config.websearch else {
+        let Some(websearch_config) = &self.ctx.agent_context().config.websearch else {
             return Ok(ToolCallRsult::error("websearch not configured"));
         };
         let websearch = match websearch_config.try_into_websearch().await {
@@ -78,7 +78,7 @@ impl Tool for WebSearchTool {
         };
         let search_result = websearch
             .search(
-                self.ctx.agent_context.workspace,
+                self.ctx.agent_context().workspace,
                 WebsearchQueryArgs {
                     query: query.into(),
                     count: top_k.unwrap_or(5),

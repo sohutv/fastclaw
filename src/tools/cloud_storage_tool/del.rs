@@ -39,7 +39,7 @@ impl Tool for CloudStorageDelTool {
     }
 
     async fn call(&self, Args { key }: Self::Args) -> Result<Self::Output, Self::Error> {
-        let Some(storage_config) = &self.ctx.agent_context.config.storage else {
+        let Some(storage_config) = &self.ctx.agent_context().config.storage else {
             return Ok(ToolCallRsult::error("storage not configured"));
         };
         let storage = match storage_config.try_into_storage().await {
@@ -47,7 +47,7 @@ impl Tool for CloudStorageDelTool {
             Err(err) => return Ok(ToolCallRsult::error(err.to_string())),
         };
         match storage
-            .del(self.ctx.agent_context.workspace, DelArgs::from(key))
+            .del(self.ctx.agent_context().workspace, DelArgs::from(key))
             .await
         {
             Ok(result) => Ok(ToolCallRsult::ok(format!(

@@ -1,7 +1,7 @@
 use super::super::imagegen::*;
 use crate::ModelName;
 use crate::config::{ApiKey, ApiUrl, Workspace};
-use crate::service_provider::ImgFormat::Png;
+use crate::type_::{Image, ImgFormat};
 use anyhow::anyhow;
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
@@ -40,7 +40,8 @@ impl ImageGen for VolcengineImageGen {
     ) -> crate::Result<ImageGenResult> {
         let images = {
             let images = if let Some(images) = images {
-                images.as_base64().await?
+                const SIZE: usize = 10usize * 1024 * 1024;
+                images.align_size_to::<SIZE>().await?.as_base64().await?
             } else {
                 vec![]
             };
@@ -121,7 +122,7 @@ impl Response {
             let _ = tokio::fs::write(&filepath, bytes).await?;
             let _ = images.push(Image::File {
                 path: filepath,
-                format: Png,
+                format: ImgFormat::Png,
             });
         }
         Ok(ImageGenResult { images })
@@ -143,7 +144,8 @@ impl VolcengineImageGenConfig {
 mod tests {
     use crate::config::Workspace;
     use crate::service_provider::volcengine::imagegen::VolcengineImageGenConfig;
-    use crate::service_provider::{Image, ImageGen, ImageGenConfig, ImageGenResult};
+    use crate::service_provider::{ImageGen, ImageGenConfig, ImageGenResult};
+    use crate::type_::Image;
 
     #[tokio::test]
     async fn test_image_gen() -> crate::Result<()> {
@@ -151,7 +153,7 @@ mod tests {
         let websearch = config.try_into_imagegen().await?;
         let workspace: &'static Workspace = Box::leak(Box::new(Workspace::init("/tmp").await?));
         let ImageGenResult { images, .. } = websearch
-            .generate(workspace, "一只阿拉蕾风格的兔子".into())
+            .generate(workspace, "一只阿拉蕾风格的兔子".try_into()?)
             .await?;
         for image in images {
             match image {

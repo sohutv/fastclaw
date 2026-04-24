@@ -1,4 +1,4 @@
-use crate::agent::{Agent, AgentRequest, RequestId};
+use crate::agent::{Agent, AgentRequest};
 use crate::channels::console_cmd::Console;
 use crate::channels::dingtalk_channel::DingtalkChannel;
 use crate::channels::{Channel, SessionId, UserId, session_id};
@@ -279,14 +279,13 @@ impl dingtalk_stream::handlers::CallbackHandler for DingTalkCallbackHandler {
 
         let msg_id = msg_id.clone();
         info!("Submit task to agent, msg_id: {}", msg_id);
-        let task_id = RequestId::default();
         match Arc::clone(&self.channel)
             .submit_agent_task(
                 Arc::clone(&dingtalk_client),
                 Arc::clone(&self.agent),
                 Some(addi_system_prompt),
                 AgentRequest {
-                    id: task_id.clone(),
+                    id: msg_id.to_string().into(),
                     session_id,
                     message: Message::User {
                         content: user_content,
@@ -296,21 +295,15 @@ impl dingtalk_stream::handlers::CallbackHandler for DingTalkCallbackHandler {
             .await
         {
             Ok(_) => {
-                let msg = format!(
-                    "Submit agent task ok, msg_id: {}, task_id: {}",
-                    msg_id, task_id
-                );
+                let msg = format!("Submit agent task ok, msg_id: {}", msg_id);
                 info!("{msg}");
                 Ok(HandlerResp::Text(msg))
             }
             Err(err) => {
-                warn!(
-                    "Agent run failed, msg_id: {}, task_id: {}, error: {}",
-                    msg_id, task_id, err
-                );
+                warn!("Agent run failed, msg_id: {}, error: {}", msg_id, err);
                 Ok(HandlerResp::Text(format!(
-                    "Submit agent task failed, msg_id: {}, task_id: {}",
-                    msg_id, task_id
+                    "Submit agent task failed, msg_id: {}",
+                    msg_id
                 )))
             }
         }
