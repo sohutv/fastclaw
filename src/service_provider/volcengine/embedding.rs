@@ -51,36 +51,21 @@ impl Embedding for VolcengineEmbedding {
             .into_iter()
             .filter(|(_, it)| !it.is_empty())
             .collect_vec();
-        for batch in resources.chunks(3) {
-            let mut rx = {
-                let (tx, rx) = tokio::sync::mpsc::channel(batch.len());
-                for (id, resources) in batch {
-                    let config = self.config.clone();
-                    let tx = tx.clone();
-                    let (id, resources) = (id.clone(), resources.clone());
-                    let _ = tokio::spawn(async move {
-                        match Self::embedding_actual(config, &resources).await {
-                            Ok(value) => {
-                                let _ = tx
-                                    .send((
-                                        id,
-                                        Vector {
-                                            resources,
-                                            vector: value.into(),
-                                        },
-                                    ))
-                                    .await;
-                            }
-                            Err(err) => {
-                                warn!("call embedding failed, err: {err}");
-                            }
-                        }
-                    });
+        for (id, resources) in resources {
+            let config = self.config.clone();
+            match Self::embedding_actual(config, &resources).await {
+                Ok(value) => {
+                    vectors.insert(
+                        id,
+                        Vector {
+                            resources,
+                            vector: value.into(),
+                        },
+                    );
                 }
-                rx
-            };
-            while let Some((id, vector)) = rx.recv().await {
-                vectors.insert(id, vector);
+                Err(err) => {
+                    warn!("call embedding failed, err: {err}");
+                }
             }
         }
         Ok(EmbeddingResult { vectors })
