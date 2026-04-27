@@ -4,6 +4,8 @@ use crate::channels::dingtalk_channel::DingtalkChannel;
 use crate::channels::{Channel, SessionId, UserId, session_id};
 use async_trait::async_trait;
 use base64::Engine;
+use dingtalk_stream::frames::DingTalkUserId;
+use dingtalk_stream::frames::down_message::callback_message::MessageSender;
 use dingtalk_stream::{
     DingTalkStream,
     client::DingtalkResource,
@@ -21,7 +23,6 @@ use dingtalk_stream::{
     },
     handlers::{Error as HandlerError, ErrorCode, LifecycleListener, Resp as HandlerResp},
 };
-use itertools::Itertools;
 use log::{info, warn};
 use rig::OneOrMany;
 use rig::completion::Message;
@@ -59,109 +60,148 @@ impl dingtalk_stream::handlers::CallbackHandler for DingTalkCallbackHandler {
                 msg: "unexpected data".to_string(),
             });
         };
-        let (sender_id, dingtalk_user_id) = match conversation {
-            Conversation::Private { .. } => (
-                sender.sender_staff_id.as_deref().map(|it| it.to_string()),
-                &sender.sender_staff_id,
-            ),
-            Conversation::Group { id, .. } => {
-                let conversation_id = id.deref();
-                (
-                    sender.sender_staff_id.as_deref().map(|sender_staff_id| {
-                        format!("group:{conversation_id}:{sender_staff_id}")
-                    }),
-                    &sender.sender_staff_id,
-                )
-            }
-        };
-        let (Some(sender_id), Some(dingtalk_user_id)) = (sender_id, dingtalk_user_id) else {
-            return Err(HandlerError {
-                code: ErrorCode::BadRequest,
-                msg: "sender_staff_id is required".to_string(),
-            });
-        };
-
-        let Ok(session_id) = SessionId::try_from((&sender_id, &self.channel.dingtalk_config))
-        else {
-            if let Some(cb_msg_sender) = cb_msg_sender {
-                let _ = cb_msg_sender
-                    .send(WebhookMessage {
-                        content: MessageContent::from("talking is forbidden"),
-                        at: dingtalk_user_id.into(),
-                        send_result_cb: None,
-                    })
-                    .await;
-            }
-            return Err(HandlerError {
-                code: ErrorCode::BadRequest,
-                msg: "sender_staff_id is required".to_string(),
-            });
-        };
-        let (cmd, line, images, files) = match payload {
-            MessagePayload::Text { text } => {
-                let mut cmd = None;
-                if text.starts_with('/') {
-                    cmd = Some(text.to_string());
+        let session_id = {
+            let (sender_id, dingtalk_user_id) = parse_sender_id(sender, conversation)?;
+            let Ok(session_id) = SessionId::try_from((&sender_id, &self.channel.dingtalk_config))
+            else {
+                if let Some(cb_msg_sender) = cb_msg_sender {
+                    let _ = cb_msg_sender
+                        .send(WebhookMessage {
+                            content: MessageContent::from("talking is forbidden"),
+                            at: dingtalk_user_id.into(),
+                            send_result_cb: None,
+                        })
+                        .await;
                 }
-                (
-                    cmd,
-                    Some(text.content.to_string()).filter(|it| !it.is_empty()),
-                    None,
-                    None,
-                )
-            }
-            MessagePayload::Picture { content: picture } => {
-                let downloads_dir = self.channel.ctx.workspace.downloads_path().to_path_buf();
-                match picture.fetch(&dingtalk_client, downloads_dir).await {
-                    Ok((filepath, image)) => {
-                        (None, None, Some(vec![(1usize, filepath, image)]), None)
-                    }
-                    Err(e) => (None, Some(format!("下载图片失败, {}", e)), None, None),
-                }
-            }
-            MessagePayload::File { content } => {
-                let downloads_dir = self.channel.ctx.workspace.downloads_path().to_path_buf();
-                match content.fetch(&dingtalk_client, downloads_dir).await {
-                    Ok((filepath, _)) => (None, None, None, Some(vec![filepath])),
-                    Err(e) => (
-                        None,
-                        Some(format!("下载文件 {} 失败, {}", content.file_name, e)),
-                        None,
-                        None,
-                    ),
-                }
-            }
-            MessagePayload::RichText { content } => {
-                let downloads_dir = self.channel.ctx.workspace.downloads_path().to_path_buf();
-                let mut texts = vec![];
-                let mut pictures = vec![];
-                let mut img_idx = 0;
-                for content in content.iter() {
-                    match content {
-                        RichTextItem::Text(text) => {
-                            texts.push(text.to_string());
+                return Err(HandlerError {
+                    code: ErrorCode::BadRequest,
+                    msg: "sender_staff_id is required".to_string(),
+                });
+            };
+            session_id
+        };
+        let (cmd, user_contents) = {
+            let mut cmd: Option<String> = None;
+            let mut user_contents = vec![];
+            match payload {
+                MessagePayload::Text { text } => {
+                    let text = text.to_string();
+                    if !text.is_empty() {
+                        if text.starts_with('/') {
+                            cmd = Some(text.to_string());
                         }
-                        RichTextItem::Picture(picture) => {
-                            match picture.fetch(&dingtalk_client, downloads_dir.clone()).await {
-                                Ok((filepath, image)) => {
-                                    img_idx += 1;
-                                    pictures.push((img_idx, filepath, image));
+                        user_contents.push(UserContent::text(text));
+                    }
+                }
+                MessagePayload::Picture { content: picture } => {
+                    let downloads_dir = self.channel.ctx.workspace.downloads_path().to_path_buf();
+                    match picture.fetch(&dingtalk_client, downloads_dir).await {
+                        Ok((filepath, image)) => {
+                            let mut buf = vec![];
+                            let cursor = Cursor::new(&mut buf);
+                            if let Ok(_) = image.write_to(cursor, image::ImageFormat::Png) {
+                                user_contents.push(UserContent::Image(Image {
+                                    data: DocumentSourceKind::Base64(
+                                        base64::engine::general_purpose::STANDARD.encode(&buf),
+                                    ),
+                                    media_type: Some(ImageMediaType::PNG),
+                                    detail: Some(ImageDetail::Auto),
+                                    additional_params: None,
+                                }));
+                                user_contents.push(UserContent::Text(
+                                    format!(
+                                        "- **filepath of the input image**: {}",
+                                        filepath.display()
+                                    )
+                                    .into(),
+                                ));
+                            }
+                        }
+                        Err(e) => {
+                            UserContent::text(format!("下载图片失败, {}", e));
+                        }
+                    }
+                }
+                MessagePayload::Video { content } => {
+                    let downloads_dir = self.channel.ctx.workspace.downloads_path().to_path_buf();
+                    match content.fetch(&dingtalk_client, downloads_dir).await {
+                        Ok((filepath, _)) => {
+                            user_contents.push(UserContent::Text(
+                                format!(
+                                    "- **filepath of the input video**: {}",
+                                    filepath.display()
+                                )
+                                .into(),
+                            ));
+                        }
+                        Err(e) => {
+                            UserContent::text(format!("下载视频失败, {}", e));
+                        }
+                    }
+                }
+                MessagePayload::File { content } => {
+                    let downloads_dir = self.channel.ctx.workspace.downloads_path().to_path_buf();
+                    match content.fetch(&dingtalk_client, downloads_dir).await {
+                        Ok((filepath, _)) => {
+                            user_contents.push(UserContent::Text(
+                                format!("- **filepath of input file**: {}", filepath.display())
+                                    .into(),
+                            ));
+                        }
+                        Err(e) => {
+                            UserContent::text(format!(
+                                "下载文件 {} 失败, {}",
+                                content.file_name, e
+                            ));
+                        }
+                    }
+                }
+                MessagePayload::RichText { content } => {
+                    let downloads_dir = self.channel.ctx.workspace.downloads_path().to_path_buf();
+                    let mut texts = vec![];
+                    for content in content.iter() {
+                        match content {
+                            RichTextItem::Text(text) => {
+                                if !text.is_empty() {
+                                    user_contents.push(UserContent::text(text.to_string()));
                                 }
-                                Err(e) => {
-                                    texts.push(format!("下载图片失败, {}", e));
+                            }
+                            RichTextItem::Picture(picture) => {
+                                match picture.fetch(&dingtalk_client, downloads_dir.clone()).await {
+                                    Ok((filepath, image)) => {
+                                        let mut buf = vec![];
+                                        let cursor = Cursor::new(&mut buf);
+                                        if let Ok(_) =
+                                            image.write_to(cursor, image::ImageFormat::Png)
+                                        {
+                                            user_contents.push(UserContent::Image(Image {
+                                                data: DocumentSourceKind::Base64(
+                                                    base64::engine::general_purpose::STANDARD
+                                                        .encode(&buf),
+                                                ),
+                                                media_type: Some(ImageMediaType::PNG),
+                                                detail: Some(ImageDetail::Auto),
+                                                additional_params: None,
+                                            }));
+                                            user_contents.push(UserContent::Text(
+                                                format!(
+                                                    "- **filepath of the input image**: {}",
+                                                    filepath.display()
+                                                )
+                                                .into(),
+                                            ));
+                                        };
+                                    }
+                                    Err(e) => {
+                                        texts.push(format!("下载图片失败, {}", e));
+                                    }
                                 }
                             }
                         }
                     }
                 }
-                (
-                    None,
-                    Some(texts.into_iter().filter(|t| !t.is_empty()).join("\n"))
-                        .filter(|it| !it.is_empty()),
-                    Some(pictures),
-                    None,
-                )
-            }
+            };
+            (cmd, user_contents)
         };
         if let Some(cmd_val) = &cmd {
             match Console::handle_console_cmd(&self.channel.ctx, &cmd_val, &self.agent, &session_id)
@@ -178,65 +218,12 @@ impl dingtalk_stream::handlers::CallbackHandler for DingTalkCallbackHandler {
                 Err(_) => {}
             }
         }
-        let prompts = vec![UserContent::text(line.as_deref().unwrap_or_default())];
 
-        let mut user_content = Vec::<UserContent>::new();
-        if let Some(images) = images {
-            for (img_idx, filepath, image) in images {
-                let mut buf = vec![];
-                let cursor = Cursor::new(&mut buf);
-                let Ok(_) = image.write_to(cursor, image::ImageFormat::Png) else {
-                    continue;
-                };
-                user_content.push(UserContent::Image(Image {
-                    data: DocumentSourceKind::Base64(
-                        base64::engine::general_purpose::STANDARD.encode(&buf),
-                    ),
-                    media_type: Some(ImageMediaType::PNG),
-                    detail: Some(ImageDetail::Auto),
-                    additional_params: None,
-                }));
-                user_content.push(UserContent::Text(
-                    format!(
-                        r#"
-- **filepath of the {}-th input image**: {}
-                "#,
-                        img_idx,
-                        filepath.display()
-                    )
-                    .into(),
-                ))
+        let user_contents = match OneOrMany::many(user_contents) {
+            Ok(val) => val,
+            Err(_) => {
+                return Ok(HandlerResp::Text("no content to submit".to_string()));
             }
-        }
-        if let Some(files) = files {
-            for filepath in files.iter() {
-                user_content.push(UserContent::Text(
-                    format!(
-                        r#"
-- **filepath of input file**: {}
-                "#,
-                        filepath.display()
-                    )
-                    .into(),
-                ));
-            }
-        }
-        if line.is_some() || user_content.len() > 0 {
-            for prompt in prompts {
-                user_content.push(prompt);
-            }
-        }
-        let user_content = if user_content.is_empty() {
-            None
-        } else {
-            if user_content.len() == 1 {
-                user_content.pop().map(|it| OneOrMany::one(it))
-            } else {
-                OneOrMany::many(user_content).ok()
-            }
-        };
-        let Some(user_content) = user_content else {
-            return Ok(HandlerResp::Text("no content to submit".to_string()));
         };
 
         let addi_system_prompt = match &session_id {
@@ -288,7 +275,7 @@ impl dingtalk_stream::handlers::CallbackHandler for DingTalkCallbackHandler {
                     id: msg_id.to_string().into(),
                     session_id,
                     message: Message::User {
-                        content: user_content,
+                        content: user_contents,
                     },
                 },
             )
@@ -312,6 +299,35 @@ impl dingtalk_stream::handlers::CallbackHandler for DingTalkCallbackHandler {
     fn topic(&self) -> &MessageTopic {
         &self.dingtalk_bot_topic
     }
+}
+
+fn parse_sender_id<'a>(
+    sender: &'a MessageSender,
+    conversation: &Conversation,
+) -> Result<(String, &'a DingTalkUserId), HandlerError> {
+    let (sender_id, dingtalk_user_id) = match conversation {
+        Conversation::Private { .. } => (
+            sender.sender_staff_id.as_deref().map(|it| it.to_string()),
+            &sender.sender_staff_id,
+        ),
+        Conversation::Group { id, .. } => {
+            let conversation_id = id.deref();
+            (
+                sender
+                    .sender_staff_id
+                    .as_deref()
+                    .map(|sender_staff_id| format!("group:{conversation_id}:{sender_staff_id}")),
+                &sender.sender_staff_id,
+            )
+        }
+    };
+    let (Some(sender_id), Some(dingtalk_user_id)) = (sender_id, dingtalk_user_id) else {
+        return Err(HandlerError {
+            code: ErrorCode::BadRequest,
+            msg: "sender_staff_id is required".to_string(),
+        });
+    };
+    Ok((sender_id, dingtalk_user_id))
 }
 
 #[async_trait]
