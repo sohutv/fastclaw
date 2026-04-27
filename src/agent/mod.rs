@@ -3,6 +3,7 @@ use async_trait::async_trait;
 use derive_more::{Deref, Display, From, FromStr, Into};
 use rig::completion::Usage;
 use rig::message::{Message, Reasoning, ToolCall};
+use rig::tool::ToolDyn;
 use serde::{Deserialize, Serialize};
 use std::fmt::Display;
 use std::sync::Arc;
@@ -18,6 +19,10 @@ use crate::ModelName;
 use crate::config::{Config, Workspace};
 use crate::memory::MemoryManager;
 use crate::model_provider::{ModelProviderName, ModelSettings, ReasoningEffort};
+
+pub type ToolFilter =
+    Option<Box<dyn (Fn(Box<dyn ToolDyn>) -> Option<Box<dyn ToolDyn>>) + Sync + Send>>;
+
 #[async_trait]
 pub trait Agent: Send + Sync {
     async fn run(
@@ -25,6 +30,7 @@ pub trait Agent: Send + Sync {
         request: AgentRequest,
         channel_message_sender: Sender<ChannelMessage>,
         addi_system_prompt: Option<&str>,
+        tool_filter: ToolFilter,
     ) -> crate::Result<()>;
 
     async fn session_compact(

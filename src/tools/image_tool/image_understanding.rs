@@ -94,6 +94,7 @@ impl Tool for ImageUnderstandingTool {
                         },
                         tx,
                         None,
+                        Some(Box::new(|_| None)),
                     )
                     .await?;
                 Ok::<_, anyhow::Error>(())

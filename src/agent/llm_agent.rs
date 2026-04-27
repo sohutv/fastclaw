@@ -2,7 +2,7 @@ use crate::ModelName;
 use crate::agent::session_history::HistoryMessage;
 use crate::agent::{
     AgentContext, AgentId, AgentRequest, AgentResponse, AgentSettings, HistoryCompactResult,
-    HistoryCompactVal, HistoryManager, LlmAgentSupplier, Workspace,
+    HistoryCompactVal, HistoryManager, LlmAgentSupplier, ToolFilter, Workspace,
 };
 use crate::channels::{ChannelMessage, SessionId};
 use crate::config::Config;
@@ -19,6 +19,7 @@ use rig::client::CompletionClient;
 use rig::completion::{AssistantContent, Message, Usage};
 use rig::message::UserContent;
 use rig::streaming::{StreamedAssistantContent, StreamingChat};
+use rig::tool::ToolDyn;
 use serde_json::json;
 use std::sync::Arc;
 use tokio::sync::mpsc::Sender;
@@ -127,6 +128,7 @@ where
         reasoning_effort: ReasoningEffort,
         addi_system_prompt: Option<&str>,
         channel_message_sender: Sender<ChannelMessage>,
+        tool_filter: impl Fn(Box<dyn ToolDyn>) -> Option<Box<dyn ToolDyn>>,
     ) -> crate::Result<Agent<C::CompletionModel>>
     where
         P: ModelProvider<Client = C>,
@@ -157,7 +159,10 @@ where
                     agent: Arc::new(self.fork_with("tool-call").await?),
                     channel_message_sender,
                 })
-                .await?,
+                .await?
+                .into_iter()
+                .flat_map(|tool| tool_filter(tool))
+                .collect_vec(),
             )
             .temperature(self.agent_settings.temperature)
             .default_max_turns(self.agent_settings.max_turns)
@@ -187,9 +192,21 @@ where
         request: AgentRequest,
         channel_message_sender: Sender<ChannelMessage>,
         addi_system_prompt: Option<&str>,
+        tool_filter: ToolFilter,
     ) -> crate::Result<()> {
-        self.run_actual(request, channel_message_sender, addi_system_prompt)
-            .await?;
+        self.run_actual(
+            request,
+            channel_message_sender,
+            addi_system_prompt,
+            |tool| {
+                if let Some(filter) = &tool_filter {
+                    filter(tool)
+                } else {
+                    Some(tool)
+                }
+            },
+        )
+        .await?;
         Ok(())
     }
 
@@ -224,6 +241,7 @@ where
         request: AgentRequest,
         channel_message_sender: Sender<ChannelMessage>,
         addi_system_prompt: Option<&str>,
+        tool_filter: impl Fn(Box<dyn ToolDyn>) -> Option<Box<dyn ToolDyn>>,
     ) -> crate::Result<()> {
         let Some(
             ref request @ AgentRequest {
@@ -256,6 +274,7 @@ where
                 self.agent_settings.reasoning_effort,
                 addi_system_prompt,
                 channel_message_sender.clone(),
+                tool_filter,
             )
             .await?;
 
@@ -459,6 +478,7 @@ where
                 ReasoningEffort::Minimal,
                 None,
                 channel_message_sender,
+                |tool| Some(tool),
             )
             .await
         {

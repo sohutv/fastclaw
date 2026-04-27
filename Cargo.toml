@@ -58,7 +58,6 @@ channel_wechat_channel = ["wechat-sdk-rs"]
 cloud_storage_tool = []
 volcengine = ["ve-tos-rust-sdk"]
 
-tool_image_understanding = []
 default = [
     "model_provider_openai_compatible",
     "channel_cli_channel",

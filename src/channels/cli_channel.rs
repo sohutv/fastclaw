@@ -88,6 +88,7 @@ impl Channel for CliChannel {
                                             },
                                             message_sender.clone(),
                                             None,
+                                            None,
                                         )
                                         .await;
                                     let _ = self_
