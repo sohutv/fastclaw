@@ -38,12 +38,12 @@ impl Tool for TaskListTool {
                 "type": "object",
                 "properties": {
                     "run_state": {
-                        "type": "enum",
+                        "type": "string",
                         "enum": TaskRunState::iter().map(|it|it.to_string()).collect::<Vec<_>>(),
                         "description": "The run state of the task",
                     },
                     "enabled": {
-                        "type": "enum",
+                        "type": "string",
                         "enum": TaskEnabled::iter().map(|it|it.to_string()).collect::<Vec<_>>(),
                         "description": "The enabled state of the task",
                     },

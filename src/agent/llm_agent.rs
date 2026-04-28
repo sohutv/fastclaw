@@ -19,8 +19,8 @@ use rig::client::CompletionClient;
 use rig::completion::{AssistantContent, Message, Usage};
 use rig::message::UserContent;
 use rig::streaming::{StreamedAssistantContent, StreamingChat};
-use serde_json::json;
 use std::sync::Arc;
+use serde_json::json;
 use tokio::sync::mpsc::Sender;
 use tokio_stream::StreamExt;
 

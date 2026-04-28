@@ -55,7 +55,7 @@ impl Tool for TaskCreateTool {
                         "description": "The current agent-id",
                     },
                 },
-                "required": ["name","cron", "desc","agent_id"],
+                "required": ["name","task_schedule", "desc","agent_id"],
             }),
         }
     }

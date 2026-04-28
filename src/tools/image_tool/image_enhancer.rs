@@ -1,4 +1,4 @@
-use crate::service_provider::{Content, Hdr, ImageEnhancerArgs, StoreArgs, StoreResult};
+use crate::service_provider::{Content, ImageEnhancerArgs, StoreArgs, StoreResult};
 use crate::tools::{ToolCallError, ToolCallRsult, ToolContext};
 use crate::type_::Image;
 use rig::completion::ToolDefinition;
@@ -13,7 +13,7 @@ pub struct ImageEnhancerTool {
 #[derive(Debug, Clone, serde::Deserialize)]
 pub struct Args {
     pub image: String,
-    pub hdr: Option<Hdr>,
+    pub hdr: Option<f32>,
     pub wb: Option<bool>,
 }
 
@@ -77,7 +77,7 @@ Enhance an image with optional HDR and white balance adjustments.
                 self.ctx.agent_context().workspace,
                 ImageEnhancerArgs {
                     image: input_image,
-                    hdr,
+                    hdr: hdr.map(|it|it.into()),
                     wb: wb.unwrap_or(false),
                 },
             )

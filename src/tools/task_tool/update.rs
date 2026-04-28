@@ -1,4 +1,4 @@
-use super::TaskEnabled;
+use super::{DATETIME_FORMAT, TaskEnabled, TaskSchedule};
 use crate::tools::{ToolCallError, ToolCallRsult, ToolContext};
 use log::error;
 use rig::completion::ToolDefinition;
@@ -16,7 +16,7 @@ pub struct TaskUpdateTool {
 pub struct Args {
     id: u64,
     name: Option<String>,
-    cron: Option<String>,
+    task_schedule: Option<TaskSchedule>,
     desc: Option<String>,
     enabled: Option<TaskEnabled>,
 }
@@ -43,16 +43,20 @@ impl Tool for TaskUpdateTool {
                         "type": "string",
                         "description": "The name of the task",
                     },
-                    "cron": {
+                    "task_schedule": {
                         "type": "string",
-                        "description": "The cron expression for the task",
+                        "description": format!(r#"
+### Task scheduling configuration supports the following formats:
+- 1 **Cyclic timed scheduling task**: The standard task_schedule expression for the task schedule, e.g. `0 0 9-18 * * * ?` .
+- 2 **Single scheduling task**: Specify the absolute trigger time {DATETIME_FORMAT} , e.g. `2026-04-18 14:00:00`
+                        "#),
                     },
                     "desc": {
                         "type": "string",
                         "description": "The description of the task",
                     },
                     "enabled": {
-                        "type": "enum",
+                        "type": "string",
                         "enum": TaskEnabled::iter().map(|it| it.to_string()).collect::<Vec<_>>(),
                         "description": "The enabled state of task",
                     },
@@ -100,9 +104,9 @@ impl Args {
             has_update = true;
             query_builder.push("`name` = ").push_bind(name).push(", ");
         }
-        if let Some(cron) = &self.cron {
+        if let Some(task_schedule) = &self.task_schedule {
             has_update = true;
-            query_builder.push("`cron` = ").push_bind(cron).push(", ");
+            query_builder.push("`cron` = ").push_bind(task_schedule.to_string()).push(", ");
         }
         if let Some(desc) = &self.desc {
             has_update = true;

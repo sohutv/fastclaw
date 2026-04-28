@@ -135,7 +135,7 @@ impl TaskInfo {
             r#"
 ## {}
 - **id**: {},
-- **cron**: {},
+- **task_schedule**: {},
 - **session_id**: {},
 - **run_state**: {},
 - **enabled**: {},
@@ -158,7 +158,7 @@ impl TaskInfo {
             r#"
 ## {}
 - **id**: {},
-- **cron**: {},
+- **task_schedule**: {},
 - **session_id**: {},
 - **run_state**: {},
 - **enabled**: {},
