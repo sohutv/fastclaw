@@ -17,6 +17,7 @@ pub trait HistoryManager: Send + Sync {
         agent: &AgentId,
         usage: &Usage,
         message: Vec<HistoryMessage>,
+        overwrite: Option<bool>,
     ) -> crate::Result<()>;
 
     async fn load(

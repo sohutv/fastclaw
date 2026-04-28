@@ -43,6 +43,7 @@ impl HistoryManager for JsonlHistoryManager {
         agent: &AgentId,
         usage: &Usage,
         new_messages: Vec<HistoryMessage>,
+        overwrite: Option<bool>,
     ) -> crate::Result<()> {
         let mut histories = self.histories.write().await;
 
@@ -57,7 +58,7 @@ impl HistoryManager for JsonlHistoryManager {
             .await?;
             let history_filepath = dir.join("history.jsonl");
             let file = fs::File::options()
-                .append(true)
+                .append(overwrite.map(|it| !it).unwrap_or(true))
                 .create(true)
                 .open(&history_filepath)
                 .await?;

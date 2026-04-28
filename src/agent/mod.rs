@@ -3,7 +3,6 @@ use async_trait::async_trait;
 use derive_more::{Deref, Display, From, FromStr, Into};
 use rig::completion::Usage;
 use rig::message::{Message, Reasoning, ToolCall};
-use rig::tool::ToolDyn;
 use serde::{Deserialize, Serialize};
 use std::fmt::Display;
 use std::sync::Arc;
@@ -20,8 +19,51 @@ use crate::config::{Config, Workspace};
 use crate::memory::MemoryManager;
 use crate::model_provider::{ModelProviderName, ModelSettings, ReasoningEffort};
 
-pub type ToolFilter =
-    Option<Box<dyn (Fn(Box<dyn ToolDyn>) -> Option<Box<dyn ToolDyn>>) + Sync + Send>>;
+mod tool_filter {
+    use async_trait::async_trait;
+    use derive_more::Deref;
+    use rig::tool::ToolDyn;
+
+    pub trait Filter {
+        fn filter(&self, tool: Box<dyn ToolDyn>) -> Option<Box<dyn ToolDyn>>;
+    }
+
+    #[async_trait]
+    impl<F> Filter for F
+    where
+        F: Fn(Box<dyn ToolDyn>) -> Option<Box<dyn ToolDyn>> + Sync + Send,
+    {
+        fn filter(&self, tool: Box<dyn ToolDyn>) -> Option<Box<dyn ToolDyn>> {
+            self(tool)
+        }
+    }
+
+    #[derive(Deref)]
+    pub struct ToolFilter(Box<dyn Filter + Send + Sync>);
+
+    impl Default for ToolFilter {
+        fn default() -> Self {
+            Self::from(|tool| Some(tool))
+        }
+    }
+
+    impl<F> From<F> for ToolFilter
+    where
+        F: Filter + Send + Sync + 'static,
+    {
+        fn from(value: F) -> Self {
+            Self(Box::new(value))
+        }
+    }
+
+    impl  AsRef<Box<dyn Filter+Sync+Send+'static>> for ToolFilter{
+        fn as_ref(&self) -> &Box<dyn Filter + Sync + Send + 'static> {
+            &self.0
+        }
+    }
+}
+
+pub use tool_filter::ToolFilter;
 
 #[async_trait]
 pub trait Agent: Send + Sync {
@@ -31,6 +73,7 @@ pub trait Agent: Send + Sync {
         channel_message_sender: Sender<ChannelMessage>,
         addi_system_prompt: Option<&str>,
         tool_filter: ToolFilter,
+        with_history: bool,
     ) -> crate::Result<()>;
 
     async fn session_compact(

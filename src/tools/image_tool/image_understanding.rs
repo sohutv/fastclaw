@@ -1,4 +1,4 @@
-use crate::agent::{AgentRequest, AgentResponse};
+use crate::agent::{AgentRequest, AgentResponse, ToolFilter};
 use crate::channels::ChannelMessage;
 use crate::tools::{ToolCallError, ToolCallRsult, ToolContext};
 use crate::type_::Prompt;
@@ -94,7 +94,8 @@ impl Tool for ImageUnderstandingTool {
                         },
                         tx,
                         None,
-                        Some(Box::new(|_| None)),
+                        ToolFilter::from(|_| None),
+                        false,
                     )
                     .await?;
                 Ok::<_, anyhow::Error>(())

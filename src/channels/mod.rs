@@ -49,7 +49,8 @@ where
                     req,
                     channel_message_sender.clone(),
                     addi_system_prompt.as_deref(),
-                    None,
+                    Default::default(),
+                    true,
                 )
                 .await
             {

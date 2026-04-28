@@ -1,7 +1,7 @@
 use crate::ModelName;
 use crate::agent::session_history::HistoryMessage;
 use crate::agent::{
-    AgentContext, AgentId, AgentRequest, AgentResponse, AgentSettings, HistoryCompactResult,
+    Agent, AgentContext, AgentId, AgentRequest, AgentResponse, AgentSettings, HistoryCompactResult,
     HistoryCompactVal, HistoryManager, LlmAgentSupplier, ToolFilter, Workspace,
 };
 use crate::channels::{ChannelMessage, SessionId};
@@ -14,12 +14,11 @@ use async_trait::async_trait;
 use itertools::Itertools;
 use log::{info, warn};
 use rig::OneOrMany;
-use rig::agent::{Agent, MultiTurnStreamItem};
+use rig::agent::{Agent as RigAgent, MultiTurnStreamItem};
 use rig::client::CompletionClient;
 use rig::completion::{AssistantContent, Message, Usage};
 use rig::message::UserContent;
 use rig::streaming::{StreamedAssistantContent, StreamingChat};
-use rig::tool::ToolDyn;
 use serde_json::json;
 use std::sync::Arc;
 use tokio::sync::mpsc::Sender;
@@ -122,16 +121,17 @@ where
         })
     }
 
-    async fn create_agent(
+    async fn create_agent<TF>(
         &self,
         session_id: &SessionId,
         reasoning_effort: ReasoningEffort,
         addi_system_prompt: Option<&str>,
         channel_message_sender: Sender<ChannelMessage>,
-        tool_filter: impl Fn(Box<dyn ToolDyn>) -> Option<Box<dyn ToolDyn>>,
-    ) -> crate::Result<Agent<C::CompletionModel>>
+        tool_filter: TF,
+    ) -> crate::Result<RigAgent<C::CompletionModel>>
     where
         P: ModelProvider<Client = C>,
+        TF: Into<ToolFilter>,
     {
         let model_client = &self.model_provider.completion_client()?;
         let reasoning_effort = self
@@ -153,7 +153,8 @@ where
                 &self.id
             ))
             .append_preamble(addi_system_prompt.unwrap_or_default())
-            .tools(
+            .tools({
+                let filter = tool_filter.into();
                 crate::tools::FunctionTool::required_tools(ToolContext {
                     session_id: session_id.clone(),
                     agent: Arc::new(self.fork_with("tool-call").await?),
@@ -161,9 +162,9 @@ where
                 })
                 .await?
                 .into_iter()
-                .flat_map(|tool| tool_filter(tool))
-                .collect_vec(),
-            )
+                .flat_map(|tool| filter.filter(tool))
+                .collect_vec()
+            })
             .temperature(self.agent_settings.temperature)
             .default_max_turns(self.agent_settings.max_turns)
             .max_tokens(
@@ -193,63 +194,13 @@ where
         channel_message_sender: Sender<ChannelMessage>,
         addi_system_prompt: Option<&str>,
         tool_filter: ToolFilter,
+        with_history: bool,
     ) -> crate::Result<()> {
-        self.run_actual(
-            request,
-            channel_message_sender,
-            addi_system_prompt,
-            |tool| {
-                if let Some(filter) = &tool_filter {
-                    filter(tool)
-                } else {
-                    Some(tool)
-                }
-            },
-        )
-        .await?;
-        Ok(())
-    }
-
-    async fn session_compact(
-        &self,
-        channel_message_sender: Sender<ChannelMessage>,
-        session_id: &SessionId,
-        compact_ratio: f32,
-    ) -> HistoryCompactResult {
-        let result = self
-            .history_compact(channel_message_sender, session_id, compact_ratio)
-            .await;
-        result
-    }
-
-    fn context(&self) -> &AgentContext {
-        &self.ctx
-    }
-
-    fn model_settings(&self) -> &ModelSettings {
-        &self.model_settings
-    }
-}
-
-impl<C, P> LlmAgent<C, P>
-where
-    C: CompletionClient + 'static + Send + Sync,
-    P: ModelProvider<Client = C> + 'static + Send + Sync,
-{
-    async fn run_actual(
-        &self,
-        request: AgentRequest,
-        channel_message_sender: Sender<ChannelMessage>,
-        addi_system_prompt: Option<&str>,
-        tool_filter: impl Fn(Box<dyn ToolDyn>) -> Option<Box<dyn ToolDyn>>,
-    ) -> crate::Result<()> {
-        let Some(
-            ref request @ AgentRequest {
-                ref session_id,
-                ref message,
-                ..
-            },
-        ) = self.request_filter(request)
+        let Some(AgentRequest {
+            ref session_id,
+            mut message,
+            ..
+        }) = self.request_filter(request)
         else {
             return Ok(());
         };
@@ -259,7 +210,16 @@ where
                 message: AgentResponse::Start,
             })
             .await;
-        let history: Vec<Message> = {
+        let agent = self
+            .create_agent(
+                session_id,
+                self.agent_settings.reasoning_effort,
+                addi_system_prompt,
+                channel_message_sender.clone(),
+                tool_filter,
+            )
+            .await?;
+        let history: Vec<Message> = if with_history {
             let (history, _) = self
                 .ctx
                 .history_manager
@@ -267,36 +227,21 @@ where
                 .await
                 .unwrap_or_default();
             history.into_iter().map(|it| it.into()).collect_vec()
+        } else {
+            vec![]
         };
-        let agent = self
-            .create_agent(
-                &request.session_id,
-                self.agent_settings.reasoning_effort,
-                addi_system_prompt,
-                channel_message_sender.clone(),
-                tool_filter,
-            )
-            .await?;
-
         let message = match message {
-            Message::System { .. } => message.clone(),
-            Message::User { content, .. } => Message::User {
-                content: OneOrMany::many(
-                    vec![
-                        content.clone().into_iter().collect_vec(),
-                        vec![UserContent::text(format!(
-                            r#"
-- **Current DateTime**: {}
-            "#,
-                            chrono::Local::now().to_rfc3339()
-                        ))],
-                    ]
-                    .into_iter()
-                    .flatten()
-                    .collect_vec(),
-                )?,
-            },
-            Message::Assistant { .. } => message.clone(),
+            Message::System { .. } => message,
+            Message::User {
+                ref mut content, ..
+            } => {
+                content.push(UserContent::text(format!(
+                    "- **Current DateTime**: {}",
+                    chrono::Local::now().to_rfc3339()
+                )));
+                message
+            }
+            Message::Assistant { .. } => message,
         };
         let mut stream = agent.stream_chat(message, history).await;
         while let Some(result) = stream.next().await {
@@ -319,13 +264,15 @@ where
                 Ok(MultiTurnStreamItem::FinalResponse(final_resp)) => {
                     let usage = final_resp.usage();
                     let append_history = final_resp.history().expect("unexpected empty history!!!");
-                    self.handle_history(
-                        channel_message_sender.clone(),
-                        &request.session_id,
-                        &usage,
-                        append_history,
-                    )
-                    .await;
+                    if with_history {
+                        self.handle_history(
+                            channel_message_sender.clone(),
+                            session_id,
+                            &usage,
+                            append_history,
+                        )
+                        .await;
+                    }
                     Some(AgentResponse::Final(usage))
                 }
                 Ok(_) => None,
@@ -343,109 +290,7 @@ where
         Ok(())
     }
 
-    fn request_filter(&self, request: AgentRequest) -> Option<AgentRequest> {
-        if let Message::User { content, .. } = request.message {
-            let mut vec = content
-                .into_iter()
-                .filter(|item| match item {
-                    UserContent::Image(_) => self.model_settings.vision,
-                    UserContent::Audio(_) => self.model_settings.audio,
-                    UserContent::Video(_) => self.model_settings.video,
-                    UserContent::Document(_) => self.model_settings.document,
-                    _ => true,
-                })
-                .collect_vec();
-            match vec.len() {
-                0 => None,
-                1 => Some(AgentRequest {
-                    id: Default::default(),
-                    session_id: request.session_id,
-                    message: Message::User {
-                        content: OneOrMany::one(vec.remove(0)),
-                    },
-                }),
-                2.. => OneOrMany::many(vec).ok().map(|content| AgentRequest {
-                    id: Default::default(),
-                    session_id: request.session_id,
-                    message: Message::User { content },
-                }),
-            }
-        } else {
-            Some(request)
-        }
-    }
-
-    async fn handle_history(
-        &self,
-        channel_message_sender: Sender<ChannelMessage>,
-        session_id: &SessionId,
-        usage: &Usage,
-        append_history: &[Message],
-    ) {
-        match self
-            .ctx
-            .history_manager
-            .append(
-                session_id,
-                &self.id,
-                &usage,
-                append_history
-                    .iter()
-                    .map(|it| HistoryMessage::message(it.clone()))
-                    .collect_vec(),
-            )
-            .await
-        {
-            Ok(_) => {}
-            Err(err) => {
-                warn!(
-                    "Store history failed, session_id: {}, agent: {}, err: {}",
-                    session_id, self.id, err
-                );
-            }
-        }
-        let max_tokens = self
-            .agent_settings
-            .max_tokens
-            .unwrap_or(self.model_settings.max_tokens);
-        if usage.total_tokens
-            >= ((max_tokens as f32 * self.agent_settings.compact_threshold) as u64)
-        {
-            let _ = channel_message_sender
-                .send(ChannelMessage {
-                    session_id: session_id.clone(),
-                    message: AgentResponse::Notify("Trigger history compact...".into()),
-                })
-                .await;
-
-            let result = self
-                .history_compact(
-                    channel_message_sender.clone(),
-                    session_id,
-                    self.agent_settings.compact_threshold,
-                )
-                .await;
-            match &result {
-                HistoryCompactResult::Ok(val) => {
-                    info!("Compact session{session_id} history ok, {val}");
-                }
-                HistoryCompactResult::Ignore(msg) => {
-                    info!("Compact session{session_id} ignore with {msg}, no history to compact");
-                }
-                HistoryCompactResult::Err(err) => {
-                    warn!("Compact session{session_id} failed, err: {err}");
-                }
-            }
-            let _ = channel_message_sender
-                .send(ChannelMessage {
-                    session_id: session_id.clone(),
-                    message: AgentResponse::HistoryCompact(result),
-                })
-                .await;
-        }
-    }
-
-    async fn history_compact(
+    async fn session_compact(
         &self,
         channel_message_sender: Sender<ChannelMessage>,
         session_id: &SessionId,
@@ -478,7 +323,7 @@ where
                 ReasoningEffort::Minimal,
                 None,
                 channel_message_sender,
-                |tool| Some(tool),
+                |_| None,
             )
             .await
         {
@@ -566,7 +411,13 @@ Execute the 'slimming' maintenance of the conversation history immediately, gene
                             let _ = self
                                 .ctx
                                 .history_manager
-                                .append(session_id, &self.id, &compacted_usage, messages)
+                                .append(
+                                    session_id,
+                                    &self.id,
+                                    &compacted_usage,
+                                    messages,
+                                    Some(true), // overwrite after summary
+                                )
                                 .await;
                         }
                         compacted_usage
@@ -585,5 +436,122 @@ Execute the 'slimming' maintenance of the conversation history immediately, gene
             }
         }
         unreachable!("unexpected error, unreachable code")
+    }
+
+    fn context(&self) -> &AgentContext {
+        &self.ctx
+    }
+
+    fn model_settings(&self) -> &ModelSettings {
+        &self.model_settings
+    }
+}
+
+impl<C, P> LlmAgent<C, P>
+where
+    C: CompletionClient + 'static + Send + Sync,
+    P: ModelProvider<Client = C> + 'static + Send + Sync,
+{
+    fn request_filter(&self, request: AgentRequest) -> Option<AgentRequest> {
+        if let Message::User { content, .. } = request.message {
+            let mut vec = content
+                .into_iter()
+                .filter(|item| match item {
+                    UserContent::Image(_) => self.model_settings.vision,
+                    UserContent::Audio(_) => self.model_settings.audio,
+                    UserContent::Video(_) => self.model_settings.video,
+                    UserContent::Document(_) => self.model_settings.document,
+                    _ => true,
+                })
+                .collect_vec();
+            match vec.len() {
+                0 => None,
+                1 => Some(AgentRequest {
+                    id: Default::default(),
+                    session_id: request.session_id,
+                    message: Message::User {
+                        content: OneOrMany::one(vec.remove(0)),
+                    },
+                }),
+                2.. => OneOrMany::many(vec).ok().map(|content| AgentRequest {
+                    id: Default::default(),
+                    session_id: request.session_id,
+                    message: Message::User { content },
+                }),
+            }
+        } else {
+            Some(request)
+        }
+    }
+
+    async fn handle_history(
+        &self,
+        channel_message_sender: Sender<ChannelMessage>,
+        session_id: &SessionId,
+        usage: &Usage,
+        append_history: &[Message],
+    ) {
+        match self
+            .ctx
+            .history_manager
+            .append(
+                session_id,
+                &self.id,
+                &usage,
+                append_history
+                    .iter()
+                    .map(|it| HistoryMessage::message(it.clone()))
+                    .collect_vec(),
+                None,
+            )
+            .await
+        {
+            Ok(_) => {}
+            Err(err) => {
+                warn!(
+                    "Store history failed, session_id: {}, agent: {}, err: {}",
+                    session_id, self.id, err
+                );
+            }
+        }
+        let max_tokens = self
+            .agent_settings
+            .max_tokens
+            .unwrap_or(self.model_settings.max_tokens);
+        if usage.total_tokens
+            >= ((max_tokens as f32 * self.agent_settings.compact_threshold) as u64)
+        {
+            let _ = channel_message_sender
+                .send(ChannelMessage {
+                    session_id: session_id.clone(),
+                    message: AgentResponse::Notify("Trigger history compact...".into()),
+                })
+                .await;
+
+            let result = self
+                .session_compact(
+                    channel_message_sender.clone(),
+                    session_id,
+                    self.agent_settings.compact_threshold,
+                )
+                .await;
+            match &result {
+                HistoryCompactResult::Ok(val) => {
+                    info!("Compact session{session_id} history ok, {val}");
+                }
+                HistoryCompactResult::Ignore(msg) => {
+                    info!("Compact session{session_id} ignore with {msg}, no history to compact");
+                }
+                HistoryCompactResult::Err(err) => {
+                    warn!("Compact session{session_id} failed, err: {err}");
+                }
+            }
+            let _ = channel_message_sender
+                .send(ChannelMessage {
+                    session_id: session_id.clone(),
+                    message: AgentResponse::HistoryCompact(result),
+                })
+                .await;
+        }
     }
 }
