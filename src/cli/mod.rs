@@ -1,5 +1,6 @@
 use clap::{Parser, Subcommand};
 
+mod onboard;
 mod start;
 #[derive(Parser)]
 pub struct Cli {
@@ -21,12 +22,14 @@ impl CmdRunner for Cli {
 #[derive(Subcommand)]
 pub enum Command {
     Start(start::Start),
+    Onboard(onboard::Onboard),
 }
 
 impl CmdRunner for Command {
     async fn run(&self) -> crate::Result<()> {
         match self {
             Self::Start(start) => start.run().await,
+            Self::Onboard(onboard) => onboard.run().await,
         }
     }
 }

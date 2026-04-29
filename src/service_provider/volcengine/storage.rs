@@ -22,19 +22,19 @@ use ve_tos_rust_sdk::object::{DeleteObjectInput, GetObjectInput, PutObjectFromBu
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct VolcengineStorageConfig {
-    endpoint: ApiUrl,
-    region: String,
-    bucket: String,
-    access_key: ApiKey,
-    secret_key: ApiKey,
+    pub endpoint: ApiUrl,
+    pub region: String,
+    pub bucket: String,
+    pub access_key: ApiKey,
+    pub secret_key: ApiKey,
     #[serde(default)]
-    key_prefix: Option<String>,
+    pub key_prefix: Option<String>,
     #[serde(default = "default_connection_timeout_ms")]
-    connection_timeout_ms: u64,
+    pub connection_timeout_ms: u64,
     #[serde(default = "default_request_timeout_ms")]
-    request_timeout_ms: u64,
+    pub request_timeout_ms: u64,
     #[serde(default = "default_max_retry_count")]
-    max_retry_count: u8,
+    pub max_retry_count: u8,
 }
 
 const fn default_connection_timeout_ms() -> u64 {

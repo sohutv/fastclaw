@@ -1,5 +1,5 @@
 #[cfg(feature = "volcengine")]
-mod volcengine;
+pub mod volcengine;
 
 mod websearch;
 pub use websearch::*;

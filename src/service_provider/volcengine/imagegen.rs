@@ -10,9 +10,9 @@ use std::str::FromStr;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct VolcengineImageGenConfig {
-    api_url: ApiUrl,
-    api_key: ApiKey,
-    model: ModelName,
+    pub api_url: ApiUrl,
+    pub api_key: ApiKey,
+    pub model: ModelName,
 }
 
 #[derive(Clone)]

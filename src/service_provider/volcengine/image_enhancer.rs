@@ -15,9 +15,9 @@ use std::str::FromStr;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct VolcengineImageEnhancerConfig {
-    api_url: ApiUrl,
-    access_key: ApiKey,
-    secret_key: ApiKey,
+    pub api_url: ApiUrl,
+    pub access_key: ApiKey,
+    pub secret_key: ApiKey,
 }
 
 #[derive(Clone)]

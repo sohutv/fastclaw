@@ -209,6 +209,33 @@ impl From<&Anonymous> for UserId {
     }
 }
 
+impl From<Master> for SessionId {
+    fn from(value: Master) -> Self {
+        Self::Master {
+            val: value,
+            settings: Default::default(),
+        }
+    }
+}
+
+impl From<&Master> for SessionId {
+    fn from(value: &Master) -> Self {
+        Self::Master {
+            val: value.clone(),
+            settings: Default::default(),
+        }
+    }
+}
+
+impl From<Anonymous> for SessionId {
+    fn from(value: Anonymous) -> Self {
+        Self::Anonymous {
+            val: value,
+            settings: Default::default(),
+        }
+    }
+}
+
 impl From<&Anonymous> for SessionId {
     fn from(value: &Anonymous) -> Self {
         Self::Anonymous {
