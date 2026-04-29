@@ -146,11 +146,10 @@ impl WechatChannel {
                         if let Some(text) = voice_item.text.as_ref().filter(|it| !it.is_empty()) {
                             user_contents.push(UserContent::text(text));
                         }
-                        let Some(file_data) = voice_item
+                        let Ok(file_data) = voice_item
                             .media
                             .download(&wechat_client.http_client, None)
                             .await
-                            .ok()
                         else {
                             warn!("download voice {} failed", voice_item.media.full_url);
                             continue;
@@ -159,14 +158,11 @@ impl WechatChannel {
                             .ctx
                             .workspace
                             .downloads_path()
-                            .join(format!("{}.mp4", uuid::Uuid::new_v4(),));
+                            .join(format!("{}.mp3", uuid::Uuid::new_v4(),));
                         let Ok(_) = tokio::fs::write(&filepath, &file_data).await else {
                             warn!("save voice failed, file-url: {}", voice_item.media.full_url);
                             continue;
                         };
-                        user_contents.push(UserContent::Text(
-                            format!("- **filepath of input voice**: {}", filepath.display()).into(),
-                        ));
                     }
                     _ => continue,
                 }

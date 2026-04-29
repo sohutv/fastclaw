@@ -117,7 +117,7 @@ impl dingtalk_stream::handlers::CallbackHandler for DingTalkCallbackHandler {
                             }
                         }
                         Err(e) => {
-                            UserContent::text(format!("下载图片失败, {}", e));
+                            UserContent::text(format!("download picture failed, {}", e));
                         }
                     }
                 }
@@ -134,29 +134,18 @@ impl dingtalk_stream::handlers::CallbackHandler for DingTalkCallbackHandler {
                             ));
                         }
                         Err(e) => {
-                            UserContent::text(format!("下载视频失败, {}", e));
+                            UserContent::text(format!("download video failed, {}", e));
                         }
                     }
                 }
-                MessagePayload::Audio {content} =>{
+                MessagePayload::Audio { content } => {
                     let text = &content.recognition;
                     if !text.is_empty() {
                         user_contents.push(UserContent::text(text));
                     }
                     let downloads_dir = self.channel.ctx.workspace.downloads_path().to_path_buf();
-                    match content.fetch(&dingtalk_client, downloads_dir).await {
-                        Ok((filepath, _)) => {
-                            user_contents.push(UserContent::Text(
-                                format!(
-                                    "- **filepath of the input audio**: {}",
-                                    filepath.display()
-                                )
-                                    .into(),
-                            ));
-                        }
-                        Err(e) => {
-                            UserContent::text(format!("下载音频失败, {}", e));
-                        }
+                    if let Err(err) = content.fetch(&dingtalk_client, downloads_dir).await {
+                        warn!("download audio failed, {err}");
                     }
                 }
                 MessagePayload::File { content } => {
@@ -170,7 +159,7 @@ impl dingtalk_stream::handlers::CallbackHandler for DingTalkCallbackHandler {
                         }
                         Err(e) => {
                             UserContent::text(format!(
-                                "下载文件 {} 失败, {}",
+                                "download file {} failed, {}",
                                 content.file_name, e
                             ));
                         }
@@ -213,7 +202,7 @@ impl dingtalk_stream::handlers::CallbackHandler for DingTalkCallbackHandler {
                                         };
                                     }
                                     Err(e) => {
-                                        texts.push(format!("下载图片失败, {}", e));
+                                        texts.push(format!("download picture failed, {}", e));
                                     }
                                 }
                             }
