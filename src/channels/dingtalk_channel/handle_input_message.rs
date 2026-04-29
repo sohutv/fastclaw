@@ -85,12 +85,11 @@ impl dingtalk_stream::handlers::CallbackHandler for DingTalkCallbackHandler {
             let mut user_contents = vec![];
             match payload {
                 MessagePayload::Text { text } => {
-                    let text = text.to_string();
                     if !text.is_empty() {
                         if text.starts_with('/') {
                             cmd = Some(text.to_string());
                         }
-                        user_contents.push(UserContent::text(text));
+                        user_contents.push(UserContent::text(text.to_string()));
                     }
                 }
                 MessagePayload::Picture { content: picture } => {
@@ -136,6 +135,27 @@ impl dingtalk_stream::handlers::CallbackHandler for DingTalkCallbackHandler {
                         }
                         Err(e) => {
                             UserContent::text(format!("下载视频失败, {}", e));
+                        }
+                    }
+                }
+                MessagePayload::Audio {content} =>{
+                    let text = &content.recognition;
+                    if !text.is_empty() {
+                        user_contents.push(UserContent::text(text));
+                    }
+                    let downloads_dir = self.channel.ctx.workspace.downloads_path().to_path_buf();
+                    match content.fetch(&dingtalk_client, downloads_dir).await {
+                        Ok((filepath, _)) => {
+                            user_contents.push(UserContent::Text(
+                                format!(
+                                    "- **filepath of the input audio**: {}",
+                                    filepath.display()
+                                )
+                                    .into(),
+                            ));
+                        }
+                        Err(e) => {
+                            UserContent::text(format!("下载音频失败, {}", e));
                         }
                     }
                 }

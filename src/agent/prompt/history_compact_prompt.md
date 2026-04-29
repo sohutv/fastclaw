@@ -13,10 +13,10 @@ Drive your logic output strictly in accordance with the following steps:
 ---
 
 ### 3 Output Specification (MARKDOWN)
-```markdown
-# Context Compact Report (Agent Session History Compression Report)
 
-## 2. Executive Summary of Session
+# Agent Session History Compression Report
+
+## 1. Executive Summary of Session
 
 ### Core Task Objectives
 > Briefly describe the core work scope and phased objectives of the current Agent here.
@@ -29,6 +29,5 @@ Drive your logic output strictly in accordance with the following steps:
 - [ ] **Task A**: Briefly describe the specific uncompleted work.
 - [ ] **Task B**: Briefly describe the next-step plan or remaining issues.
 
-### Context Memo
+### Detailed Background Summary
 *(Write a detailed background summary of 200-300 words here to ensure that the Agent can seamlessly connect with the previous dialogue logic after reading this section. The summary should include key context variables, clarified restrictions and unresolved difficulties.)*
-```

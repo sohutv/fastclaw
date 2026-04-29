@@ -22,8 +22,8 @@ use std::sync::Arc;
 use tokio::sync::mpsc::Receiver;
 use tokio::task::JoinHandle;
 
-mod callback_handler;
 mod config;
+mod handle_input_message;
 mod recv_agent_message;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -65,7 +65,7 @@ impl Channel for DingtalkChannel {
         agent: Arc<dyn Agent>,
     ) -> crate::Result<(Arc<Self>, Arc<Self::Client>, Self::JoinHandle)> {
         let self_ = Arc::new(self);
-        let cb_handler = Arc::new(callback_handler::DingTalkCallbackHandler {
+        let cb_handler = Arc::new(handle_input_message::DingTalkCallbackHandler {
             channel: Arc::clone(&self_),
             dingtalk_bot_topic: MessageTopic::Callback(dingtalk_stream::TOPIC_ROBOT.to_string()),
             agent: Arc::clone(&agent),

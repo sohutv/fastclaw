@@ -1,5 +1,5 @@
 use crate::ModelName;
-use crate::agent::session_history::HistoryMessage;
+use crate::agent::session_history::{HistoryMessage, StoreOption};
 use crate::agent::{
     Agent, AgentContext, AgentId, AgentRequest, AgentResponse, AgentSettings, HistoryCompactResult,
     HistoryCompactVal, HistoryManager, LlmAgentSupplier, ToolFilter, Workspace,
@@ -19,8 +19,8 @@ use rig::client::CompletionClient;
 use rig::completion::{AssistantContent, Message, Usage};
 use rig::message::UserContent;
 use rig::streaming::{StreamedAssistantContent, StreamingChat};
-use std::sync::Arc;
 use serde_json::json;
+use std::sync::Arc;
 use tokio::sync::mpsc::Sender;
 use tokio_stream::StreamExt;
 
@@ -393,9 +393,7 @@ Execute the 'slimming' maintenance of the conversation history immediately, gene
 ## Raw Data Backup Information
 - Backup File Path: {}
 - Processing Time: {}
-- Status: Backup completed successfully
-
-                                    "#,
+- Status: Backup completed successfully"#,
                                         history_backup_path.display(),
                                         chrono::Local::now().format("%Y-%m-%d %H:%M:%S")
                                     )));
@@ -411,12 +409,12 @@ Execute the 'slimming' maintenance of the conversation history immediately, gene
                             let _ = self
                                 .ctx
                                 .history_manager
-                                .append(
+                                .store(
                                     session_id,
                                     &self.id,
                                     &compacted_usage,
                                     messages,
-                                    Some(true), // overwrite after summary
+                                    StoreOption::Overwrite, // overwrite after summary
                                 )
                                 .await;
                         }
@@ -494,7 +492,7 @@ where
         match self
             .ctx
             .history_manager
-            .append(
+            .store(
                 session_id,
                 &self.id,
                 &usage,
@@ -502,7 +500,7 @@ where
                     .iter()
                     .map(|it| HistoryMessage::message(it.clone()))
                     .collect_vec(),
-                None,
+                StoreOption::Append,
             )
             .await
         {

@@ -1,7 +1,8 @@
-use crate::agent::session_history::HistoryMessage;
+use crate::agent::session_history::{HistoryMessage, StoreOption};
 use crate::agent::{AgentId, HistoryManager, Workspace};
 use crate::channels::SessionId;
 use crate::config::Config;
+use anyhow::anyhow;
 use async_trait::async_trait;
 use rig::completion::Usage;
 use std::ops::{Deref, DerefMut};
@@ -37,13 +38,13 @@ impl JsonlHistoryManager {
 
 #[async_trait]
 impl HistoryManager for JsonlHistoryManager {
-    async fn append(
+    async fn store(
         &self,
         session_id: &SessionId,
         agent: &AgentId,
         usage: &Usage,
-        new_messages: Vec<HistoryMessage>,
-        overwrite: Option<bool>,
+        update_messages: Vec<HistoryMessage>,
+        option: StoreOption,
     ) -> crate::Result<()> {
         let mut histories = self.histories.write().await;
 
@@ -57,29 +58,49 @@ impl HistoryManager for JsonlHistoryManager {
             )
             .await?;
             let history_filepath = dir.join("history.jsonl");
-            let file = fs::File::options()
-                .append(overwrite.map(|it| !it).unwrap_or(true))
-                .create(true)
-                .open(&history_filepath)
-                .await?;
-            let mut writer = tokio::io::BufWriter::new(file);
-            for message in &new_messages {
-                let line = serde_json::to_string(message)?;
-                let _ = writer.write(line.as_bytes()).await?;
-                let _ = writer.write(b"\n").await?;
+
+            match option {
+                StoreOption::Append => {
+                    let file = fs::File::options()
+                        .create(true)
+                        .write(true)
+                        .append(true)
+                        .open(&history_filepath)
+                        .await?;
+                    let _ = Self::write_actual(file, &update_messages).await?;
+                }
+                StoreOption::Overwrite => {
+                    let tmp_filepath = history_filepath
+                        .parent()
+                        .ok_or(anyhow!(
+                            "unexpected history filepath: {}",
+                            history_filepath.display()
+                        ))?
+                        .join(format!(
+                            "tmp_{}_{}.jsonl",
+                            chrono::Local::now().format("%Y%m%d_%H%M%S"),
+                            uuid::Uuid::new_v4(),
+                        ));
+                    let file = fs::File::options()
+                        .create(true)
+                        .write(true)
+                        .open(&tmp_filepath)
+                        .await?;
+                    let _ = Self::write_actual(file, &update_messages).await?;
+                    fs::rename(&tmp_filepath, &history_filepath).await?;
+                }
             }
-            let _ = writer.flush().await?;
         }
 
         if let Some((messages, usage)) = histories.deref_mut() {
-            for new_message in new_messages {
-                match new_message {
+            for update_message in update_messages {
+                match update_message {
                     HistoryMessage::Message(_) => {
-                        messages.push(new_message);
+                        messages.push(update_message);
                     }
                     HistoryMessage::Summary(_) => {
                         *messages = vec![];
-                        messages.push(new_message);
+                        messages.push(update_message);
                     }
                 }
             }
@@ -162,5 +183,16 @@ impl JsonlHistoryManager {
             return Err(anyhow::anyhow!("{} is not a directory", dir.display()));
         }
         Ok(dir)
+    }
+
+    async fn write_actual(file: fs::File, messages: &[HistoryMessage]) -> crate::Result<()> {
+        let mut writer = tokio::io::BufWriter::new(file);
+        for message in messages {
+            let line = serde_json::to_string(message)?;
+            let _ = writer.write(line.as_bytes()).await?;
+            let _ = writer.write(b"\n").await?;
+        }
+        let _ = writer.flush().await?;
+        Ok(())
     }
 }

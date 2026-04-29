@@ -11,13 +11,13 @@ pub use jsonl_history_manager::JsonlHistoryManager;
 
 #[async_trait]
 pub trait HistoryManager: Send + Sync {
-    async fn append(
+    async fn store(
         &self,
         session_id: &SessionId,
         agent: &AgentId,
         usage: &Usage,
         message: Vec<HistoryMessage>,
-        overwrite: Option<bool>,
+        option: StoreOption,
     ) -> crate::Result<()>;
 
     async fn load(
@@ -28,6 +28,12 @@ pub trait HistoryManager: Send + Sync {
 
     #[allow(unused)]
     async fn usage(&self, session_id: &SessionId, agent: &AgentId) -> crate::Result<Usage>;
+}
+
+#[derive(Debug,Copy, Clone)]
+pub enum StoreOption{
+    Append,
+    Overwrite,
 }
 
 #[derive(Debug, Clone, Serialize, Deref)]

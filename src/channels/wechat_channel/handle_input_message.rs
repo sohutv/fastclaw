@@ -16,7 +16,7 @@ use wechat_sdk::client::message::{MessageItem, MessageItemValue, TextItem, Wecha
 impl WechatChannel {
     /// ### handle_wechat_message
     /// - wechat-bot 不支持群聊, 所以不会出现未授权的会话
-    pub(super) async fn handle_wechat_message(
+    pub(super) async fn handle_input_message(
         self: Arc<Self>,
         agent: Arc<dyn Agent>,
         wechat_client: Arc<WechatClient>,
@@ -50,7 +50,7 @@ impl WechatChannel {
                             .ok()
                             .and_then(|buf| image::load_from_memory(&buf).ok())
                         else {
-                            warn!("download {} failed", image_item.media.full_url);
+                            warn!("download image {} failed", image_item.media.full_url);
                             continue;
                         };
                         let mut image_data = vec![];
@@ -99,7 +99,7 @@ impl WechatChannel {
                             .await
                             .ok()
                         else {
-                            warn!("download {} failed", video_item.media.full_url);
+                            warn!("download video {} failed", video_item.media.full_url);
                             continue;
                         };
 
@@ -109,15 +109,11 @@ impl WechatChannel {
                             .downloads_path()
                             .join(format!("{}.mp4", uuid::Uuid::new_v4(),));
                         let Ok(_) = tokio::fs::write(&filepath, &file_data).await else {
-                            warn!(
-                                "save video file failed, file-url: {}",
-                                video_item.media.full_url
-                            );
+                            warn!("save video failed, file-url: {}", video_item.media.full_url);
                             continue;
                         };
                         user_contents.push(UserContent::Text(
-                            format!("- **filepath of input video file**: {}", filepath.display())
-                                .into(),
+                            format!("- **filepath of input video**: {}", filepath.display()).into(),
                         ));
                     }
                     MessageItemValue::File { file_item, .. } => {
@@ -127,7 +123,7 @@ impl WechatChannel {
                             .await
                             .ok()
                         else {
-                            warn!("download {} failed", file_item.media.full_url);
+                            warn!("download file {} failed", file_item.media.full_url);
                             continue;
                         };
                         let filepath = &self.ctx.workspace.downloads_path().join(format!(
@@ -150,6 +146,27 @@ impl WechatChannel {
                         if let Some(text) = voice_item.text.as_ref().filter(|it| !it.is_empty()) {
                             user_contents.push(UserContent::text(text));
                         }
+                        let Some(file_data) = voice_item
+                            .media
+                            .download(&wechat_client.http_client, None)
+                            .await
+                            .ok()
+                        else {
+                            warn!("download voice {} failed", voice_item.media.full_url);
+                            continue;
+                        };
+                        let filepath = &self
+                            .ctx
+                            .workspace
+                            .downloads_path()
+                            .join(format!("{}.mp4", uuid::Uuid::new_v4(),));
+                        let Ok(_) = tokio::fs::write(&filepath, &file_data).await else {
+                            warn!("save voice failed, file-url: {}", voice_item.media.full_url);
+                            continue;
+                        };
+                        user_contents.push(UserContent::Text(
+                            format!("- **filepath of input voice**: {}", filepath.display()).into(),
+                        ));
                     }
                     _ => continue,
                 }

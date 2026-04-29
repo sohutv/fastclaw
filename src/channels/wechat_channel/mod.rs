@@ -12,7 +12,7 @@ use wechat_sdk::client::message::MessageItems;
 use wechat_sdk::client::{WechatClient, WechatConfig as WechatInnerConfig};
 
 mod config;
-
+mod handle_input_message;
 mod recv_agent_message;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -90,7 +90,7 @@ impl Channel for WechatChannel {
                                 l
                             }) {
                                 let _ = Arc::clone(&self_)
-                                    .handle_wechat_message(
+                                    .handle_input_message(
                                         Arc::clone(&agent),
                                         Arc::clone(&wechat_client),
                                         message,
@@ -148,8 +148,6 @@ impl Channel for WechatChannel {
         Ok(vec![&self.wechat_config.session_id])
     }
 }
-
-mod handle_input_message;
 
 impl WechatChannel {
     fn create_robot_messages<Content: Into<MessageItems>>(
