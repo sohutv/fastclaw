@@ -45,7 +45,7 @@ impl Tool for ImageUnderstandingTool {
                             "type": "string"
                         },
                         "minItems": 1,
-                        "maxItems": 3
+                        "maxItems": 10
                     }
                 },
                 "required": ["prompt", "images"]
