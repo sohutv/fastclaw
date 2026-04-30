@@ -1,4 +1,4 @@
-use crate::agent::ToolFilter;
+use crate::agent::{Agent, ToolFilter};
 use crate::agent::llm_agent::LlmAgent;
 use crate::channels::{ChannelMessage, SessionId};
 use crate::model_provider::{ModelProvider, ReasoningEffort};
@@ -51,7 +51,9 @@ where
                 let filter = tool_filter.into();
                 crate::tools::FunctionTool::required_tools(ToolContext {
                     session_id: session_id.clone(),
-                    agent: Arc::new(self.fork_with("tool-call").await?),
+                    agent: {
+                        Arc::new(self.fork_with("tool-call").await?).start().await?
+                    },
                     channel_message_sender,
                 })
                 .await?

@@ -77,7 +77,7 @@ pub trait SessionCompactSupport: Send + Sync {
 }
 #[async_trait]
 pub trait Agent: SessionCompactSupport + Send + Sync {
-    async fn start(self: Arc<Self>) -> crate::Result<()>;
+    async fn start(self: Arc<Self>) -> crate::Result<Arc<dyn Agent>>;
 
     async fn get_channel_sender(
         &self,

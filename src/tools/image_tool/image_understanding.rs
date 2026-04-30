@@ -3,12 +3,11 @@ use crate::channels::ChannelMessage;
 use crate::tools::{ToolCallError, ToolCallRsult, ToolContext};
 use crate::type_::Prompt;
 use base64::Engine;
-use log::warn;
+use log::{error, warn};
 use rig::OneOrMany;
 use rig::completion::{AssistantContent, ToolDefinition};
 use rig::message::{DocumentSourceKind, ImageDetail, ImageMediaType, Message, UserContent};
 use rig::tool::Tool;
-use std::sync::Arc;
 
 #[derive(Clone)]
 pub struct ImageUnderstandingTool {
@@ -56,58 +55,13 @@ impl Tool for ImageUnderstandingTool {
 
     async fn call(&self, args: Self::Args) -> Result<Self::Output, Self::Error> {
         let (tx, mut rx) = tokio::sync::mpsc::channel(32);
-        let Self::Args { prompt, images } = args;
 
-        let join_handle = {
-            let session_id = self.ctx.session_id.clone();
-            let agent = Arc::clone(&self.ctx.agent);
-            let join_handle = tokio::spawn(async move {
-                agent
-                    .get_channel_sender()
-                    .await?
-                    .send((
-                        AgentRequest {
-                            id: uuid::Uuid::new_v4().into(),
-                            session_id,
-                            message: Message::User {
-                                content: OneOrMany::many({
-                                    let mut vec = Vec::with_capacity(images.len() + 1);
-                                    vec.push(UserContent::text(prompt));
-                                    for image in images {
-                                        let data = {
-                                            let image = image.try_into_image().await?;
-                                            let data = image.as_png().await?;
-                                            data
-                                        };
-                                        vec.push(UserContent::Image(
-                                            rig::completion::message::Image {
-                                                data: DocumentSourceKind::Base64(
-                                                    base64::engine::general_purpose::STANDARD
-                                                        .encode(&data),
-                                                ),
-                                                media_type: Some(ImageMediaType::PNG),
-                                                detail: Some(ImageDetail::Auto),
-                                                additional_params: None,
-                                            },
-                                        ));
-                                    }
-                                    vec
-                                })?,
-                            },
-                        },
-                        AgentRequestContext {
-                            channel_message_sender: tx,
-                            addi_system_prompt: None,
-                            tool_filter: ToolFilter::from(|_| None),
-                            with_history: false,
-                        },
-                    ))
-                    .await?;
-                Ok::<_, anyhow::Error>(())
-            });
-            join_handle
-        };
-
+        if let Err(err)= self
+            .send_request(tx, args)
+            .await {
+            error!("{err}");
+            return Err(ToolCallError(format!("{err}")));
+        }
         let mut buff = vec![];
         while let Some(message) = rx.recv().await {
             match message {
@@ -138,10 +92,56 @@ impl Tool for ImageUnderstandingTool {
                 }
             }
         }
-        // self.ctx.channel_message_sender.clone()
-        match join_handle.await {
-            Ok(_) => Ok(ToolCallRsult::ok(buff.join(""))),
-            Err(err) => Err(ToolCallError(format!("{err}"))),
-        }
+        Ok(ToolCallRsult::ok(buff.join("")))
+    }
+}
+
+impl ImageUnderstandingTool {
+    async fn send_request(
+        &self,
+        channel_message_sender: tokio::sync::mpsc::Sender<crate::Result<ChannelMessage>>,
+        Args { prompt, images }: Args,
+    ) -> crate::Result<()> {
+        let _ = self
+            .ctx
+            .agent
+            .get_channel_sender()
+            .await?
+            .send((
+                AgentRequest {
+                    id: uuid::Uuid::new_v4().into(),
+                    session_id: self.ctx.session_id.clone(),
+                    message: Message::User {
+                        content: OneOrMany::many({
+                            let mut vec = Vec::with_capacity(images.len() + 1);
+                            vec.push(UserContent::text(prompt));
+                            for image in images {
+                                let data = {
+                                    let image = image.try_into_image().await?;
+                                    let data = image.as_png().await?;
+                                    data
+                                };
+                                vec.push(UserContent::Image(rig::completion::message::Image {
+                                    data: DocumentSourceKind::Base64(
+                                        base64::engine::general_purpose::STANDARD.encode(&data),
+                                    ),
+                                    media_type: Some(ImageMediaType::PNG),
+                                    detail: Some(ImageDetail::Auto),
+                                    additional_params: None,
+                                }));
+                            }
+                            vec
+                        })?,
+                    },
+                },
+                AgentRequestContext {
+                    channel_message_sender,
+                    addi_system_prompt: None,
+                    tool_filter: ToolFilter::from(|_| None),
+                    with_history: false,
+                },
+            ))
+            .await?;
+        Ok(())
     }
 }

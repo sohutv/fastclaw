@@ -124,20 +124,23 @@ where
     C: CompletionClient + 'static + Send + Sync,
     P: ModelProvider<Client = C> + 'static + Send + Sync,
 {
-    async fn start(self: Arc<Self>) -> crate::Result<()> {
-        let mut sender = self.channel_sender.write().await;
-        if sender.is_some() {
-            return Ok(());
-        }
-        let (tx, mut rx) = tokio::sync::mpsc::channel(64);
-        let self_ = Arc::clone(&self);
-        tokio::spawn(async move {
-            while let Some((request, ctx)) = rx.recv().await {
-                self_.handle_request(request, ctx).await
+    async fn start(self: Arc<Self>) -> crate::Result<Arc<dyn Agent>> {
+        {
+            let mut sender = self.channel_sender.write().await;
+            if sender.is_some() {
+                drop(sender);
+                return Ok(self);
             }
-        });
-        *sender = Some(tx);
-        Ok(())
+            let (tx, mut rx) = tokio::sync::mpsc::channel(64);
+            let self_ = Arc::clone(&self);
+            tokio::spawn(async move {
+                while let Some((request, ctx)) = rx.recv().await {
+                    self_.handle_request(request, ctx).await
+                }
+            });
+            *sender = Some(tx);
+        }
+        Ok(self)
     }
 
     async fn get_channel_sender(
