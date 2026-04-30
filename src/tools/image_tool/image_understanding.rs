@@ -96,7 +96,7 @@ impl Tool for ImageUnderstandingTool {
                             },
                         },
                         AgentRequestContext {
-                            sender: tx,
+                            channel_message_sender: tx,
                             addi_system_prompt: None,
                             tool_filter: ToolFilter::from(|_| None),
                             with_history: false,

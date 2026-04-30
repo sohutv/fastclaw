@@ -92,7 +92,7 @@ impl Channel for CliChannel {
                                                 message,
                                             },
                                             AgentRequestContext {
-                                                sender: message_sender.clone(),
+                                                channel_message_sender: message_sender.clone(),
                                                 addi_system_prompt: None,
                                                 tool_filter: Default::default(),
                                                 with_history: true,

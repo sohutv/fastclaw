@@ -57,7 +57,7 @@ where
                 agent,
                 req,
                 AgentRequestContext {
-                    sender: channel_message_sender,
+                    channel_message_sender: channel_message_sender,
                     addi_system_prompt,
                     tool_filter: Default::default(),
                     with_history: true,

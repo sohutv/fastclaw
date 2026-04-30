@@ -67,17 +67,21 @@ mod tool_filter {
 pub use tool_filter::ToolFilter;
 
 #[async_trait]
-pub trait Agent: Send + Sync {
-    async fn start(self: Arc<Self>) -> crate::Result<()>;
-
-    async fn get_channel_sender(&self) -> crate::Result<Sender<(AgentRequest, AgentRequestContext)>>;
-
+pub trait SessionCompactSupport: Send + Sync {
     async fn session_compact(
         &self,
         channel_message_sender: Sender<crate::Result<ChannelMessage>>,
         session_id: &SessionId,
         compact_ratio: f32,
     ) -> HistoryCompactResult;
+}
+#[async_trait]
+pub trait Agent: SessionCompactSupport + Send + Sync {
+    async fn start(self: Arc<Self>) -> crate::Result<()>;
+
+    async fn get_channel_sender(
+        &self,
+    ) -> crate::Result<Sender<(AgentRequest, AgentRequestContext)>>;
 
     fn context(&self) -> &AgentContext;
 
@@ -128,7 +132,7 @@ pub struct AgentRequest {
 
 #[derive(Clone)]
 pub struct AgentRequestContext {
-    pub sender: Sender<crate::Result<ChannelMessage>>,
+    pub channel_message_sender: Sender<crate::Result<ChannelMessage>>,
     pub addi_system_prompt: Option<String>,
     pub tool_filter: ToolFilter,
     pub with_history: bool,
