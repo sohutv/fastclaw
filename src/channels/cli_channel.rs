@@ -1,9 +1,10 @@
-use crate::agent::{Agent, AgentRequest, AgentResponse, Notify};
+use crate::agent::{Agent, AgentRequest, AgentRequestContext, AgentResponse, Notify};
 use crate::channels::console_cmd::Console;
 use crate::channels::{Channel, ChannelContext, ChannelMessage, SessionId};
 use crate::config::{Config, Workspace};
 use anyhow::anyhow;
 use async_trait::async_trait;
+use log::warn;
 use rig::completion::Message;
 use rig::message::{AssistantContent, ReasoningContent, ToolCall, ToolFunction};
 use rustyline::DefaultEditor;
@@ -47,6 +48,7 @@ impl Channel for CliChannel {
         agent: Arc<dyn Agent>,
     ) -> crate::Result<(Arc<Self>, Arc<Self::Client>, Self::JoinHandle)> {
         let self_ = Arc::new(self);
+        let _ = Agent::start(Arc::clone(&agent)).await?;
         let (message_sender, mut message_receiver) = tokio::sync::mpsc::channel(32);
         let join_handle = {
             let self_ = Arc::clone(&self_);
@@ -80,17 +82,22 @@ impl Channel for CliChannel {
                                     }
                                     let message = Message::user(line);
                                     let _ = agent
-                                        .run(
+                                        .get_channel_sender()
+                                        .await
+                                        .unwrap()
+                                        .send((
                                             AgentRequest {
                                                 id: Default::default(),
                                                 session_id: self_.session_id.clone(),
                                                 message,
                                             },
-                                            message_sender.clone(),
-                                            None,
-                                            Default::default(),
-                                            true,
-                                        )
+                                            AgentRequestContext {
+                                                sender: message_sender.clone(),
+                                                addi_system_prompt: None,
+                                                tool_filter: Default::default(),
+                                                with_history: true,
+                                            },
+                                        ))
                                         .await;
                                     let _ = self_
                                         .handle_agent_message(Arc::new(()), &mut message_receiver)
@@ -116,7 +123,7 @@ impl Channel for CliChannel {
     async fn handle_agent_message(
         &self,
         _: Arc<Self::Client>,
-        receiver: &mut Receiver<ChannelMessage>,
+        receiver: &mut Receiver<crate::Result<ChannelMessage>>,
     ) -> crate::Result<()> {
         let mut state = AgentRespState::Init;
         let mut interval = tokio::time::interval(std::time::Duration::from_millis(500));
@@ -124,12 +131,19 @@ impl Channel for CliChannel {
             tokio::select! {
                 message = receiver.recv() => {
                     if let Some(message) = message {
-                        match  Self::handle_agent_message(&self.ctx, &message, state).await{
-                            Ok(AgentRespState::Final) | Err( _)=> {
-                                return Ok(());
+                        match message{
+                            Ok(message) =>{
+                                match  Self::handle_agent_message(&self.ctx, &message, state).await{
+                                    Ok(AgentRespState::Final) | Err( _)=> {
+                                        return Ok(());
+                                    },
+                                    Ok(next)=>{
+                                        state = next;
+                                    }
+                                }
                             },
-                            Ok(next)=>{
-                                state = next;
+                            Err(err)=> {
+                                warn!("recv error channel message: {err}");
                             }
                         }
                     } else {

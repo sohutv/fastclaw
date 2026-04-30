@@ -15,6 +15,7 @@ use dingtalk_stream::{
     },
 };
 use itertools::Itertools;
+use log::warn;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::ops::Deref;
@@ -65,6 +66,7 @@ impl Channel for DingtalkChannel {
         agent: Arc<dyn Agent>,
     ) -> crate::Result<(Arc<Self>, Arc<Self::Client>, Self::JoinHandle)> {
         let self_ = Arc::new(self);
+        let _ = Agent::start(Arc::clone(&agent)).await?;
         let cb_handler = Arc::new(handle_input_message::DingTalkCallbackHandler {
             channel: Arc::clone(&self_),
             dingtalk_bot_topic: MessageTopic::Callback(dingtalk_stream::TOPIC_ROBOT.to_string()),
@@ -85,21 +87,28 @@ impl Channel for DingtalkChannel {
     async fn handle_agent_message(
         &self,
         dingtalk: Arc<DingTalkStream>,
-        receiver: &mut Receiver<ChannelMessage>,
+        receiver: &mut Receiver<crate::Result<ChannelMessage>>,
     ) -> crate::Result<()> {
         let mut state = AgentRespState::Wait;
         let mut buff = Vec::<String>::new();
         while let Some(message) = receiver.recv().await {
-            match self
-                .handle_agent_message_actual(&dingtalk, &message, state, &mut buff)
-                .await
-            {
-                Ok(AgentRespState::Final) | Err(_) => {
-                    state = AgentRespState::Wait;
-                    buff.clear();
+            match message {
+                Ok(message) => {
+                    match self
+                        .handle_agent_message_actual(&dingtalk, &message, state, &mut buff)
+                        .await
+                    {
+                        Ok(AgentRespState::Final) | Err(_) => {
+                            state = AgentRespState::Wait;
+                            buff.clear();
+                        }
+                        Ok(next) => {
+                            state = next;
+                        }
+                    }
                 }
-                Ok(next) => {
-                    state = next;
+                Err(err) => {
+                    warn!("recv error channel message: {err}");
                 }
             }
         }

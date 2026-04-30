@@ -1,4 +1,4 @@
-use crate::agent::{Agent, AgentRequest, AgentResponse};
+use crate::agent::{Agent, AgentRequest, AgentRequestContext, AgentResponse};
 use crate::config::{Config, Workspace};
 use async_trait::async_trait;
 use derive_more::Deref;
@@ -37,22 +37,33 @@ where
 
     async fn spawn_agent_task(
         &self,
-        req: AgentRequest,
         agent: Arc<dyn Agent>,
+        req: AgentRequest,
         addi_system_prompt: Option<String>,
-    ) -> crate::Result<Receiver<ChannelMessage>> {
+    ) -> crate::Result<Receiver<crate::Result<ChannelMessage>>> {
         let (channel_message_sender, channel_message_receiver) = tokio::sync::mpsc::channel(32);
         tokio::spawn(async move {
+            async fn spawn_agent_task_inner(
+                agent: Arc<dyn Agent>,
+                req: AgentRequest,
+                ctx: AgentRequestContext,
+            ) -> crate::Result<()> {
+                let sender = agent.get_channel_sender().await?;
+                let _ = sender.send((req, ctx)).await?;
+                Ok(())
+            }
             let task_id = req.id.clone();
-            match agent
-                .run(
-                    req,
-                    channel_message_sender.clone(),
-                    addi_system_prompt.as_deref(),
-                    Default::default(),
-                    true,
-                )
-                .await
+            match spawn_agent_task_inner(
+                agent,
+                req,
+                AgentRequestContext {
+                    sender: channel_message_sender,
+                    addi_system_prompt,
+                    tool_filter: Default::default(),
+                    with_history: true,
+                },
+            )
+            .await
             {
                 Ok(_) => {
                     info!("Agent run completed, task_id: {}", task_id);
@@ -68,7 +79,7 @@ where
     async fn handle_agent_message(
         &self,
         client: Arc<Self::Client>,
-        receiver: &mut Receiver<ChannelMessage>,
+        receiver: &mut Receiver<crate::Result<ChannelMessage>>,
     ) -> crate::Result<()>;
 
     /// handle_agent_task
@@ -81,7 +92,7 @@ where
         req: AgentRequest,
     ) -> crate::Result<JoinHandle<crate::Result<()>>> {
         let mut receiver = Arc::clone(&self)
-            .spawn_agent_task(req, agent, addi_system_prompt)
+            .spawn_agent_task(agent, req, addi_system_prompt)
             .await?;
         let self_ = Arc::clone(&self);
         let join_handle = tokio::spawn(async move {

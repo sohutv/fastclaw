@@ -1,11 +1,11 @@
+use crate::ModelName;
 use crate::agent::AgentId;
 use crate::btree_map;
 use crate::config::logger::LogConfig;
 use crate::config::{AgentSettings, Config};
 use crate::model_provider::{ModelProviderName, ModelProviders};
-use crate::ModelName;
 use anyhow::anyhow;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 impl Config {
     pub fn model_provider(&self, name: &ModelProviderName) -> crate::Result<ModelProviders> {
@@ -24,8 +24,8 @@ impl Config {
         &self.default_model
     }
 
-    pub fn init_logger(&mut self) -> crate::Result<&mut Self> {
-        self.log_config.init()?;
+    pub fn init_logger<P: AsRef<Path>>(&mut self, workdir: P) -> crate::Result<&mut Self> {
+        self.log_config.init(workdir)?;
         Ok(self)
     }
 

@@ -53,7 +53,7 @@ impl CmdRunner for Start {
             let config = Box::leak(Box::new(toml::from_str::<Config>(&config_toml)?));
             config
         };
-        let _ = config.init_logger()?;
+        let _ = config.init_logger(&workdir)?;
         let workspace = { Box::leak(Box::new(Workspace::init(workdir).await?)) };
         let history_manager: Arc<dyn HistoryManager> =
             Arc::new(JsonlHistoryManager::new(config, workspace).await?);

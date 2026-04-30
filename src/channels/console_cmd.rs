@@ -36,7 +36,7 @@ impl Console {
         line: &str,
         agent: &Arc<dyn Agent>,
         session_id: &SessionId,
-    ) -> crate::Result<Receiver<ChannelMessage>> {
+    ) -> crate::Result<Receiver<crate::Result<ChannelMessage>>> {
         let line = format!("/ {}", &line[1..]);
         match Console::try_parse_from(line.split(" ")) {
             Ok(command) => match command {
@@ -54,19 +54,19 @@ impl Console {
                     let session_id = session_id.clone();
                     let _ = tokio::spawn(async move {
                         let _ = tx
-                            .send(ChannelMessage {
+                            .send(Ok(ChannelMessage {
                                 session_id: session_id.clone(),
                                 message: AgentResponse::Notify(
                                     "正在执行会话压缩...".to_string().into(),
                                 ),
-                            })
+                            }))
                             .await;
                         let result = agent.session_compact(tx.clone(), &session_id, ratio).await;
                         let _ = tx
-                            .send(ChannelMessage {
+                            .send(Ok(ChannelMessage {
                                 session_id,
                                 message: AgentResponse::HistoryCompact(result),
-                            })
+                            }))
                             .await;
                     });
                     Ok(rx)

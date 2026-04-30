@@ -75,6 +75,7 @@ impl Channel for WechatChannel {
                 .await?,
         );
         let self_ = Arc::new(self);
+        let _ = Agent::start(Arc::clone(&agent)).await?;
         let join_handle = {
             let self_ = Arc::clone(&self_);
             let wechat_client = Arc::clone(&wechat_client);
@@ -113,28 +114,35 @@ impl Channel for WechatChannel {
     async fn handle_agent_message(
         &self,
         wechat: Arc<WechatClient>,
-        receiver: &mut Receiver<ChannelMessage>,
+        receiver: &mut Receiver<crate::Result<ChannelMessage>>,
     ) -> crate::Result<()> {
         let mut state = AgentRespState::Wait;
         let mut buff = Vec::<String>::new();
         let typing_ticket = wechat.get_config().await.ok();
-        while let Some(message) = receiver.recv().await {
-            match self
-                .handle_agent_message_actual(
-                    &wechat,
-                    typing_ticket.as_ref(),
-                    &message,
-                    state,
-                    &mut buff,
-                )
-                .await
-            {
-                Ok(AgentRespState::Final) | Err(_) => {
-                    state = AgentRespState::Wait;
-                    buff.clear();
+        while let Some(message_result) = receiver.recv().await {
+            match message_result {
+                Ok(message) => {
+                    match self
+                        .handle_agent_message_actual(
+                            &wechat,
+                            typing_ticket.as_ref(),
+                            &message,
+                            state,
+                            &mut buff,
+                        )
+                        .await
+                    {
+                        Ok(AgentRespState::Final) | Err(_) => {
+                            state = AgentRespState::Wait;
+                            buff.clear();
+                        }
+                        Ok(next) => {
+                            state = next;
+                        }
+                    }
                 }
-                Ok(next) => {
-                    state = next;
+                Err(err) => {
+                    warn!("recv error channel message: {err}");
                 }
             }
         }

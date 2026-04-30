@@ -37,7 +37,7 @@ pub struct ToolContext {
     pub session_id: SessionId,
     pub agent: Arc<dyn Agent>,
     #[allow(unused)]
-    pub channel_message_sender: Sender<ChannelMessage>,
+    pub channel_message_sender: Sender<crate::Result<ChannelMessage>>,
 }
 
 impl ToolContext {

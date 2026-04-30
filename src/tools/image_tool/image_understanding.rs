@@ -1,8 +1,9 @@
-use crate::agent::{AgentRequest, AgentResponse, ToolFilter};
+use crate::agent::{AgentRequest, AgentRequestContext, AgentResponse, ToolFilter};
 use crate::channels::ChannelMessage;
 use crate::tools::{ToolCallError, ToolCallRsult, ToolContext};
 use crate::type_::Prompt;
 use base64::Engine;
+use log::warn;
 use rig::OneOrMany;
 use rig::completion::{AssistantContent, ToolDefinition};
 use rig::message::{DocumentSourceKind, ImageDetail, ImageMediaType, Message, UserContent};
@@ -62,7 +63,9 @@ impl Tool for ImageUnderstandingTool {
             let agent = Arc::clone(&self.ctx.agent);
             let join_handle = tokio::spawn(async move {
                 agent
-                    .run(
+                    .get_channel_sender()
+                    .await?
+                    .send((
                         AgentRequest {
                             id: uuid::Uuid::new_v4().into(),
                             session_id,
@@ -92,11 +95,13 @@ impl Tool for ImageUnderstandingTool {
                                 })?,
                             },
                         },
-                        tx,
-                        None,
-                        ToolFilter::from(|_| None),
-                        false,
-                    )
+                        AgentRequestContext {
+                            sender: tx,
+                            addi_system_prompt: None,
+                            tool_filter: ToolFilter::from(|_| None),
+                            with_history: false,
+                        },
+                    ))
                     .await?;
                 Ok::<_, anyhow::Error>(())
             });
@@ -104,29 +109,33 @@ impl Tool for ImageUnderstandingTool {
         };
 
         let mut buff = vec![];
-        while let Some(channel_message) = rx.recv().await {
-            let ChannelMessage { message, .. } = channel_message;
+        while let Some(message) = rx.recv().await {
             match message {
-                AgentResponse::MessageStream(message) => match message {
-                    Message::Assistant { content, .. } => {
-                        for content in content.iter() {
-                            match content {
-                                AssistantContent::Text(text) => {
-                                    let text_str = text.to_string();
-                                    if !text_str.is_empty() {
-                                        buff.push(text_str);
+                Ok(ChannelMessage { message, .. }) => match message {
+                    AgentResponse::MessageStream(message) => match message {
+                        Message::Assistant { content, .. } => {
+                            for content in content.iter() {
+                                match content {
+                                    AssistantContent::Text(text) => {
+                                        let text_str = text.to_string();
+                                        if !text_str.is_empty() {
+                                            buff.push(text_str);
+                                        }
                                     }
+                                    _ => {}
                                 }
-                                _ => {}
                             }
                         }
+                        _ => {}
+                    },
+                    AgentResponse::Error(err) => {
+                        return Err(ToolCallError(err));
                     }
-                    _ => {}
+                    _ => continue,
                 },
-                AgentResponse::Error(err) => {
-                    return Err(ToolCallError(err));
+                Err(err) => {
+                    warn!("recv error channel message: {err}");
                 }
-                _ => continue,
             }
         }
         // self.ctx.channel_message_sender.clone()

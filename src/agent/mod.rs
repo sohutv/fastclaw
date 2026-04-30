@@ -23,6 +23,7 @@ mod tool_filter {
     use async_trait::async_trait;
     use derive_more::Deref;
     use rig::tool::ToolDyn;
+    use std::sync::Arc;
 
     pub trait Filter {
         fn filter(&self, tool: Box<dyn ToolDyn>) -> Option<Box<dyn ToolDyn>>;
@@ -38,8 +39,8 @@ mod tool_filter {
         }
     }
 
-    #[derive(Deref)]
-    pub struct ToolFilter(Box<dyn Filter + Send + Sync>);
+    #[derive(Clone, Deref)]
+    pub struct ToolFilter(Arc<dyn Filter + Send + Sync>);
 
     impl Default for ToolFilter {
         fn default() -> Self {
@@ -52,12 +53,12 @@ mod tool_filter {
         F: Filter + Send + Sync + 'static,
     {
         fn from(value: F) -> Self {
-            Self(Box::new(value))
+            Self(Arc::new(value))
         }
     }
 
-    impl  AsRef<Box<dyn Filter+Sync+Send+'static>> for ToolFilter{
-        fn as_ref(&self) -> &Box<dyn Filter + Sync + Send + 'static> {
+    impl AsRef<Arc<dyn Filter + Sync + Send + 'static>> for ToolFilter {
+        fn as_ref(&self) -> &Arc<dyn Filter + Sync + Send + 'static> {
             &self.0
         }
     }
@@ -67,18 +68,13 @@ pub use tool_filter::ToolFilter;
 
 #[async_trait]
 pub trait Agent: Send + Sync {
-    async fn run(
-        &self,
-        request: AgentRequest,
-        channel_message_sender: Sender<ChannelMessage>,
-        addi_system_prompt: Option<&str>,
-        tool_filter: ToolFilter,
-        with_history: bool,
-    ) -> crate::Result<()>;
+    async fn start(self: Arc<Self>) -> crate::Result<()>;
+
+    async fn get_channel_sender(&self) -> crate::Result<Sender<(AgentRequest, AgentRequestContext)>>;
 
     async fn session_compact(
         &self,
-        channel_message_sender: Sender<ChannelMessage>,
+        channel_message_sender: Sender<crate::Result<ChannelMessage>>,
         session_id: &SessionId,
         compact_ratio: f32,
     ) -> HistoryCompactResult;
@@ -128,6 +124,14 @@ pub struct AgentRequest {
     #[deref]
     #[into]
     pub message: Message,
+}
+
+#[derive(Clone)]
+pub struct AgentRequestContext {
+    pub sender: Sender<crate::Result<ChannelMessage>>,
+    pub addi_system_prompt: Option<String>,
+    pub tool_filter: ToolFilter,
+    pub with_history: bool,
 }
 
 #[derive(Debug, Clone, Deref, Display, From, FromStr)]

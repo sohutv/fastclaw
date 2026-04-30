@@ -1,8 +1,9 @@
 use crate::ModelName;
 use crate::agent::session_history::{HistoryMessage, StoreOption};
 use crate::agent::{
-    Agent, AgentContext, AgentId, AgentRequest, AgentResponse, AgentSettings, HistoryCompactResult,
-    HistoryCompactVal, HistoryManager, LlmAgentSupplier, ToolFilter, Workspace,
+    Agent, AgentContext, AgentId, AgentRequest, AgentRequestContext, AgentResponse, AgentSettings,
+    HistoryCompactResult, HistoryCompactVal, HistoryManager, LlmAgentSupplier, ToolFilter,
+    Workspace,
 };
 use crate::channels::{ChannelMessage, SessionId};
 use crate::config::Config;
@@ -13,7 +14,6 @@ use anyhow::anyhow;
 use async_trait::async_trait;
 use itertools::Itertools;
 use log::{info, warn};
-use rig::OneOrMany;
 use rig::agent::{Agent as RigAgent, MultiTurnStreamItem};
 use rig::client::CompletionClient;
 use rig::completion::{AssistantContent, Message, Usage};
@@ -36,6 +36,7 @@ where
     model_name: ModelName,
     pub model_settings: ModelSettings,
     agent_settings: AgentSettings,
+    channel_sender: Arc<tokio::sync::RwLock<Option<Sender<(AgentRequest, AgentRequestContext)>>>>,
 }
 
 #[async_trait]
@@ -102,6 +103,7 @@ where
             model_provider,
             id: agent_id,
             ctx,
+            channel_sender: Default::default(),
         })
     }
 
@@ -118,6 +120,7 @@ where
             model_name: self.model_name.clone(),
             model_provider: self.model_provider.clone(),
             ctx: self.ctx.clone(),
+            channel_sender: Default::default(),
         })
     }
 
@@ -126,7 +129,7 @@ where
         session_id: &SessionId,
         reasoning_effort: ReasoningEffort,
         addi_system_prompt: Option<&str>,
-        channel_message_sender: Sender<ChannelMessage>,
+        channel_message_sender: Sender<crate::Result<ChannelMessage>>,
         tool_filter: TF,
     ) -> crate::Result<RigAgent<C::CompletionModel>>
     where
@@ -183,116 +186,43 @@ where
 }
 
 #[async_trait]
-impl<C, P> super::Agent for LlmAgent<C, P>
+impl<C, P> Agent for LlmAgent<C, P>
 where
     C: CompletionClient + 'static + Send + Sync,
     P: ModelProvider<Client = C> + 'static + Send + Sync,
 {
-    async fn run(
-        &self,
-        request: AgentRequest,
-        channel_message_sender: Sender<ChannelMessage>,
-        addi_system_prompt: Option<&str>,
-        tool_filter: ToolFilter,
-        with_history: bool,
-    ) -> crate::Result<()> {
-        let Some(AgentRequest {
-            ref session_id,
-            mut message,
-            ..
-        }) = self.request_filter(request)
-        else {
+    async fn start(self: Arc<Self>) -> crate::Result<()> {
+        let mut sender = self.channel_sender.write().await;
+        if sender.is_some() {
             return Ok(());
-        };
-        let _ = channel_message_sender
-            .send(ChannelMessage {
-                session_id: session_id.clone(),
-                message: AgentResponse::Start,
-            })
-            .await;
-        let agent = self
-            .create_agent(
-                session_id,
-                self.agent_settings.reasoning_effort,
-                addi_system_prompt,
-                channel_message_sender.clone(),
-                tool_filter,
-            )
-            .await?;
-        let history: Vec<Message> = if with_history {
-            let (history, _) = self
-                .ctx
-                .history_manager
-                .load(session_id, &self.id)
-                .await
-                .unwrap_or_default();
-            history.into_iter().map(|it| it.into()).collect_vec()
-        } else {
-            vec![]
-        };
-        let message = match message {
-            Message::System { .. } => message,
-            Message::User {
-                ref mut content, ..
-            } => {
-                content.push(UserContent::text(format!(
-                    "- **Current DateTime**: {}",
-                    chrono::Local::now().to_rfc3339()
-                )));
-                message
-            }
-            Message::Assistant { .. } => message,
-        };
-        let mut stream = agent.stream_chat(message, history).await;
-        while let Some(result) = stream.next().await {
-            let response = match result {
-                Ok(MultiTurnStreamItem::StreamAssistantItem(content)) => match content {
-                    StreamedAssistantContent::ReasoningDelta { reasoning, .. } => {
-                        Some(AgentResponse::ReasoningStream(
-                            rig::completion::message::Reasoning::new(&reasoning),
-                        ))
-                    }
-                    StreamedAssistantContent::Text(text) => Some(AgentResponse::MessageStream(
-                        Message::assistant(text.text()),
-                    )),
-                    StreamedAssistantContent::ToolCall { tool_call, .. } => {
-                        Some(AgentResponse::ToolCall(tool_call))
-                    }
-                    _ => None,
-                },
-                Ok(MultiTurnStreamItem::StreamUserItem(_)) => None,
-                Ok(MultiTurnStreamItem::FinalResponse(final_resp)) => {
-                    let usage = final_resp.usage();
-                    let append_history = final_resp.history().expect("unexpected empty history!!!");
-                    if with_history {
-                        self.handle_history(
-                            channel_message_sender.clone(),
-                            session_id,
-                            &usage,
-                            append_history,
-                        )
-                        .await;
-                    }
-                    Some(AgentResponse::Final(usage))
-                }
-                Ok(_) => None,
-                Err(err) => Some(AgentResponse::Error(err.to_string())),
-            };
-            if let Some(message) = response {
-                let _ = channel_message_sender
-                    .send(ChannelMessage {
-                        session_id: session_id.clone(),
-                        message,
-                    })
-                    .await;
-            }
         }
+        let (tx, mut rx) = tokio::sync::mpsc::channel(64);
+        let self_ = Arc::clone(&self);
+        tokio::spawn(async move {
+            while let Some((request, ctx)) = rx.recv().await {
+                self_.handle_request(request, ctx).await
+            }
+        });
+        *sender = Some(tx);
         Ok(())
+    }
+
+    async fn get_channel_sender(
+        &self,
+    ) -> crate::Result<Sender<(AgentRequest, AgentRequestContext)>> {
+        let sender = self.channel_sender.read().await;
+        if let Some(sender) = &*sender {
+            Ok(sender.clone())
+        } else {
+            Err(anyhow!(
+                "Agent channel not initialized. Call start() first."
+            ))
+        }
     }
 
     async fn session_compact(
         &self,
-        channel_message_sender: Sender<ChannelMessage>,
+        channel_message_sender: Sender<crate::Result<ChannelMessage>>,
         session_id: &SessionId,
         compact_ratio: f32,
     ) -> HistoryCompactResult {
@@ -450,41 +380,116 @@ where
     C: CompletionClient + 'static + Send + Sync,
     P: ModelProvider<Client = C> + 'static + Send + Sync,
 {
-    fn request_filter(&self, request: AgentRequest) -> Option<AgentRequest> {
-        if let Message::User { content, .. } = request.message {
-            let mut vec = content
-                .into_iter()
-                .filter(|item| match item {
-                    UserContent::Image(_) => self.model_settings.vision,
-                    UserContent::Audio(_) => self.model_settings.audio,
-                    UserContent::Video(_) => self.model_settings.video,
-                    UserContent::Document(_) => self.model_settings.document,
-                    _ => true,
-                })
-                .collect_vec();
-            match vec.len() {
-                0 => None,
-                1 => Some(AgentRequest {
-                    id: Default::default(),
-                    session_id: request.session_id,
-                    message: Message::User {
-                        content: OneOrMany::one(vec.remove(0)),
-                    },
-                }),
-                2.. => OneOrMany::many(vec).ok().map(|content| AgentRequest {
-                    id: Default::default(),
-                    session_id: request.session_id,
-                    message: Message::User { content },
-                }),
+    async fn handle_request(
+        &self,
+        AgentRequest {
+            ref session_id,
+            mut message,
+            ..
+        }: AgentRequest,
+        AgentRequestContext {
+            sender: channel_message_sender,
+            addi_system_prompt,
+            tool_filter,
+            with_history,
+        }: AgentRequestContext,
+    ) {
+        let _ = channel_message_sender
+            .send(Ok(ChannelMessage {
+                session_id: session_id.clone(),
+                message: AgentResponse::Start,
+            }))
+            .await;
+        let agent = match self
+            .create_agent(
+                session_id,
+                self.agent_settings.reasoning_effort,
+                addi_system_prompt.as_deref(),
+                channel_message_sender.clone(),
+                tool_filter,
+            )
+            .await
+        {
+            Ok(agent) => agent,
+            Err(err) => {
+                warn!("create_agent failed, err: {err}");
+                let _ = channel_message_sender.send(Err(err)).await;
+                return;
             }
+        };
+        let history: Vec<Message> = if with_history {
+            let (history, _) = self
+                .ctx
+                .history_manager
+                .load(session_id, &self.id)
+                .await
+                .unwrap_or_default();
+            history.into_iter().map(|it| it.into()).collect_vec()
         } else {
-            Some(request)
+            vec![]
+        };
+        let message = match message {
+            Message::System { .. } => message,
+            Message::User {
+                ref mut content, ..
+            } => {
+                content.push(UserContent::text(format!(
+                    "- **Current DateTime**: {}",
+                    chrono::Local::now().to_rfc3339()
+                )));
+                message
+            }
+            Message::Assistant { .. } => message,
+        };
+        let mut stream = agent.stream_chat(message, history).await;
+        while let Some(result) = stream.next().await {
+            let response = match result {
+                Ok(MultiTurnStreamItem::StreamAssistantItem(content)) => match content {
+                    StreamedAssistantContent::ReasoningDelta { reasoning, .. } => {
+                        Some(AgentResponse::ReasoningStream(
+                            rig::completion::message::Reasoning::new(&reasoning),
+                        ))
+                    }
+                    StreamedAssistantContent::Text(text) => Some(AgentResponse::MessageStream(
+                        Message::assistant(text.text()),
+                    )),
+                    StreamedAssistantContent::ToolCall { tool_call, .. } => {
+                        Some(AgentResponse::ToolCall(tool_call))
+                    }
+                    _ => None,
+                },
+                Ok(MultiTurnStreamItem::StreamUserItem(_)) => None,
+                Ok(MultiTurnStreamItem::FinalResponse(final_resp)) => {
+                    let usage = final_resp.usage();
+                    let append_history = final_resp.history().expect("unexpected empty history!!!");
+                    if with_history {
+                        self.handle_history(
+                            channel_message_sender.clone(),
+                            session_id,
+                            &usage,
+                            append_history,
+                        )
+                        .await;
+                    }
+                    Some(AgentResponse::Final(usage))
+                }
+                Ok(_) => None,
+                Err(err) => Some(AgentResponse::Error(err.to_string())),
+            };
+            if let Some(message) = response {
+                let _ = channel_message_sender
+                    .send(Ok(ChannelMessage {
+                        session_id: session_id.clone(),
+                        message,
+                    }))
+                    .await;
+            }
         }
     }
 
     async fn handle_history(
         &self,
-        channel_message_sender: Sender<ChannelMessage>,
+        channel_message_sender: Sender<crate::Result<ChannelMessage>>,
         session_id: &SessionId,
         usage: &Usage,
         append_history: &[Message],
@@ -520,10 +525,10 @@ where
             >= ((max_tokens as f32 * self.agent_settings.compact_threshold) as u64)
         {
             let _ = channel_message_sender
-                .send(ChannelMessage {
+                .send(Ok(ChannelMessage {
                     session_id: session_id.clone(),
                     message: AgentResponse::Notify("Trigger history compact...".into()),
-                })
+                }))
                 .await;
 
             let result = self
@@ -545,10 +550,10 @@ where
                 }
             }
             let _ = channel_message_sender
-                .send(ChannelMessage {
+                .send(Ok(ChannelMessage {
                     session_id: session_id.clone(),
                     message: AgentResponse::HistoryCompact(result),
-                })
+                }))
                 .await;
         }
     }
