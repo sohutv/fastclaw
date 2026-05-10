@@ -27,6 +27,12 @@ where
         let tasks = TaskTools::fetch_ready_tasks(&self.workspace, session_id).await?;
         let now = chrono::Local::now();
         let (down, up) = (now - Duration::hours(1), now);
+        enum TaskScheduleResult {
+            Exec,
+            Next,
+            Delayed,
+            Finished,
+        }
         for task in tasks {
             // Parse cron expression and check if current time matches
             let time_to_exec = match &task.task_schedule {
@@ -34,9 +40,13 @@ where
                     Ok(schedule) => {
                         let last_exe_at = task.last_exe_at.as_ref().unwrap_or(&task.created_at);
                         if let Some(next) = schedule.after(last_exe_at).next() {
-                            down < next && next < up
+                            match (down < next, next < up) {
+                                (true, true) => TaskScheduleResult::Exec,
+                                (_, false) => TaskScheduleResult::Next,
+                                (false, _) => TaskScheduleResult::Delayed,
+                            }
                         } else {
-                            false
+                            TaskScheduleResult::Finished
                         }
                     }
                     Err(err) => {
@@ -44,7 +54,7 @@ where
                             "Failed to parse cron expression '{}' for task {}: {}",
                             cron, &task.id, err
                         );
-                        false
+                        TaskScheduleResult::Finished
                     }
                 },
                 TaskSchedule::Datetime(dt) => {
@@ -52,31 +62,40 @@ where
                         dt.and_local_timezone(now.timezone()).single(),
                         &task.last_exe_at,
                     ) {
-                        down < dt && dt < up
+                        match (down < dt, dt < up) {
+                            (true, true) => TaskScheduleResult::Exec,
+                            (_, false) => TaskScheduleResult::Next,
+                            (false, _) => TaskScheduleResult::Delayed,
+                        }
                     } else {
-                        false
+                        TaskScheduleResult::Finished
                     }
                 }
             };
-            if time_to_exec {
-                let session_id = SessionId::Anonymous {
-                    val: Anonymous(task.session_id.clone()),
-                    settings: Default::default(),
-                };
-                // To optimize the problem of repeated task execution, the task status will be marked first.
-                if let Err(err) = TaskTools::mark_task_executed(
-                    &self.workspace,
-                    &session_id,
-                    task.id,
-                    &task.task_schedule,
-                )
-                .await
-                {
-                    error!(
-                        "Failed to update last_exe_at for task '{}' (id: {}): {}",
-                        task.name, task.id, err
-                    );
+            let session_id = SessionId::Anonymous {
+                val: Anonymous(task.session_id.clone()),
+                settings: Default::default(),
+            };
+            match time_to_exec {
+                TaskScheduleResult::Exec | TaskScheduleResult::Delayed => {
+                    // To optimize the problem of repeated task execution, the task status will be marked first.
+                    if let Err(err) = TaskTools::mark_task_executed(
+                        &self.workspace,
+                        &session_id,
+                        task.id,
+                        &task.task_schedule,
+                    )
+                    .await
+                    {
+                        error!(
+                            "Failed to update last_exe_at for task '{}' (id: {}): {}",
+                            task.name, task.id, err
+                        );
+                    }
                 }
+                _ => {}
+            }
+            if let TaskScheduleResult::Exec = time_to_exec {
                 match Arc::clone(&self.channel)
                     .submit_agent_task(
                         Arc::clone(&self.client),
