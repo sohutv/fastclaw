@@ -27,6 +27,8 @@ pub struct Config {
     pub dingtalk_config: Option<DingTalkConfig>,
     #[cfg(feature = "channel_wechat_channel")]
     pub wechat_config: Option<WechatConfig>,
+    #[cfg(feature = "channel_streamable_channel")]
+    pub streamable_config: Option<StreamableConfig>,
     #[serde(default)]
     pub heartbeat_config: HeartbeatConfig,
     pub websearch: Option<WebsearchConfigs>,
@@ -50,4 +52,6 @@ impl Default for HeartbeatConfig {
 
 mod workspace;
 use crate::channels::wechat_channel::WechatConfig;
+#[cfg(feature = "channel_streamable_channel")]
+use crate::channels::streamable_channel::StreamableConfig;
 pub use workspace::*;
