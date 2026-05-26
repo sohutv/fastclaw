@@ -18,7 +18,7 @@ toml = { version = "1.0.7" }
 tokio = { version = "1.50", features = ["full"] }
 tokio-stream = { version = "0.1" }
 url = { version = "2.5" }
-reqwest = { version = "0.13", features = ["json", "query"]}
+reqwest = { version = "0.13", features = ["json", "query"] }
 uuid = { version = "1.22", features = ["v4"] }
 base64 = { version = "0.22" }
 itertools = { version = "0.14" }
@@ -26,7 +26,7 @@ derive_more = { version = "2.1", features = ["full"] }
 strum = { version = "0.28", features = ["derive"] }
 chrono = { version = "0.4", features = ["serde"] }
 dateparser = { version = "0.3" }
-rig-core = { version = "0.35" }
+rig-core = { version = "0.35", features = ["rmcp"] }
 async-trait = { version = "0.1" }
 sqlx = { version = "=0.8.6", features = ["runtime-tokio", "sqlite"] }
 sqlite-vec = { version = "0.1.9" }
@@ -49,6 +49,7 @@ hmac = { version = "0.13" }
 ring = { version = "0.17" }
 regex = { version = "1.12" }
 lazy_static = { version = "1.5" }
+rmcp = { version = "1.7", features = ["transport-io", "transport-streamable-http-client-reqwest"] }
 
 [features]
 model_provider_openai_compatible = []
