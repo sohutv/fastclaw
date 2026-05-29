@@ -1,13 +1,11 @@
-// streamable_http channel
-
-use crate::agent::{Agent, AgentRequest};
+// http_completable channel
+use crate::agent::{Agent, AgentRequest, AgentResponse};
 use crate::channels::{Channel, ChannelContext, ChannelMessage, SessionId};
 use crate::config::{Config, Workspace};
 use anyhow::anyhow;
 use async_trait::async_trait;
 use axum::{
     Json, Router,
-    response::sse::{Event, Sse},
     routing::post,
 };
 use log::{error, info};
@@ -15,27 +13,29 @@ use serde::{Deserialize, Serialize};
 use std::net::SocketAddr;
 use std::sync::Arc;
 use tokio::sync::mpsc::Receiver;
-use tokio_stream::wrappers::ReceiverStream;
-use tokio_stream::StreamExt;
 
 use rig::OneOrMany;
 use rig::completion::Message;
-use rig::message::{DocumentSourceKind, Image, ImageDetail, ImageMediaType, UserContent};
+use rig::message::{AssistantContent, DocumentSourceKind, Image, ImageDetail, ImageMediaType, ReasoningContent, UserContent};
 use base64::Engine;
+use crate::type_::Images;
+
+mod handle_input_message;
+mod recv_agent_message;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct StreamableConfig {
+pub struct HttpCompletableConfig {
     pub addr: String,
     pub session_id: SessionId,
 }
 
-pub struct StreamableChannel {
+pub struct HttpCompletableChannel {
     #[allow(dead_code)]
     pub ctx: Arc<ChannelContext>,
-    pub streamable_config: StreamableConfig,
+    pub config: HttpCompletableConfig,
 }
 
-impl StreamableChannel {
+impl HttpCompletableChannel {
     pub async fn new(
         config: &'static Config,
         workspace: &'static Workspace,
@@ -45,27 +45,21 @@ impl StreamableChannel {
                 config: config.clone(),
                 workspace,
             }),
-            streamable_config: config
-                .streamable_config
+            config: config
+                .http_completable_config
                 .clone()
-                .ok_or_else(|| anyhow!("streamable config not found"))?,
+                .ok_or_else(|| anyhow!("http_completable config not found"))?,
         })
     }
 }
 
-#[derive(Debug, Deserialize)]
-pub struct ChatImage {
-    pub data: String,
-    #[allow(dead_code)]
-    pub media_type: Option<String>,
-}
 
-#[derive(Debug, Deserialize)]
-pub struct ChatRequest {
+
+#[derive(Debug, Serialize)]
+pub struct ChatResponse {
     pub message: String,
-    pub session_id: Option<String>,
-    pub addi_system_prompt: Option<String>,
-    pub images: Option<Vec<ChatImage>>,
+    pub reasoning: Option<String>,
+    pub session_id: String,
 }
 
 fn clean_base64(data: String) -> String {
@@ -77,7 +71,7 @@ fn clean_base64(data: String) -> String {
 }
 
 #[async_trait]
-impl Channel for StreamableChannel {
+impl Channel for HttpCompletableChannel {
     type Client = ();
     type JoinHandle = tokio::task::JoinHandle<crate::Result<()>>;
 
@@ -93,8 +87,8 @@ impl Channel for StreamableChannel {
             let agent_clone = Arc::clone(&agent);
 
             Router::new().route(
-                "/chat",
-                post(move |Json(body): Json<ChatRequest>| {
+                "/channel/chat/completable",
+                post(move |Json(body): Json<super::type_::HttpMessage>| {
                     let self_ = Arc::clone(&self_clone);
                     let agent = Arc::clone(&agent_clone);
                     async move {
@@ -194,7 +188,7 @@ impl Channel for StreamableChannel {
                                 val: sid.into(),
                                 settings: Default::default(),
                             },
-                            None => self_.streamable_config.session_id.clone(),
+                            None => self_.config.session_id.clone(),
                         };
                         let req = AgentRequest {
                             id: Default::default(),
@@ -203,22 +197,50 @@ impl Channel for StreamableChannel {
                         };
 
                         match self_.spawn_agent_task(agent, req, body.addi_system_prompt).await {
-                            Ok(receiver) => {
-                                let stream = ReceiverStream::new(receiver).map(|msg_res| {
-                                    let event = match msg_res {
-                                        Ok(msg) => match serde_json::to_string(&msg.message) {
-                                            Ok(json) => Event::default().data(json),
-                                            Err(e) => Event::default()
-                                                .event("error")
-                                                .data(e.to_string()),
-                                        },
-                                        Err(e) => Event::default()
-                                            .event("error")
-                                            .data(e.to_string()),
-                                    };
-                                    Ok::<_, std::convert::Infallible>(event)
-                                });
-                                Ok(Sse::new(stream))
+                            Ok(mut receiver) => {
+                                let mut accumulated_message = String::new();
+                                let mut accumulated_reasoning = String::new();
+                                let mut final_session_id = String::new();
+
+                                while let Some(msg_res) = receiver.recv().await {
+                                    match msg_res {
+                                        Ok(msg) => {
+                                            final_session_id = msg.session_id.to_string();
+                                            match msg.message {
+                                                AgentResponse::MessageStream(Message::Assistant { content, .. }) => {
+                                                    for part in content {
+                                                        if let AssistantContent::Text(text) = part {
+                                                            accumulated_message.push_str(&text.to_string());
+                                                        }
+                                                    }
+                                                }
+                                                AgentResponse::ReasoningStream(reasoning) => {
+                                                    for part in reasoning.content {
+                                                        if let ReasoningContent::Text { text, .. } = part {
+                                                            accumulated_reasoning.push_str(&text);
+                                                        }
+                                                    }
+                                                }
+                                                AgentResponse::Error(err) => {
+                                                    error!("Agent returned error in stream: {}", err);
+                                                    return Err(axum::http::StatusCode::INTERNAL_SERVER_ERROR);
+                                                }
+                                                _ => {}
+                                            }
+                                        }
+                                        Err(e) => {
+                                            error!("Error in agent task stream: {}", e);
+                                            return Err(axum::http::StatusCode::INTERNAL_SERVER_ERROR);
+                                        }
+                                    }
+                                }
+
+                                let response = ChatResponse {
+                                    message: accumulated_message,
+                                    reasoning: if accumulated_reasoning.is_empty() { None } else { Some(accumulated_reasoning) },
+                                    session_id: final_session_id,
+                                };
+                                Ok(Json(response))
                             }
                             Err(e) => {
                                 error!("Failed to spawn agent task: {}", e);
@@ -230,14 +252,14 @@ impl Channel for StreamableChannel {
             )
         };
 
-        let addr: SocketAddr = self_.streamable_config.addr.parse()?;
+        let addr: SocketAddr = self_.config.addr.parse()?;
         let listener = tokio::net::TcpListener::bind(&addr).await?;
-        info!("Streamable HTTP channel listening on {}", addr);
+        info!("HttpCompletable HTTP channel listening on {}", addr);
 
         let join_handle = tokio::spawn(async move {
             if let Err(err) = axum::serve(listener, app).await {
-                error!("Streamable channel server error: {}", err);
-                return Err(anyhow!("Streamable server error: {}", err));
+                error!("HttpCompletable channel server error: {}", err);
+                return Err(anyhow!("HttpCompletable server error: {}", err));
             }
             Ok(())
         });
@@ -253,10 +275,10 @@ impl Channel for StreamableChannel {
         while let Some(msg_result) = receiver.recv().await {
             match msg_result {
                 Ok(msg) => {
-                    info!("StreamableChannel background task message: {:?}", msg.message);
+                    info!("HttpCompletableChannel background task message: {:?}", msg.message);
                 }
                 Err(err) => {
-                    error!("StreamableChannel background task error: {}", err);
+                    error!("HttpCompletableChannel background task error: {}", err);
                 }
             }
         }
@@ -264,6 +286,6 @@ impl Channel for StreamableChannel {
     }
 
     fn allow_session_ids(&self) -> crate::Result<Vec<&SessionId>> {
-        Ok(vec![&self.streamable_config.session_id])
+        Ok(vec![&self.config.session_id])
     }
 }

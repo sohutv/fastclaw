@@ -1,6 +1,6 @@
 use crate::agent::{Agent, HistoryManager, JsonlHistoryManager, LlmAgentSupplier};
 use crate::channels;
-use crate::channels::Channel;
+use crate::channels::{http_channel, Channel};
 use crate::cli::CmdRunner;
 use crate::config::{Config, Workspace};
 use crate::heartbeat::Heartbeat;
@@ -33,9 +33,12 @@ pub enum ChannelType {
     #[cfg(feature = "channel_wechat_channel")]
     /// start with wechat
     Wechat,
-    #[cfg(feature = "channel_streamable_channel")]
-    /// start with streamable http
-    Streamable,
+    #[cfg(feature = "channel_http_streamable_channel")]
+    /// start with http_streamable
+    HttpStreamable,
+    #[cfg(feature = "channel_http_completable_channel")]
+    /// start with http_completable
+    HttpCompletable,
 }
 
 impl CmdRunner for Start {
@@ -127,11 +130,26 @@ impl CmdRunner for Start {
                     .await?;
                     join_handles.push(JoinHandle::Tokio(join_handle));
                 }
-                #[cfg(feature = "channel_streamable_channel")]
-                ChannelType::Streamable => {
-                    info!("Starting Streamable channel");
+                #[cfg(feature = "channel_http_streamable_channel")]
+                ChannelType::HttpStreamable => {
+                    info!("Starting HttpStreamable channel");
                     let channel =
-                        channels::streamable_channel::StreamableChannel::new(config, workspace).await?;
+                        http_channel::streamable::HttpStreamableChannel::new(config, workspace).await?;
+                    let join_handle = start_channel(
+                        config,
+                        workspace,
+                        channel,
+                        Arc::clone(&main_agent),
+                        Arc::clone(&heartbeat_agent),
+                    )
+                    .await?;
+                    join_handles.push(JoinHandle::Tokio(join_handle));
+                }
+                #[cfg(feature = "channel_http_completable_channel")]
+                ChannelType::HttpCompletable => {
+                    info!("Starting HttpCompletable channel");
+                    let channel =
+                        http_channel::completable::HttpCompletableChannel::new(config, workspace).await?;
                     let join_handle = start_channel(
                         config,
                         workspace,

@@ -26,7 +26,7 @@ pub struct Base64(String);
 impl Base64 {
     pub fn data(&self) -> String {
         lazy_static::lazy_static! {
-            static ref HEADER_REGEX: regex::Regex = regex::Regex::from_str(r#"^data:image/(\w+);base64,"#).unwrap();
+            static ref HEADER_REGEX: regex::Regex = regex::Regex::from_str(r#"^data:(\w+)/(\w+);base64,"#).unwrap();
         };
         let str = self.deref();
         let data = HEADER_REGEX.replace(str, "");
@@ -63,3 +63,6 @@ pub use image::*;
 
 mod prompt;
 pub use prompt::*;
+
+mod base64res;
+pub use base64res::*;

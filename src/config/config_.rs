@@ -45,8 +45,10 @@ impl Default for Config {
             log_config: LogConfig::default(),
             dingtalk_config: None,
             wechat_config: None,
-            #[cfg(feature = "channel_streamable_channel")]
-            streamable_config: None,
+            #[cfg(feature = "channel_http_streamable_channel")]
+            http_streamable_config: None,
+            #[cfg(feature = "channel_http_completable_channel")]
+            http_completable_config: None,
             heartbeat_config: Default::default(),
             websearch: None,
             imagegen: None,

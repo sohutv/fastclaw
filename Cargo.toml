@@ -56,7 +56,8 @@ model_provider_openai_compatible = []
 channel_cli_channel = ["rustyline"]
 channel_dingtalk_channel = ["dingtalk-stream-sdk"]
 channel_wechat_channel = ["wechat-sdk-rs"]
-channel_streamable_channel = ["dep:axum"]
+channel_http_streamable_channel = ["dep:axum"]
+channel_http_completable_channel = ["dep:axum"]
 cloud_storage_tool = []
 volcengine = ["ve-tos-rust-sdk"]
 
@@ -65,7 +66,8 @@ default = [
     "channel_cli_channel",
     "channel_dingtalk_channel",
     "channel_wechat_channel",
-    "channel_streamable_channel",
+    "channel_http_streamable_channel",
+    "channel_http_completable_channel",
     "volcengine",
     "cloud_storage_tool",
 ]

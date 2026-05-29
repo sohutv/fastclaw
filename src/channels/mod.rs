@@ -17,8 +17,11 @@ pub mod dingtalk_channel;
 #[cfg(feature = "channel_wechat_channel")]
 pub mod wechat_channel;
 
-#[cfg(feature = "channel_streamable_channel")]
-pub mod streamable_channel;
+#[cfg(any(
+    feature = "channel_http_completable_channel",
+    feature = "channel_http_streamable_channel"
+))]
+pub mod http_channel;
 
 pub mod a2a_channel;
 mod session_id;
