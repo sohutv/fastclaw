@@ -9,6 +9,9 @@ mod shell_tool;
 mod task_tool;
 pub use task_tool::{TaskSchedule, TaskTools};
 
+pub mod mcp_tool;
+pub use mcp_tool::McpToolConfig;
+
 mod time_tool;
 
 mod websearch_tool;
@@ -96,6 +99,7 @@ impl FunctionTool {
             } else {
                 vec![]
             },
+            mcp_tool::get_mcp_tools(),
         ];
         Ok(tools.into_iter().flatten().collect())
     }

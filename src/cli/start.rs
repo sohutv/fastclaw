@@ -54,6 +54,7 @@ impl CmdRunner for Start {
             config
         };
         let _ = config.init_logger(&workdir)?;
+        crate::tools::mcp_tool::init_mcp_tools(config).await?;
         let workspace = { Box::leak(Box::new(Workspace::init(workdir).await?)) };
         let history_manager: Arc<dyn HistoryManager> =
             Arc::new(JsonlHistoryManager::new(config, workspace).await?);

@@ -49,7 +49,7 @@ hmac = { version = "0.13" }
 ring = { version = "0.17" }
 regex = { version = "1.12" }
 lazy_static = { version = "1.5" }
-rmcp = { version = "1.7", features = ["transport-io", "transport-streamable-http-client-reqwest"] }
+rmcp = { version = "1.7", features = ["transport-io", "transport-child-process", "transport-streamable-http-client-reqwest", "which-command"] }
 
 [features]
 model_provider_openai_compatible = []

@@ -51,6 +51,7 @@ impl Default for Config {
             image_enhancer: None,
             storage: None,
             embedding: None,
+            mcp_tools: None,
         }
     }
 }
