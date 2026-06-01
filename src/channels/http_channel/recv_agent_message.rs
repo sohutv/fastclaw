@@ -1,17 +1,20 @@
+use crate::agent::{AgentResponse, HistoryCompactResult, Notify};
+use crate::channels::http_channel::type_::HttpReqMessage;
+use crate::channels::http_channel::{Client, HttpChannel};
+use crate::channels::http_channel::{HttpRespMessage, Payload, UserId};
+use crate::channels::{
+    AgentRespState, AgentRespType, ChannelContext, ChannelMessage, SessionId,
+    create_robot_messages_for_agent,
+};
 use anyhow::anyhow;
 use rig::completion::{AssistantContent, Message};
 use rig::message::{ReasoningContent, ToolCall, ToolFunction};
-use wechat_sdk::client::message::TypingTicket;
-use wechat_sdk::client::WechatClient;
-use crate::agent::{AgentResponse, HistoryCompactResult, Notify};
-use crate::channels::{create_robot_messages_for_agent, session_id, AgentRespState, AgentRespType, ChannelMessage};
-use crate::channels::http_channel::completable::HttpCompletableChannel;
-use crate::channels::wechat_channel::WechatChannel;
 
-impl HttpCompletableChannel {
+impl HttpChannel {
     pub(super) async fn handle_agent_message_actual(
         &self,
-        client: &(),
+        client: &Client,
+        inbound_message: Option<&HttpReqMessage>,
         ChannelMessage {
             session_id,
             message,
@@ -29,13 +32,14 @@ impl HttpCompletableChannel {
                 }
             }
             AgentResponse::ToolCall(ToolCall {
-                                        function: ToolFunction { name, arguments },
-                                        ..
-                                    }) => {
+                function: ToolFunction { name, arguments },
+                ..
+            }) => {
                 if let Ok(Some(robot_message)) = create_robot_messages_for_agent(
                     session_id,
                     &self.ctx,
                     AgentRespType::ToolCall,
+                    inbound_message,
                     format!(
                         r#"
 ### 工具调用: {name}...
@@ -46,11 +50,11 @@ impl HttpCompletableChannel {
                         serde_json::to_string_pretty(arguments)
                             .unwrap_or_else(|err| format!("Error serializing arguments: {}", err))
                     ),
-                    WechatChannel::create_robot_messages,
+                    HttpChannel::create_resp_messages,
                 )
-                    .await
+                .await
                 {
-                    let _ = robot_message.send(&wechat).await;
+                    let _ = robot_message.send(client, inbound_message).await;
                 }
                 Ok(curr_state)
             }
@@ -87,12 +91,13 @@ impl HttpCompletableChannel {
                                 session_id,
                                 &self.ctx,
                                 AgentRespType::Reasoning,
+                                inbound_message,
                                 content,
-                                WechatChannel::create_robot_messages,
+                                HttpChannel::create_resp_messages,
                             )
-                                .await?
+                            .await?
                             {
-                                let _ = robot_message.send(&wechat).await;
+                                let _ = robot_message.send(client, inbound_message).await;
                             }
                         }
                     }
@@ -136,12 +141,13 @@ impl HttpCompletableChannel {
                     session_id,
                     &self.ctx,
                     AgentRespType::Content,
+                    inbound_message,
                     content,
-                    WechatChannel::create_robot_messages,
+                    HttpChannel::create_resp_messages,
                 )
-                    .await?
+                .await?
                 {
-                    let _ = robot_message.send(&wechat).await;
+                    let _ = robot_message.send(client, inbound_message).await;
                 }
                 Ok(AgentRespState::Final)
             }
@@ -150,12 +156,13 @@ impl HttpCompletableChannel {
                     session_id,
                     &self.ctx,
                     AgentRespType::Error,
+                    inbound_message,
                     format!("Agent error: {}", error),
-                    WechatChannel::create_robot_messages,
+                    HttpChannel::create_resp_messages,
                 )
-                    .await?
+                .await?
                 {
-                    let _ = robot_message.send(&wechat).await;
+                    let _ = robot_message.send(client, inbound_message).await;
                 }
                 Ok(AgentRespState::Final)
             }
@@ -166,12 +173,13 @@ impl HttpCompletableChannel {
                             session_id,
                             &self.ctx,
                             AgentRespType::Notify,
-                            text,
-                            WechatChannel::create_robot_messages,
+                            inbound_message,
+                            text.clone(),
+                            HttpChannel::create_resp_messages,
                         )
-                            .await?
+                        .await?
                         {
-                            let _ = robot_message.send(&wechat).await;
+                            let _ = robot_message.send(client, inbound_message).await;
                         }
                     }
                     Notify::Markdown { content, .. } => {
@@ -179,12 +187,13 @@ impl HttpCompletableChannel {
                             session_id,
                             &self.ctx,
                             AgentRespType::Notify,
+                            inbound_message,
                             format!("{content}",),
-                            WechatChannel::create_robot_messages,
+                            HttpChannel::create_resp_messages,
                         )
-                            .await?
+                        .await?
                         {
-                            let _ = robot_message.send(&wechat).await;
+                            let _ = robot_message.send(client, inbound_message).await;
                         }
                     }
                 }
@@ -197,7 +206,8 @@ impl HttpCompletableChannel {
                             session_id,
                             &self.ctx,
                             AgentRespType::HistoryCompactOk,
-                            &format!(
+                            inbound_message,
+                            format!(
                                 r#"
 ### 压缩上下文完成
 - 压缩前 **{}** Tokens
@@ -208,11 +218,11 @@ impl HttpCompletableChannel {
                                 val.current().total_tokens,
                                 val.compact_ratio(),
                             ),
-                            WechatChannel::create_robot_messages,
+                            HttpChannel::create_resp_messages,
                         )
-                            .await?
+                        .await?
                         {
-                            let _ = robot_message.send(&wechat).await;
+                            let _ = robot_message.send(client, inbound_message).await;
                         }
                     }
                     HistoryCompactResult::Err(err_msg) => {
@@ -220,12 +230,13 @@ impl HttpCompletableChannel {
                             session_id,
                             &self.ctx,
                             AgentRespType::HistoryCompactErr,
-                            err_msg,
-                            WechatChannel::create_robot_messages,
+                            inbound_message,
+                            err_msg.clone(),
+                            HttpChannel::create_resp_messages,
                         )
-                            .await?
+                        .await?
                         {
-                            let _ = robot_message.send(&wechat).await;
+                            let _ = robot_message.send(client, inbound_message).await;
                         }
                     }
                     HistoryCompactResult::Ignore(msg) => {
@@ -233,22 +244,56 @@ impl HttpCompletableChannel {
                             session_id,
                             &self.ctx,
                             AgentRespType::HistoryCompactIgnore,
+                            inbound_message,
                             format!(
                                 r#"
 ### 压缩请求被忽略
 {msg}
                             "#
                             ),
-                            WechatChannel::create_robot_messages,
+                            HttpChannel::create_resp_messages,
                         )
-                            .await?
+                        .await?
                         {
-                            let _ = robot_message.send(&wechat).await;
+                            let _ = robot_message.send(client, inbound_message).await;
                         }
                     }
                 }
 
                 Ok(curr_state)
+            }
+        }
+    }
+}
+
+impl HttpChannel {
+    fn create_resp_messages<Content: Into<Payload>>(
+        session_id: &SessionId,
+        _: &ChannelContext,
+        inbound: Option<&HttpReqMessage>,
+        content: Content,
+    ) -> crate::Result<HttpRespMessage> {
+        let message = match &session_id {
+            SessionId::Master { .. } | SessionId::Anonymous { .. } => HttpRespMessage {
+                message_id: inbound.map(|it| it.message_id.clone()).unwrap_or_default(),
+                user_id: UserId::from(session_id),
+                payloads: vec![content.into()],
+            },
+            SessionId::Group { .. } => {
+                unreachable!("send robot message to group is not supported by http")
+            }
+        };
+        Ok(message)
+    }
+}
+
+impl HttpRespMessage {
+    async fn send(self, client: &Client, inbound: Option<&HttpReqMessage>) {
+        if let Some(inbound) = inbound {
+            if let Some(transports) = client.lock().await.get(&inbound.user_id) {
+                for transport in transports {
+                    let _ = transport.tx.send(self.clone()).await;
+                }
             }
         }
     }

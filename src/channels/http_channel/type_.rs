@@ -1,13 +1,21 @@
+use crate::channels::SessionId;
 use crate::type_::Base64Res;
 use anyhow::anyhow;
 use derive_more::{Deref, Display};
 use image::{DynamicImage, ImageFormat};
-use serde::{Deserialize, Deserializer, Serialize, Serializer};
+use serde::{Deserialize, Serialize};
 use std::ops::Deref;
 use uuid::Uuid;
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
-pub struct HttpMessage {
+pub struct HttpReqMessage {
+    pub message_id: MessageId,
+    pub user_id: UserId,
+    pub payloads: Vec<Payload>,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct HttpRespMessage {
     pub message_id: MessageId,
     pub user_id: UserId,
     pub payloads: Vec<Payload>,
@@ -29,9 +37,17 @@ impl From<Uuid> for MessageId {
     }
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize, Display, Eq, PartialEq, Ord, PartialOrd, Hash)]
+#[derive(
+    Debug, Clone, Deserialize, Serialize, Display, Eq, PartialEq, Ord, PartialOrd, Hash, Deref,
+)]
 #[display("{_0}")]
 pub struct UserId(String);
+
+impl From<&SessionId> for UserId {
+    fn from(value: &SessionId) -> Self {
+        UserId(value.to_string())
+    }
+}
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(tag = "type")]
@@ -40,12 +56,18 @@ pub enum Payload {
     Image(Base64Image),
 }
 
+impl From<String> for Payload {
+    fn from(value: String) -> Self {
+        Payload::Text(value)
+    }
+}
+
 #[derive(Debug, Clone, Deref, Serialize, Deserialize)]
 pub struct Base64Image(Base64Res);
 
 impl Base64Image {
     pub fn format(&self) -> crate::Result<ImageFormat> {
-        ImageFormat::from_mime_type(self.mime)
+        ImageFormat::from_mime_type(&self.mime)
             .ok_or(anyhow!(format!("unexpected mime: {}", self.mime)))
     }
 

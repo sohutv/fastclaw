@@ -6,13 +6,14 @@ use anyhow::anyhow;
 use rig::completion::{AssistantContent, Message};
 use rig::message::{ReasoningContent, ToolCall, ToolFunction};
 use wechat_sdk::client::WechatClient;
-use wechat_sdk::client::message::TypingTicket;
+use wechat_sdk::client::message::{TypingTicket, WechatMessage};
 
 impl WechatChannel {
     pub(super) async fn handle_agent_message_actual(
         &self,
         wechat: &WechatClient,
         typing_ticket: Option<&TypingTicket>,
+        inbound_message: Option<&WechatMessage>,
         ChannelMessage {
             session_id,
             message,
@@ -40,6 +41,7 @@ impl WechatChannel {
                     session_id,
                     &self.ctx,
                     AgentRespType::ToolCall,
+                    inbound_message,
                     format!(
                         r#"
 ### 工具调用: {name}...
@@ -91,6 +93,7 @@ impl WechatChannel {
                                 session_id,
                                 &self.ctx,
                                 AgentRespType::Reasoning,
+                                inbound_message,
                                 content,
                                 WechatChannel::create_robot_messages,
                             )
@@ -140,6 +143,7 @@ impl WechatChannel {
                     session_id,
                     &self.ctx,
                     AgentRespType::Content,
+                    inbound_message,
                     content,
                     WechatChannel::create_robot_messages,
                 )
@@ -154,6 +158,7 @@ impl WechatChannel {
                     session_id,
                     &self.ctx,
                     AgentRespType::Error,
+                    inbound_message,
                     format!("Agent error: {}", error),
                     WechatChannel::create_robot_messages,
                 )
@@ -170,6 +175,7 @@ impl WechatChannel {
                             session_id,
                             &self.ctx,
                             AgentRespType::Notify,
+                            inbound_message,
                             text,
                             WechatChannel::create_robot_messages,
                         )
@@ -183,6 +189,7 @@ impl WechatChannel {
                             session_id,
                             &self.ctx,
                             AgentRespType::Notify,
+                            inbound_message,
                             format!("{content}",),
                             WechatChannel::create_robot_messages,
                         )
@@ -201,6 +208,7 @@ impl WechatChannel {
                             session_id,
                             &self.ctx,
                             AgentRespType::HistoryCompactOk,
+                            inbound_message,
                             &format!(
                                 r#"
 ### 压缩上下文完成
@@ -224,6 +232,7 @@ impl WechatChannel {
                             session_id,
                             &self.ctx,
                             AgentRespType::HistoryCompactErr,
+                            inbound_message,
                             err_msg,
                             WechatChannel::create_robot_messages,
                         )
@@ -237,6 +246,7 @@ impl WechatChannel {
                             session_id,
                             &self.ctx,
                             AgentRespType::HistoryCompactIgnore,
+                            inbound_message,
                             format!(
                                 r#"
 ### 压缩请求被忽略

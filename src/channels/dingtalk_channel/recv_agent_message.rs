@@ -4,6 +4,7 @@ use crate::channels::dingtalk_channel::DingtalkChannel;
 use crate::channels::{ChannelContext, ChannelMessage, SessionId};
 use anyhow::anyhow;
 use dingtalk_stream::DingTalkStream;
+use dingtalk_stream::frames::down_message::callback_message::MessageData;
 use dingtalk_stream::frames::up_message::{MessageContentMarkdown, MessageContentText};
 use rig::completion::{AssistantContent, Message};
 use rig::message::{ReasoningContent, ToolCall, ToolFunction};
@@ -13,6 +14,7 @@ impl DingtalkChannel {
     pub(super) async fn handle_agent_message_actual(
         &self,
         dingtalk: &DingTalkStream,
+        inbound_message: Option<&MessageData>,
         ChannelMessage {
             session_id,
             message,
@@ -28,6 +30,7 @@ impl DingtalkChannel {
                         session_id,
                         &self.ctx,
                         AgentRespType::Start,
+                        inbound_message,
                         MessageContentText::from("正在思考..."),
                         DingtalkChannel::create_robot_messages,
                     )
@@ -48,6 +51,7 @@ impl DingtalkChannel {
                     session_id,
                     &self.ctx,
                     AgentRespType::ToolCall,
+                    inbound_message,
                     MessageContentMarkdown::from((
                         format!("工具调用: {name}..."),
                         format!(
@@ -107,6 +111,7 @@ impl DingtalkChannel {
                                 session_id,
                                 &self.ctx,
                                 AgentRespType::Reasoning,
+                                inbound_message,
                                 content,
                                 DingtalkChannel::create_robot_messages,
                             )
@@ -159,6 +164,7 @@ impl DingtalkChannel {
                     session_id,
                     &self.ctx,
                     AgentRespType::Content,
+                    inbound_message,
                     content,
                     DingtalkChannel::create_robot_messages,
                 )
@@ -173,6 +179,7 @@ impl DingtalkChannel {
                     session_id,
                     &self.ctx,
                     AgentRespType::Error,
+                    inbound_message,
                     MessageContentText::from(format!("Agent error: {}", error)),
                     DingtalkChannel::create_robot_messages,
                 )
@@ -189,6 +196,7 @@ impl DingtalkChannel {
                             session_id,
                             &self.ctx,
                             AgentRespType::Notify,
+                            inbound_message,
                             MessageContentText::from(text),
                             DingtalkChannel::create_robot_messages,
                         )
@@ -202,6 +210,7 @@ impl DingtalkChannel {
                             session_id,
                             &self.ctx,
                             AgentRespType::Notify,
+                            inbound_message,
                             MessageContentMarkdown::from((title, &format!("{content}",))),
                             DingtalkChannel::create_robot_messages,
                         )
@@ -220,6 +229,7 @@ impl DingtalkChannel {
                             session_id,
                             &self.ctx,
                             AgentRespType::HistoryCompactOk,
+                            inbound_message,
                             MessageContentMarkdown::from((
                                 "压缩上下文完成",
                                 &format!(
@@ -246,6 +256,7 @@ impl DingtalkChannel {
                             session_id,
                             &self.ctx,
                             AgentRespType::HistoryCompactErr,
+                            inbound_message,
                             MessageContentText::from(err_msg),
                             DingtalkChannel::create_robot_messages,
                         )
@@ -259,6 +270,7 @@ impl DingtalkChannel {
                             session_id,
                             &self.ctx,
                             AgentRespType::HistoryCompactIgnore,
+                            inbound_message,
                             MessageContentMarkdown::from((
                                 "压缩请求被忽略",
                                 format!(
@@ -287,11 +299,17 @@ async fn create_robot_messages_for_agent<Content, F, OutboundMsg>(
     session_id: &SessionId,
     ctx: &ChannelContext,
     resp_type: AgentRespType,
+    inbound_message: Option<&MessageData>,
     content: Content,
     outbound_msg_creator: F,
 ) -> crate::Result<Option<OutboundMsg>>
 where
-    F: FnOnce(&SessionId, &ChannelContext, Content) -> crate::Result<OutboundMsg>,
+    F: FnOnce(
+        &SessionId,
+        &ChannelContext,
+        Option<&MessageData>,
+        Content,
+    ) -> crate::Result<OutboundMsg>,
 {
     let Some(session_id) = ctx
         .config
@@ -305,6 +323,7 @@ where
         &session_id,
         ctx,
         resp_type,
+        inbound_message,
         content,
         outbound_msg_creator,
     )
