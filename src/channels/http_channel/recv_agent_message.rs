@@ -1,19 +1,21 @@
-use super::super::{AgentRespState, AgentRespType};
 use crate::agent::{AgentResponse, HistoryCompactResult, Notify};
-use crate::channels::wechat_channel::WechatChannel;
-use crate::channels::{ChannelMessage, create_robot_messages_for_agent};
+use crate::channels::http_channel::type_::HttpReqMessage;
+use crate::channels::http_channel::{Client, HttpChannel};
+use crate::channels::http_channel::{HttpRespMessage, Payload, UserId};
+use crate::channels::{
+    AgentRespState, AgentRespType, ChannelContext, ChannelMessage, SessionId,
+    create_robot_messages_for_agent,
+};
 use anyhow::anyhow;
 use rig::completion::{AssistantContent, Message};
 use rig::message::{ReasoningContent, ToolCall, ToolFunction};
-use wechat_sdk::client::WechatClient;
-use wechat_sdk::client::message::{TypingTicket, WechatMessage};
+use std::mem;
 
-impl WechatChannel {
+impl HttpChannel {
     pub(super) async fn handle_agent_message_actual(
         &self,
-        wechat: &WechatClient,
-        typing_ticket: Option<&TypingTicket>,
-        inbound_message: Option<&WechatMessage>,
+        client: &Client,
+        inbound_message: Option<&HttpReqMessage>,
         ChannelMessage {
             session_id,
             message,
@@ -25,9 +27,6 @@ impl WechatChannel {
             AgentResponse::Start => {
                 if let AgentRespState::Wait = curr_state {
                     buff.clear();
-                    if let Some(typing_ticket) = typing_ticket {
-                        let _ = wechat.send_typing(&typing_ticket).await;
-                    }
                     Ok(AgentRespState::Start)
                 } else {
                     Err(anyhow!("AgentRespState must be Init when starting"))
@@ -43,20 +42,19 @@ impl WechatChannel {
                     AgentRespType::ToolCall,
                     inbound_message,
                     format!(
-                        r#"
-### 工具调用: {name}...
+                        r#"### 工具调用: {name}...
 ```
 {}
 ```json
-                                            "#,
+"#,
                         serde_json::to_string_pretty(arguments)
                             .unwrap_or_else(|err| format!("Error serializing arguments: {}", err))
                     ),
-                    WechatChannel::create_robot_messages,
+                    HttpChannel::create_resp_messages,
                 )
                 .await
                 {
-                    let _ = robot_message.send(&wechat).await;
+                    let _ = robot_message.send(client, inbound_message).await;
                 }
                 Ok(curr_state)
             }
@@ -83,10 +81,9 @@ impl WechatChannel {
                                 let content = buff.join("");
                                 buff.clear();
                                 format!(
-                                    r#"
-### 我的想法..
+                                    r#"### 我的想法..
 {content}
-                                    "#
+"#
                                 )
                             };
                             if let Some(robot_message) = create_robot_messages_for_agent(
@@ -95,11 +92,11 @@ impl WechatChannel {
                                 AgentRespType::Reasoning,
                                 inbound_message,
                                 content,
-                                WechatChannel::create_robot_messages,
+                                HttpChannel::create_resp_messages,
                             )
                             .await?
                             {
-                                let _ = robot_message.send(&wechat).await;
+                                let _ = robot_message.send(client, inbound_message).await;
                             }
                         }
                     }
@@ -126,11 +123,9 @@ impl WechatChannel {
             AgentResponse::Final(usage) => {
                 let content = {
                     let content = format!(
-                        r#"
-{}
-
+                        r#"{}
 *<<Tokens:{}↑{}↓{}>>*
-                    "#,
+"#,
                         buff.join(""),
                         usage.total_tokens,
                         usage.input_tokens,
@@ -145,11 +140,11 @@ impl WechatChannel {
                     AgentRespType::Content,
                     inbound_message,
                     content,
-                    WechatChannel::create_robot_messages,
+                    HttpChannel::create_resp_messages,
                 )
                 .await?
                 {
-                    let _ = robot_message.send(&wechat).await;
+                    let _ = robot_message.send(client, inbound_message).await;
                 }
                 Ok(AgentRespState::Final)
             }
@@ -160,11 +155,11 @@ impl WechatChannel {
                     AgentRespType::Error,
                     inbound_message,
                     format!("Agent error: {}", error),
-                    WechatChannel::create_robot_messages,
+                    HttpChannel::create_resp_messages,
                 )
                 .await?
                 {
-                    let _ = robot_message.send(&wechat).await;
+                    let _ = robot_message.send(client, inbound_message).await;
                 }
                 Ok(AgentRespState::Final)
             }
@@ -176,12 +171,12 @@ impl WechatChannel {
                             &self.ctx,
                             AgentRespType::Notify,
                             inbound_message,
-                            text,
-                            WechatChannel::create_robot_messages,
+                            text.clone(),
+                            HttpChannel::create_resp_messages,
                         )
                         .await?
                         {
-                            let _ = robot_message.send(&wechat).await;
+                            let _ = robot_message.send(client, inbound_message).await;
                         }
                     }
                     Notify::Markdown { content, .. } => {
@@ -191,11 +186,11 @@ impl WechatChannel {
                             AgentRespType::Notify,
                             inbound_message,
                             format!("{content}",),
-                            WechatChannel::create_robot_messages,
+                            HttpChannel::create_resp_messages,
                         )
                         .await?
                         {
-                            let _ = robot_message.send(&wechat).await;
+                            let _ = robot_message.send(client, inbound_message).await;
                         }
                     }
                 }
@@ -209,22 +204,21 @@ impl WechatChannel {
                             &self.ctx,
                             AgentRespType::HistoryCompactOk,
                             inbound_message,
-                            &format!(
-                                r#"
-### 压缩上下文完成
+                            format!(
+                                r#"### 压缩上下文完成
 - 压缩前 **{}** Tokens
 - 压缩后 **{}** Tokens
 - 压缩率 **{:.2}%**
-                    "#,
+"#,
                                 val.before().total_tokens,
                                 val.current().total_tokens,
                                 val.compact_ratio(),
                             ),
-                            WechatChannel::create_robot_messages,
+                            HttpChannel::create_resp_messages,
                         )
                         .await?
                         {
-                            let _ = robot_message.send(&wechat).await;
+                            let _ = robot_message.send(client, inbound_message).await;
                         }
                     }
                     HistoryCompactResult::Err(err_msg) => {
@@ -233,12 +227,12 @@ impl WechatChannel {
                             &self.ctx,
                             AgentRespType::HistoryCompactErr,
                             inbound_message,
-                            err_msg,
-                            WechatChannel::create_robot_messages,
+                            err_msg.clone(),
+                            HttpChannel::create_resp_messages,
                         )
                         .await?
                         {
-                            let _ = robot_message.send(&wechat).await;
+                            let _ = robot_message.send(client, inbound_message).await;
                         }
                     }
                     HistoryCompactResult::Ignore(msg) => {
@@ -248,21 +242,62 @@ impl WechatChannel {
                             AgentRespType::HistoryCompactIgnore,
                             inbound_message,
                             format!(
-                                r#"
-### 压缩请求被忽略
+                                r#"### 压缩请求被忽略
 {msg}
-                            "#
+"#
                             ),
-                            WechatChannel::create_robot_messages,
+                            HttpChannel::create_resp_messages,
                         )
                         .await?
                         {
-                            let _ = robot_message.send(&wechat).await;
+                            let _ = robot_message.send(client, inbound_message).await;
                         }
                     }
                 }
 
                 Ok(curr_state)
+            }
+        }
+    }
+}
+
+impl HttpChannel {
+    fn create_resp_messages<Content: Into<Payload>>(
+        session_id: &SessionId,
+        _: &ChannelContext,
+        inbound: Option<&HttpReqMessage>,
+        content: Content,
+    ) -> crate::Result<HttpRespMessage> {
+        let message = match &session_id {
+            SessionId::Master { .. } | SessionId::Anonymous { .. } => HttpRespMessage {
+                message_id: inbound.map(|it| it.message_id.clone()).unwrap_or_default(),
+                user_id: UserId::from(session_id),
+                payloads: vec![content.into()],
+            },
+            SessionId::Group { .. } => {
+                unreachable!("send robot message to group is not supported by http")
+            }
+        };
+        Ok(message)
+    }
+}
+
+impl HttpRespMessage {
+    async fn send(self, client: &Client, inbound: Option<&HttpReqMessage>) {
+        if let Some(inbound) = inbound {
+            let mut client = client.lock().await;
+            if let Some(transports) = client.get_mut(&inbound.user_id) {
+                let mut updated = vec![];
+                for transport in mem::replace(transports, vec![]) {
+                    {
+                        let sender = &transport.sender;
+                        if !sender.is_closed() {
+                            let _ = sender.send(self.clone()).await;
+                            updated.push(transport);
+                        }
+                    }
+                }
+                *transports = updated;
             }
         }
     }

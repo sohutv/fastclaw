@@ -47,7 +47,7 @@ impl dingtalk_stream::handlers::CallbackHandler for DingTalkCallbackHandler {
         CallbackMessage { data, .. }: &CallbackMessage,
         cb_msg_sender: Option<Sender<WebhookMessage>>,
     ) -> Result<HandlerResp, HandlerError> {
-        let Some(MessageData {
+        let Some(inbound_message@ MessageData {
             msg_id,
             payload: Some(payload),
             sender,
@@ -219,8 +219,9 @@ impl dingtalk_stream::handlers::CallbackHandler for DingTalkCallbackHandler {
                 Ok(mut receiver) => {
                     let channel = Arc::clone(&self.channel);
                     let client = Arc::clone(&dingtalk_client);
+                    let inbound_message = inbound_message.clone();
                     let _ = tokio::spawn(async move {
-                        let _ = channel.handle_agent_message(client, &mut receiver).await;
+                        let _ = channel.handle_agent_message(client, Some(inbound_message), &mut receiver).await;
                     });
                     return Ok(HandlerResp::Text("cmd submitted".to_string()));
                 }
@@ -280,6 +281,7 @@ impl dingtalk_stream::handlers::CallbackHandler for DingTalkCallbackHandler {
                 Arc::clone(&dingtalk_client),
                 Arc::clone(&self.agent),
                 Some(addi_system_prompt),
+                Some(inbound_message.clone()),
                 AgentRequest {
                     id: msg_id.to_string().into(),
                     session_id,
@@ -350,6 +352,7 @@ impl LifecycleListener for DingTalkCallbackHandler {
             let Ok(message) = DingtalkChannel::create_robot_messages(
                 &session_id,
                 &self.channel.ctx,
+                None,
                 MessageContentMarkdown::from((
                     "Connected",
                     format!(
@@ -382,6 +385,7 @@ Connected to dingtalk websocket
                     let Ok(message) = DingtalkChannel::create_robot_messages(
                         &session_id,
                         &self.channel.ctx,
+                        None,
                         MessageContentText::from("disconnected from dingtalk websocket"),
                     ) else {
                         return;
@@ -392,6 +396,7 @@ Connected to dingtalk websocket
                     let Ok(message) = DingtalkChannel::create_robot_messages(
                         &session_id,
                         &self.channel.ctx,
+                        None,
                         MessageContentMarkdown::from((
                             "Disconnected",
                             format!(

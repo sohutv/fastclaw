@@ -1,6 +1,5 @@
 use crate::ModelName;
 use crate::agent::{AgentId, AgentSettings};
-use crate::channels::dingtalk_channel::DingTalkConfig;
 use crate::config::logger::LogConfig;
 use crate::model_provider::{ModelProviderName, ModelProviders};
 use serde::{Deserialize, Serialize};
@@ -24,9 +23,11 @@ pub struct Config {
     pub model_providers: BTreeMap<ModelProviderName, ModelProviders>,
     pub log_config: LogConfig,
     #[cfg(feature = "channel_dingtalk_channel")]
-    pub dingtalk_config: Option<DingTalkConfig>,
+    pub dingtalk_config: Option<crate::channels::dingtalk_channel::DingTalkConfig>,
     #[cfg(feature = "channel_wechat_channel")]
-    pub wechat_config: Option<WechatConfig>,
+    pub wechat_config: Option<crate::channels::wechat_channel::WechatConfig>,
+    #[cfg(feature = "channel_http_channel")]
+    pub http_config: Option<crate::channels::http_channel::HttpChannelConfig>,
     #[serde(default)]
     pub heartbeat_config: HeartbeatConfig,
     pub websearch: Option<WebsearchConfigs>,
@@ -51,5 +52,4 @@ impl Default for HeartbeatConfig {
 }
 
 mod workspace;
-use crate::channels::wechat_channel::WechatConfig;
 pub use workspace::*;

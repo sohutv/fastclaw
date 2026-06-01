@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::mpsc::Receiver;
-use wechat_sdk::client::message::MessageItems;
+use wechat_sdk::client::message::{MessageItems, WechatMessage};
 use wechat_sdk::client::{WechatClient, WechatConfig as WechatInnerConfig};
 
 mod config;
@@ -46,6 +46,7 @@ impl WechatChannel {
 #[async_trait]
 impl Channel for WechatChannel {
     type Client = WechatClient;
+    type InboundMessage = WechatMessage;
     type JoinHandle = tokio::task::JoinHandle<crate::Result<()>>;
 
     async fn start(
@@ -114,6 +115,7 @@ impl Channel for WechatChannel {
     async fn handle_agent_message(
         &self,
         wechat: Arc<WechatClient>,
+        inbound_message: Option<Self::InboundMessage>,
         receiver: &mut Receiver<crate::Result<ChannelMessage>>,
     ) -> crate::Result<()> {
         let mut state = AgentRespState::Wait;
@@ -126,6 +128,7 @@ impl Channel for WechatChannel {
                         .handle_agent_message_actual(
                             &wechat,
                             typing_ticket.as_ref(),
+                            inbound_message.as_ref(),
                             &message,
                             state,
                             &mut buff,
@@ -161,6 +164,7 @@ impl WechatChannel {
     fn create_robot_messages<Content: Into<MessageItems>>(
         session_id: &SessionId,
         _: &ChannelContext,
+        _: Option<&WechatMessage>,
         content: Content,
     ) -> crate::Result<WechatRobotMessage> {
         let message = match &session_id {

@@ -33,6 +33,9 @@ pub enum ChannelType {
     #[cfg(feature = "channel_wechat_channel")]
     /// start with wechat
     Wechat,
+    #[cfg(feature = "channel_http_channel")]
+    /// start with http_channel
+    Http,
 }
 
 impl CmdRunner for Start {
@@ -115,6 +118,22 @@ impl CmdRunner for Start {
                 ChannelType::Wechat => {
                     let channel =
                         channels::wechat_channel::WechatChannel::new(config, workspace).await?;
+                    let join_handle = start_channel(
+                        config,
+                        workspace,
+                        channel,
+                        Arc::clone(&main_agent),
+                        Arc::clone(&heartbeat_agent),
+                    )
+                    .await?;
+                    join_handles.push(JoinHandle::Tokio(join_handle));
+                }
+                #[cfg(feature = "channel_http_channel")]
+                ChannelType::Http => {
+                    info!("Starting HttpStreamable channel");
+                    let channel =
+                        channels::http_channel::HttpChannel::new(config, workspace)
+                            .await?;
                     let join_handle = start_channel(
                         config,
                         workspace,

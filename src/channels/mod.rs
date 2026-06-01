@@ -17,6 +17,9 @@ pub mod dingtalk_channel;
 #[cfg(feature = "channel_wechat_channel")]
 pub mod wechat_channel;
 
+#[cfg(feature = "channel_http_channel")]
+pub mod http_channel;
+
 pub mod a2a_channel;
 mod session_id;
 pub use session_id::*;
@@ -27,6 +30,8 @@ where
     Self: 'static,
 {
     type Client: Sync + Send;
+
+    type InboundMessage: Sync + Send;
 
     type JoinHandle: Sync + Send;
 
@@ -79,6 +84,7 @@ where
     async fn handle_agent_message(
         &self,
         client: Arc<Self::Client>,
+        inbound_message: Option<Self::InboundMessage>,
         receiver: &mut Receiver<crate::Result<ChannelMessage>>,
     ) -> crate::Result<()>;
 
@@ -89,14 +95,15 @@ where
         client: Arc<Self::Client>,
         agent: Arc<dyn Agent>,
         addi_system_prompt: Option<String>,
+        inbound_message: Option<Self::InboundMessage>,
         req: AgentRequest,
     ) -> crate::Result<JoinHandle<crate::Result<()>>> {
         let mut receiver = Arc::clone(&self)
-            .spawn_agent_task(agent, req, addi_system_prompt)
+            .spawn_agent_task(agent, req.clone(), addi_system_prompt)
             .await?;
         let self_ = Arc::clone(&self);
         let join_handle = tokio::spawn(async move {
-            let _ = self_.handle_agent_message(client, &mut receiver).await?;
+            let _ = self_.handle_agent_message(client, inbound_message, &mut receiver).await?;
             Ok(())
         });
         Ok(join_handle)
@@ -143,15 +150,16 @@ enum AgentRespState {
     Final,
 }
 
-async fn create_robot_messages_for_agent<Content, F, OutboundMsg>(
+async fn create_robot_messages_for_agent<Content, F, InboundMsg, OutboundMsg>(
     session_id: &SessionId,
     ctx: &ChannelContext,
     resp_type: AgentRespType,
+    inbound_msg: Option<&InboundMsg>,
     content: Content,
     outbound_msg_creator: F,
 ) -> crate::Result<Option<OutboundMsg>>
 where
-    F: FnOnce(&SessionId, &ChannelContext, Content) -> crate::Result<OutboundMsg>,
+    F: FnOnce(&SessionId, &ChannelContext, Option<&InboundMsg>, Content) -> crate::Result<OutboundMsg>,
 {
     let SessionSettings {
         show_start,
@@ -208,6 +216,6 @@ where
             };
         }
     }
-    let msg = outbound_msg_creator(&session_id, ctx, content)?;
+    let msg = outbound_msg_creator(&session_id, ctx, inbound_msg, content)?;
     Ok(Some(msg))
 }

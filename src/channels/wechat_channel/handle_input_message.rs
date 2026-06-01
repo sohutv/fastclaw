@@ -25,7 +25,7 @@ impl WechatChannel {
         // wechat bot 不支持群聊, 所以不会出现未授权的会话
         let WechatMessage {
             message_id, items, ..
-        } = data;
+        } = &data;
         let (cmd, mut user_contents) = {
             let mut cmd = None;
             let mut user_contents = vec![];
@@ -182,7 +182,9 @@ impl WechatChannel {
                     let self_ = Arc::clone(&self);
                     let client = Arc::clone(&wechat_client);
                     let _ = tokio::spawn(async move {
-                        let _ = self_.handle_agent_message(client, &mut receiver).await;
+                        let _ = self_
+                            .handle_agent_message(client, Some(data), &mut receiver)
+                            .await;
                     });
                     return Ok(());
                 }
@@ -208,6 +210,7 @@ impl WechatChannel {
                 Arc::clone(&wechat_client),
                 Arc::clone(&agent),
                 None,
+                Some(data),
                 AgentRequest {
                     id: msg_id.to_string().into(),
                     session_id: self.wechat_config.session_id.clone(),
