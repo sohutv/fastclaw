@@ -101,7 +101,7 @@ where
                         Arc::clone(&self.client),
                         Arc::clone(&self.agent),
                         None,
-                        None, // todo zwh cannot be None
+                        None,
                         AgentRequest {
                             id: Default::default(),
                             session_id: session_id.clone(),

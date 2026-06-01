@@ -1,4 +1,3 @@
-// http_completable channel
 use crate::agent::Agent;
 use crate::channels::{AgentRespState, Channel, ChannelContext, ChannelMessage, SessionId};
 use crate::config::{Config, Workspace};
@@ -6,19 +5,26 @@ use anyhow::anyhow;
 use async_trait::async_trait;
 use axum::extract::{Query, State};
 use axum::http::StatusCode;
+use axum::response::sse::Event;
+use axum::response::{IntoResponse, Sse};
 use axum::routing::get;
 use axum::{Json, Router, routing::post};
 use log::{error, info, warn};
 use std::collections::HashMap;
+use std::convert::Infallible;
 use std::net::SocketAddr;
 use std::ops::Deref;
-use std::sync::Arc;
+use std::sync::{Arc, Weak};
 use tokio::sync::mpsc::{Receiver, Sender};
 
 use crate::channels::http_channel::{HttpReqMessage, HttpRespMessage, UserId};
 use derive_more::Deref;
+use futures_core::Stream;
 use itertools::Itertools;
+use serde::{Deserialize, Serialize};
 use tokio::sync::Mutex;
+use tokio_stream::StreamExt;
+use tokio_stream::wrappers::ReceiverStream;
 
 mod type_;
 pub use type_::*;
@@ -27,6 +33,7 @@ mod handle_input_message;
 mod recv_agent_message;
 
 mod config;
+use crate::hash_map;
 pub use config::*;
 
 pub struct HttpChannel {
@@ -62,29 +69,36 @@ impl HttpChannel {
             config: config
                 .http_config
                 .clone()
-                .ok_or_else(|| anyhow!("http_completable config not found"))?,
+                .ok_or_else(|| anyhow!("http_config not found"))?,
         })
     }
 }
 
+#[derive(Deref, Clone)]
 pub struct Transport {
     #[allow(unused)]
     id: uuid::Uuid,
     #[allow(unused)]
     session_id: SessionId,
-    tx: Sender<HttpRespMessage>,
-    rx: Receiver<HttpRespMessage>,
+    #[deref]
+    sender: Weak<Sender<HttpRespMessage>>,
 }
 
 impl Transport {
-    fn new(session_id: &SessionId) -> Self {
-        let (tx, rx) = tokio::sync::mpsc::channel(64);
-        Self {
-            id: uuid::Uuid::new_v4(),
-            session_id: session_id.clone(),
-            tx,
+    fn new(session_id: &SessionId) -> (Self, Receiver<HttpRespMessage>) {
+        let (sender, rx) = tokio::sync::mpsc::channel(64);
+        (
+            Self {
+                id: uuid::Uuid::new_v4(),
+                session_id: session_id.clone(),
+                sender: {
+                    let sender = Arc::new(sender);
+                    let weak_sender = Arc::downgrade(&sender);
+                    weak_sender
+                },
+            },
             rx,
-        }
+        )
     }
 }
 
@@ -92,7 +106,7 @@ impl Transport {
 pub struct Client(Mutex<HashMap<UserId, Vec<Transport>>>);
 #[derive(Clone)]
 struct AppState {
-    self_: Arc<HttpChannel>,
+    http_channel: Arc<HttpChannel>,
     agent: Arc<dyn Agent>,
     client: Arc<Client>,
 }
@@ -113,10 +127,10 @@ impl Channel for HttpChannel {
         let app = {
             Router::new()
                 .route("/channel/chat/send", post(Self::handle_chat_send))
-                .route("/channel/chat/recv", get(Self::handle_chat_recv))
+                .route("/channel/chat/recv/sse", get(Self::handle_chat_recv_sse))
         }
         .with_state(AppState {
-            self_: self_.clone(),
+            http_channel: self_.clone(),
             agent,
             client: Arc::clone(&client),
         });
@@ -179,55 +193,106 @@ impl Channel for HttpChannel {
     }
 }
 
+#[derive(Clone, Serialize, Deserialize)]
+struct ChatRecvSSEParams {
+    user_id: UserId,
+}
+
+#[derive(Clone, Serialize, Deserialize)]
+struct ChatSendParams {
+    sse: bool,
+}
+
 impl HttpChannel {
-    async fn handle_chat_recv(
-        State(AppState { self_, client, .. }): State<AppState>,
-        Query(user_id): Query<UserId>,
-    ) -> Result<(), StatusCode> {
-        let session_id = SessionId::try_from((user_id.deref(), &self_.config)).map_err(|err| {
-            warn!("handle_chat_recv failed, err: {err}");
-            StatusCode::FORBIDDEN
-        })?;
-        {
+    async fn handle_chat_recv_sse(
+        State(AppState {
+            http_channel,
+            client,
+            ..
+        }): State<AppState>,
+        Query(ChatRecvSSEParams { user_id }): Query<ChatRecvSSEParams>,
+    ) -> Result<Sse<impl Stream<Item = Result<Event, Infallible>>>, StatusCode> {
+        let session_id =
+            SessionId::try_from((user_id.deref(), &http_channel.config)).map_err(|err| {
+                warn!("handle_chat_recv failed, err: {err}");
+                StatusCode::FORBIDDEN
+            })?;
+        let rx = {
             let mut transports = client.lock().await;
             let vec = transports.entry(user_id.clone()).or_insert(vec![]);
-            vec.push(Transport::new(&session_id));
-        }
-        todo!("send sse data");
-        Ok(())
+            let (transport, rx) = Transport::new(&session_id);
+            vec.push(transport);
+            rx
+        };
+        let stream = ReceiverStream::new(rx).map(|it| {
+            Ok::<_, Infallible>(match serde_json::to_string(&it) {
+                Ok(json) => Event::default().data(json),
+                Err(err) => Event::default().event("error").data(err.to_string()),
+            })
+        });
+        Ok(Sse::new(stream))
     }
 
     async fn handle_chat_send(
         State(AppState {
-            self_,
+            http_channel,
             agent,
             client,
         }): State<AppState>,
+        Query(ChatSendParams { sse }): Query<ChatSendParams>,
         Json(data): Json<HttpReqMessage>,
-    ) -> Result<(), StatusCode> {
-        let user_id = &data.user_id;
-        let session_id = SessionId::try_from((user_id.deref(), &self_.config)).map_err(|err| {
-            warn!("handle_chat_recv failed, err: {err}");
-            StatusCode::FORBIDDEN
-        })?;
-        let senders = {
-            let transports = client.lock().await;
-            let transport = transports.get(user_id).ok_or_else(|| {
-                warn!("handle_chat_recv failed, transport not found, user_id: {user_id}");
+    ) -> Result<axum::response::Response, StatusCode> {
+        let session_id = SessionId::try_from((data.user_id.deref(), &http_channel.config))
+            .map_err(|err| {
+                warn!("handle_chat_recv failed, err: {err}");
                 StatusCode::FORBIDDEN
             })?;
-            Arc::new(transport.iter().map(|it| it.tx.clone()).collect_vec())
-        };
-        match self_
-            .handle_input_message(agent, session_id, client, data)
-            .await
-        {
-            Ok(()) => {
-                todo!()
+        if sse {
+            let transports_exist = {
+                let transports = client.lock().await;
+                transports.get(&data.user_id).is_some()
+            };
+            if !transports_exist {
+                warn!(
+                    "handle_chat_recv failed, transports not exist, user_id: {}",
+                    &data.user_id
+                );
+                return Err(StatusCode::FORBIDDEN);
             }
-            Err(err) => {
-                todo!()
+            let _ = http_channel
+                .handle_input_message(agent, session_id, client, data.clone())
+                .await
+                .map_err(|err| {
+                    warn!("handle_chat_send failed, err: {err}");
+                    StatusCode::INTERNAL_SERVER_ERROR
+                })?;
+            Ok(StatusCode::OK.into_response())
+        } else {
+            let (transport, mut rx) = Transport::new(&session_id);
+            let client = Arc::new(Client(Mutex::new(hash_map!(
+                data.user_id.clone() => vec![transport],
+            ))));
+            let _ = http_channel
+                .handle_input_message(agent, session_id, client, data.clone())
+                .await
+                .map_err(|err| {
+                    warn!("handle_chat_send failed, err: {err}");
+                    StatusCode::INTERNAL_SERVER_ERROR
+                })?;
+            let mut payloads = vec![];
+            while let Some(HttpRespMessage {
+                payloads: mut array,
+                ..
+            }) = rx.recv().await
+            {
+                payloads.append(&mut array);
             }
-        };
+            Ok(Json(HttpRespMessage {
+                message_id: data.message_id,
+                user_id: data.user_id,
+                payloads,
+            })
+            .into_response())
+        }
     }
 }

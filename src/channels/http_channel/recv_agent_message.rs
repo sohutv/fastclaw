@@ -9,6 +9,7 @@ use crate::channels::{
 use anyhow::anyhow;
 use rig::completion::{AssistantContent, Message};
 use rig::message::{ReasoningContent, ToolCall, ToolFunction};
+use std::mem;
 
 impl HttpChannel {
     pub(super) async fn handle_agent_message_actual(
@@ -290,10 +291,20 @@ impl HttpChannel {
 impl HttpRespMessage {
     async fn send(self, client: &Client, inbound: Option<&HttpReqMessage>) {
         if let Some(inbound) = inbound {
-            if let Some(transports) = client.lock().await.get(&inbound.user_id) {
-                for transport in transports {
-                    let _ = transport.tx.send(self.clone()).await;
+            let mut client = client.lock().await;
+            if let Some(transports) = client.get_mut(&inbound.user_id) {
+                let mut updated = vec![];
+                for transport in mem::replace(transports, vec![]) {
+                    {
+                        if let Some(sender) = transport.sender.upgrade() {
+                            if !sender.is_closed() {
+                                let _ = sender.send(self.clone()).await;
+                                updated.push(transport);
+                            }
+                        }
+                    }
                 }
+                *transports = updated;
             }
         }
     }
