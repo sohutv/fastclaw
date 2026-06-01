@@ -41,6 +41,11 @@ impl IdentityPrompt {
 
     async fn build_actual(&self, workspace_dir: &Path) -> crate::Result<String> {
         let mut vec = Vec::with_capacity(IDENTITY_MD_FILES.len());
+        #[cfg(feature = "lumen_fox")]
+        {
+            let lumen_fox_md = include_str!("../../../resources/lumen_fox.md");
+            vec.push((None,  lumen_fox_md.to_string()));
+        }
         for (filename, default_content) in IDENTITY_MD_FILES {
             let filepath = workspace_dir.join(filename);
             let content = if !filepath.exists() {
@@ -52,17 +57,16 @@ impl IdentityPrompt {
                     err
                 })?
             };
-            vec.push((filename, content))
+            vec.push((Some(*filename), content))
         }
         let prompt = vec
             .into_iter()
             .map(|(filename, content)| {
                 format!(
-                    r#"
-### {}
+                    r#"### {}
 {}
 "#,
-                    filename, content
+                    filename.unwrap_or_default(), content
                 )
             })
             .join("\n");

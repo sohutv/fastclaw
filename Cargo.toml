@@ -36,7 +36,7 @@ bytemuck = { version = "1.25" }
 cron = { version = "0.16" }
 mime = { version = "0.3" }
 futures-core = { version = "0.3" }
-futures-util = {version = "0.3"}
+futures-util = { version = "0.3" }
 ve-tos-rust-sdk = { version = "2.9.16", optional = true }
 md5 = { version = "0.8" }
 rustyline = { version = "18.0", optional = true }
@@ -60,6 +60,12 @@ channel_wechat_channel = ["wechat-sdk-rs"]
 channel_http_channel = ["dep:axum"]
 cloud_storage_tool = []
 volcengine = ["ve-tos-rust-sdk"]
+
+lumen_fox = [
+    "model_provider_openai_compatible",
+    "channel_http_channel",
+    "volcengine",
+]
 
 default = [
     "model_provider_openai_compatible",
