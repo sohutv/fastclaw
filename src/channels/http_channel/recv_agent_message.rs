@@ -42,12 +42,11 @@ impl HttpChannel {
                     AgentRespType::ToolCall,
                     inbound_message,
                     format!(
-                        r#"
-### 工具调用: {name}...
+                        r#"### 工具调用: {name}...
 ```
 {}
 ```json
-                                            "#,
+"#,
                         serde_json::to_string_pretty(arguments)
                             .unwrap_or_else(|err| format!("Error serializing arguments: {}", err))
                     ),
@@ -82,10 +81,9 @@ impl HttpChannel {
                                 let content = buff.join("");
                                 buff.clear();
                                 format!(
-                                    r#"
-### 我的想法..
+                                    r#"### 我的想法..
 {content}
-                                    "#
+"#
                                 )
                             };
                             if let Some(robot_message) = create_robot_messages_for_agent(
@@ -125,11 +123,9 @@ impl HttpChannel {
             AgentResponse::Final(usage) => {
                 let content = {
                     let content = format!(
-                        r#"
-{}
-
+                        r#"{}
 *<<Tokens:{}↑{}↓{}>>*
-                    "#,
+"#,
                         buff.join(""),
                         usage.total_tokens,
                         usage.input_tokens,
@@ -209,12 +205,11 @@ impl HttpChannel {
                             AgentRespType::HistoryCompactOk,
                             inbound_message,
                             format!(
-                                r#"
-### 压缩上下文完成
+                                r#"### 压缩上下文完成
 - 压缩前 **{}** Tokens
 - 压缩后 **{}** Tokens
 - 压缩率 **{:.2}%**
-                    "#,
+"#,
                                 val.before().total_tokens,
                                 val.current().total_tokens,
                                 val.compact_ratio(),
@@ -247,10 +242,9 @@ impl HttpChannel {
                             AgentRespType::HistoryCompactIgnore,
                             inbound_message,
                             format!(
-                                r#"
-### 压缩请求被忽略
+                                r#"### 压缩请求被忽略
 {msg}
-                            "#
+"#
                             ),
                             HttpChannel::create_resp_messages,
                         )
@@ -296,11 +290,10 @@ impl HttpRespMessage {
                 let mut updated = vec![];
                 for transport in mem::replace(transports, vec![]) {
                     {
-                        if let Some(sender) = transport.sender.upgrade() {
-                            if !sender.is_closed() {
-                                let _ = sender.send(self.clone()).await;
-                                updated.push(transport);
-                            }
+                        let sender = &transport.sender;
+                        if !sender.is_closed() {
+                            let _ = sender.send(self.clone()).await;
+                            updated.push(transport);
                         }
                     }
                 }

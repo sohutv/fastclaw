@@ -3,7 +3,7 @@ use crate::channels::{AgentRespState, Channel, ChannelContext, ChannelMessage, S
 use crate::config::{Config, Workspace};
 use anyhow::anyhow;
 use async_trait::async_trait;
-use axum::extract::{Query, State};
+use axum::extract::{Path, Query, State};
 use axum::http::StatusCode;
 use axum::response::sse::Event;
 use axum::response::{IntoResponse, Sse};
@@ -14,16 +14,15 @@ use std::collections::HashMap;
 use std::convert::Infallible;
 use std::net::SocketAddr;
 use std::ops::Deref;
-use std::sync::{Arc, Weak};
+use std::sync::Arc;
 use tokio::sync::mpsc::{Receiver, Sender};
 
 use crate::channels::http_channel::{HttpReqMessage, HttpRespMessage, UserId};
 use derive_more::Deref;
-use futures_core::Stream;
+use futures_util::stream;
 use itertools::Itertools;
 use serde::{Deserialize, Serialize};
 use tokio::sync::Mutex;
-use tokio_stream::StreamExt;
 use tokio_stream::wrappers::ReceiverStream;
 
 mod type_;
@@ -81,7 +80,7 @@ pub struct Transport {
     #[allow(unused)]
     session_id: SessionId,
     #[deref]
-    sender: Weak<Sender<HttpRespMessage>>,
+    sender: Sender<HttpRespMessage>,
 }
 
 impl Transport {
@@ -91,11 +90,7 @@ impl Transport {
             Self {
                 id: uuid::Uuid::new_v4(),
                 session_id: session_id.clone(),
-                sender: {
-                    let sender = Arc::new(sender);
-                    let weak_sender = Arc::downgrade(&sender);
-                    weak_sender
-                },
+                sender,
             },
             rx,
         )
@@ -126,8 +121,8 @@ impl Channel for HttpChannel {
         let client = Default::default();
         let app = {
             Router::new()
-                .route("/channel/chat/send", post(Self::handle_chat_send))
-                .route("/channel/chat/recv/sse", get(Self::handle_chat_recv_sse))
+                .route("/channel/chat/:resp_type", post(Self::handle_chat))
+                .route("/channel/chat/keepalive", get(Self::handle_chat_keepalive))
         }
         .with_state(AppState {
             http_channel: self_.clone(),
@@ -198,20 +193,28 @@ struct ChatRecvSSEParams {
     user_id: UserId,
 }
 
-#[derive(Clone, Serialize, Deserialize)]
-struct ChatSendParams {
-    sse: bool,
+#[derive(Clone, Serialize, Deserialize, Default)]
+#[serde(default)]
+struct ChatSendParams {}
+#[derive(Clone, Copy, Serialize, Deserialize)]
+enum ChatRespType {
+    #[serde(rename = "completable")]
+    Completable,
+    #[serde(rename = "sse")]
+    SSE,
+    #[serde(rename = "streamable")]
+    Streamable,
 }
 
 impl HttpChannel {
-    async fn handle_chat_recv_sse(
+    async fn handle_chat_keepalive(
         State(AppState {
             http_channel,
             client,
             ..
         }): State<AppState>,
         Query(ChatRecvSSEParams { user_id }): Query<ChatRecvSSEParams>,
-    ) -> Result<Sse<impl Stream<Item = Result<Event, Infallible>>>, StatusCode> {
+    ) -> Result<axum::response::Response, StatusCode> {
         let session_id =
             SessionId::try_from((user_id.deref(), &http_channel.config)).map_err(|err| {
                 warn!("handle_chat_recv failed, err: {err}");
@@ -224,22 +227,32 @@ impl HttpChannel {
             vec.push(transport);
             rx
         };
-        let stream = ReceiverStream::new(rx).map(|it| {
-            Ok::<_, Infallible>(match serde_json::to_string(&it) {
-                Ok(json) => Event::default().data(json),
-                Err(err) => Event::default().event("error").data(err.to_string()),
-            })
-        });
-        Ok(Sse::new(stream))
+        use futures_util::stream::StreamExt as _;
+        let stream = ReceiverStream::new(rx)
+            .flat_map(|it| stream::iter(it.payloads))
+            .map(|it| {
+                Ok::<_, Infallible>(match serde_json::to_string(&it) {
+                    Ok(json) => Event::default().data(json),
+                    Err(err) => Event::default().event("error").data(err.to_string()),
+                })
+            });
+        let sse = Sse::new(stream).keep_alive(Default::default());
+        let mut response = sse.into_response();
+        response.headers_mut().insert(
+            axum::http::header::CONTENT_TYPE,
+            axum::http::header::HeaderValue::from_static("text/event-stream; charset=utf-8"),
+        );
+        Ok(response)
     }
 
-    async fn handle_chat_send(
+    async fn handle_chat(
         State(AppState {
             http_channel,
             agent,
             client,
         }): State<AppState>,
-        Query(ChatSendParams { sse }): Query<ChatSendParams>,
+        Path(resp_type): Path<ChatRespType>,
+        _: Query<ChatSendParams>,
         Json(data): Json<HttpReqMessage>,
     ) -> Result<axum::response::Response, StatusCode> {
         let session_id = SessionId::try_from((data.user_id.deref(), &http_channel.config))
@@ -247,52 +260,87 @@ impl HttpChannel {
                 warn!("handle_chat_recv failed, err: {err}");
                 StatusCode::FORBIDDEN
             })?;
-        if sse {
-            let transports_exist = {
-                let transports = client.lock().await;
-                transports.get(&data.user_id).is_some()
-            };
-            if !transports_exist {
-                warn!(
-                    "handle_chat_recv failed, transports not exist, user_id: {}",
-                    &data.user_id
+        match resp_type {
+            ChatRespType::SSE => {
+                let transports_exist = {
+                    let transports = client.lock().await;
+                    transports.get(&data.user_id).is_some()
+                };
+                if !transports_exist {
+                    warn!(
+                        "handle_chat_recv failed, transports not exist, user_id: {}",
+                        &data.user_id
+                    );
+                    return Err(StatusCode::FORBIDDEN);
+                }
+                let _ = http_channel
+                    .handle_input_message(agent, session_id, client, data.clone())
+                    .await
+                    .map_err(|err| {
+                        warn!("handle_chat_send failed, err: {err}");
+                        StatusCode::INTERNAL_SERVER_ERROR
+                    })?;
+                Ok(StatusCode::OK.into_response())
+            }
+            ChatRespType::Streamable => {
+                let (transport, rx) = Transport::new(&session_id);
+                let client = Arc::new(Client(Mutex::new(hash_map!(
+                    data.user_id.clone() => vec![transport],
+                ))));
+                let _ = http_channel
+                    .handle_input_message(agent, session_id, client, data.clone())
+                    .await
+                    .map_err(|err| {
+                        warn!("handle_chat_send failed, err: {err}");
+                        StatusCode::INTERNAL_SERVER_ERROR
+                    })?;
+
+                use futures_util::stream::StreamExt as _;
+                let stream = ReceiverStream::new(rx)
+                    .flat_map(|it| stream::iter(it.payloads))
+                    .map(|it| {
+                        Ok::<_, Infallible>(match serde_json::to_string(&it) {
+                            Ok(json) => Event::default().data(json),
+                            Err(err) => Event::default().event("error").data(err.to_string()),
+                        })
+                    });
+                let sse = Sse::new(stream).keep_alive(Default::default());
+                let mut response = sse.into_response();
+                response.headers_mut().insert(
+                    axum::http::header::CONTENT_TYPE,
+                    axum::http::header::HeaderValue::from_static(
+                        "text/event-stream; charset=utf-8",
+                    ),
                 );
-                return Err(StatusCode::FORBIDDEN);
+                Ok(response)
             }
-            let _ = http_channel
-                .handle_input_message(agent, session_id, client, data.clone())
-                .await
-                .map_err(|err| {
-                    warn!("handle_chat_send failed, err: {err}");
-                    StatusCode::INTERNAL_SERVER_ERROR
-                })?;
-            Ok(StatusCode::OK.into_response())
-        } else {
-            let (transport, mut rx) = Transport::new(&session_id);
-            let client = Arc::new(Client(Mutex::new(hash_map!(
-                data.user_id.clone() => vec![transport],
-            ))));
-            let _ = http_channel
-                .handle_input_message(agent, session_id, client, data.clone())
-                .await
-                .map_err(|err| {
-                    warn!("handle_chat_send failed, err: {err}");
-                    StatusCode::INTERNAL_SERVER_ERROR
-                })?;
-            let mut payloads = vec![];
-            while let Some(HttpRespMessage {
-                payloads: mut array,
-                ..
-            }) = rx.recv().await
-            {
-                payloads.append(&mut array);
+            ChatRespType::Completable => {
+                let (transport, mut rx) = Transport::new(&session_id);
+                let client = Arc::new(Client(Mutex::new(hash_map!(
+                    data.user_id.clone() => vec![transport],
+                ))));
+                let _ = http_channel
+                    .handle_input_message(agent, session_id, client, data.clone())
+                    .await
+                    .map_err(|err| {
+                        warn!("handle_chat_send failed, err: {err}");
+                        StatusCode::INTERNAL_SERVER_ERROR
+                    })?;
+                let mut payloads = vec![];
+                while let Some(HttpRespMessage {
+                    payloads: mut array,
+                    ..
+                }) = rx.recv().await
+                {
+                    payloads.append(&mut array);
+                }
+                Ok(Json(HttpRespMessage {
+                    message_id: data.message_id,
+                    user_id: data.user_id,
+                    payloads,
+                })
+                .into_response())
             }
-            Ok(Json(HttpRespMessage {
-                message_id: data.message_id,
-                user_id: data.user_id,
-                payloads,
-            })
-            .into_response())
         }
     }
 }

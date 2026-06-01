@@ -9,6 +9,7 @@ use uuid::Uuid;
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct HttpReqMessage {
+    #[serde(default)]
     pub message_id: MessageId,
     pub user_id: UserId,
     pub payloads: Vec<Payload>,
@@ -50,9 +51,10 @@ impl From<&SessionId> for UserId {
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
-#[serde(tag = "type")]
 pub enum Payload {
+    #[serde(rename = "text")]
     Text(String),
+    #[serde(rename = "image")]
     Image(Base64Image),
 }
 
