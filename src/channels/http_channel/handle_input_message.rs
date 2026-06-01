@@ -39,6 +39,17 @@ impl HttpChannel {
                             user_contents.push(UserContent::text(text));
                         }
                     }
+                    Payload::Json(json) => match serde_json::to_string(json) {
+                        Ok(text) => {
+                            if !text.is_empty() {
+                                user_contents.push(UserContent::text(text));
+                            }
+                        }
+                        Err(err) => {
+                            warn!("write json to text failed, err: {err}");
+                            continue;
+                        }
+                    },
                     Payload::Image(image) => {
                         let extension = match image.extension() {
                             Ok(val) => val,

@@ -54,6 +54,8 @@ impl From<&SessionId> for UserId {
 pub enum Payload {
     #[serde(rename = "text")]
     Text(String),
+    #[serde(rename = "json")]
+    Json(serde_json::Value),
     #[serde(rename = "image")]
     Image(Base64Image),
 }
