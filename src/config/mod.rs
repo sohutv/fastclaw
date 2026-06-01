@@ -35,6 +35,8 @@ pub struct Config {
     pub image_enhancer: Option<ImageEnhancerConfigs>,
     pub storage: Option<StorageConfigs>,
     pub embedding: Option<EmbeddingConfigs>,
+    #[serde(default)]
+    pub mcp_tools: Option<std::collections::BTreeMap<String, crate::tools::McpToolConfig>>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
