@@ -10,7 +10,6 @@ mod task_tool;
 pub use task_tool::{TaskSchedule, TaskTools};
 
 pub mod mcp_tool;
-pub use mcp_tool::McpToolConfig;
 
 mod time_tool;
 
@@ -18,11 +17,14 @@ mod websearch_tool;
 
 mod image_tool;
 mod media;
+use crate::tools::mcp_tool::McpRegistry;
 use media::*;
 
 #[cfg(feature = "cloud_storage_tool")]
 mod cloud_storage_tool;
 mod memory_recall;
+
+mod daemon_agent;
 
 #[derive(Debug, Copy, Clone, serde::Deserialize)]
 pub enum RiskLevel {
@@ -38,14 +40,15 @@ pub struct ToolCallError(String);
 #[derive(Clone)]
 pub struct ToolContext {
     pub session_id: SessionId,
-    pub agent: Arc<dyn Agent>,
+    pub parent_agent: Arc<dyn Agent>,
     #[allow(unused)]
     pub channel_message_sender: Sender<crate::Result<ChannelMessage>>,
+    pub mcp_registry: &'static McpRegistry,
 }
 
 impl ToolContext {
     fn agent_context(&self) -> &AgentContext {
-        self.agent.context()
+        self.parent_agent.context()
     }
 }
 
@@ -95,11 +98,14 @@ impl FunctionTool {
             },
             TaskTools::create(ctx.clone()).await?,
             if let Some(_) = ctx.agent_context().config.embedding {
-                vec![Box::new(memory_recall::MemoryRecallTool { ctx: ctx.clone() })]
+                vec![Box::new(memory_recall::MemoryRecallTool {
+                    ctx: ctx.clone(),
+                })]
             } else {
                 vec![]
             },
-            mcp_tool::get_mcp_tools(),
+            ctx.mcp_registry.tools().await?,
+            daemon_agent::DaemonAgentTools::create(ctx.clone()).await?,
         ];
         Ok(tools.into_iter().flatten().collect())
     }

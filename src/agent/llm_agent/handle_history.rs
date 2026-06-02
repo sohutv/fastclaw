@@ -7,6 +7,7 @@ use itertools::Itertools;
 use log::{info, warn};
 use rig::client::CompletionClient;
 use rig::completion::{Message, Usage};
+use std::sync::Arc;
 use tokio::sync::mpsc::Sender;
 
 impl<C, P> LlmAgent<C, P>
@@ -15,7 +16,7 @@ where
     P: ModelProvider<Client = C> + 'static + Send + Sync,
 {
     pub(super) async fn handle_history(
-        &self,
+        self: Arc<Self>,
         channel_message_sender: Sender<crate::Result<ChannelMessage>>,
         session_id: &SessionId,
         usage: &Usage,
@@ -58,7 +59,7 @@ where
                 }))
                 .await;
 
-            let result = self
+            let result = Arc::clone(&self)
                 .session_compact(
                     channel_message_sender.clone(),
                     session_id,

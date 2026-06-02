@@ -1,10 +1,8 @@
 mod identity;
-use crate::agent::AgentContext;
-use derive_more::{Deref, Display, From, FromStr};
-use identity::IdentityPrompt;
 
-#[derive(Debug, Clone, Display, From, FromStr, Deref)]
-pub struct Prompt(String);
+use crate::agent::AgentContext;
+use crate::type_::SystemPrompt;
+use identity::IdentityPrompt;
 
 #[derive(Debug, Clone, strum::EnumIter)]
 pub enum PromptSection {
@@ -12,7 +10,7 @@ pub enum PromptSection {
 }
 
 impl PromptSection {
-    pub async fn build(&self, ctx: &AgentContext) -> crate::Result<Prompt> {
+    pub async fn build(&self, ctx: &AgentContext) -> crate::Result<SystemPrompt> {
         let prompt = match self {
             PromptSection::Identity => IdentityPrompt.build(ctx).await?,
         };

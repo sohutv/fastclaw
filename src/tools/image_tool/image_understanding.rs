@@ -56,9 +56,7 @@ impl Tool for ImageUnderstandingTool {
     async fn call(&self, args: Self::Args) -> Result<Self::Output, Self::Error> {
         let (tx, mut rx) = tokio::sync::mpsc::channel(32);
 
-        if let Err(err)= self
-            .send_request(tx, args)
-            .await {
+        if let Err(err) = self.send_request(tx, args).await {
             error!("{err}");
             return Err(ToolCallError(format!("{err}")));
         }
@@ -104,7 +102,11 @@ impl ImageUnderstandingTool {
     ) -> crate::Result<()> {
         let _ = self
             .ctx
-            .agent
+            .parent_agent
+            .clone_with("tool-call".into())
+            .await?
+            .start()
+            .await?
             .get_channel_sender()
             .await?
             .send((

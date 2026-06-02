@@ -1,11 +1,25 @@
-use serde::{Deserialize, Serialize};
-use std::collections::BTreeMap;
-use std::sync::{Arc, OnceLock, RwLock};
 use crate::config::Config;
+use derive_more::{Deref, Display};
+use itertools::Itertools;
+use rig::tool::ToolDyn;
+use rmcp::service::NotificationContext;
+use rmcp::{RoleClient, ServiceExt};
+use serde::{Deserialize, Serialize};
+use std::collections::{BTreeMap, HashMap};
+use std::ops::Deref;
+use std::sync::Arc;
+use tokio::sync::RwLock;
+use tokio::task::JoinHandle;
+
+#[derive(Debug, Clone, Serialize, Deserialize, Deref)]
+pub struct McpToolSetConfigs(HashMap<McpToolSetName, McpToolSetConfig>);
+
+#[derive(Debug, Clone, Hash, Eq, PartialEq, Ord, PartialOrd, Display, Serialize, Deserialize)]
+pub struct McpToolSetName(String);
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(tag = "type")]
-pub enum McpToolConfig {
+#[serde(untagged)]
+pub enum McpToolSetConfig {
     #[serde(rename = "stdio")]
     Stdio {
         command: String,
@@ -15,162 +29,209 @@ pub enum McpToolConfig {
         env: BTreeMap<String, String>,
     },
     #[serde(rename = "sse")]
-    Sse {
-        url: String,
-    },
+    Sse { url: String },
 }
 
-#[derive(Clone)]
-pub struct McpHandler {
-    pub server_name: String,
+#[derive(Deref)]
+pub struct McpRegistry {
+    #[allow(unused)]
+    config: &'static Config,
+    #[deref]
+    mcp_tool_set: HashMap<McpToolSetName, McpToolSet>,
 }
 
-impl rmcp::handler::client::ClientHandler for McpHandler {
+#[derive(Deref)]
+pub struct McpToolSet {
+    #[deref]
+    inner: McpToolSetInnerShared,
+    join_handle: JoinHandle<()>,
+}
+
+impl McpToolSet {
+    async fn join(self) -> crate::Result<()> {
+        let _ = self.join_handle.await?;
+        Ok(())
+    }
+}
+
+#[derive(Deref)]
+pub struct McpToolSetInner {
+    name: McpToolSetName,
+    #[allow(unused)]
+    config: McpToolSetConfig,
+    #[deref]
+    tools: RwLock<Vec<rig::tool::rmcp::McpTool>>,
+}
+
+#[derive(Deref, Clone)]
+pub struct McpToolSetInnerShared(Arc<McpToolSetInner>);
+
+impl rmcp::handler::client::ClientHandler for McpToolSetInnerShared {
     fn get_info(&self) -> rmcp::model::ClientInfo {
         rmcp::model::ClientInfo::new(
             rmcp::model::ClientCapabilities::default(),
-            rmcp::model::Implementation::new("fastclaw", "0.2.4"),
+            rmcp::model::Implementation::new("fastclaw", env!("CARGO_PKG_VERSION")),
         )
     }
 
-    async fn on_tool_list_changed(
-        &self,
-        context: rmcp::service::NotificationContext<rmcp::service::RoleClient>,
-    ) {
-        log::info!("MCP server '{}' notified tool list changed, re-fetching...", self.server_name);
+    async fn on_tool_list_changed(&self, context: NotificationContext<RoleClient>) {
+        log::info!(
+            "MCP server '{}' notified tool list changed, re-fetching...",
+            self.name
+        );
         match context.peer.list_all_tools().await {
             Ok(tools) => {
-                let mcp_tools = tools
+                let mut guard = self.write().await;
+                *guard = tools
                     .into_iter()
                     .map(|t| rig::tool::rmcp::McpTool::from_mcp_server(t, context.peer.clone()))
                     .collect::<Vec<_>>();
-                
-                let reg = registry();
-                let mut guard = reg.tools.write().unwrap();
-                guard.insert(self.server_name.clone(), mcp_tools);
                 log::info!(
                     "MCP server '{}' updated with {} tools.",
-                    self.server_name,
-                    guard.get(&self.server_name).map(|v| v.len()).unwrap_or(0)
+                    self.name,
+                    guard.len()
                 );
             }
             Err(e) => {
-                log::error!("Failed to re-fetch tools from MCP server '{}': {}", self.server_name, e);
+                log::warn!(
+                    "Failed to re-fetch tools from MCP server '{}': {}",
+                    self.name,
+                    e
+                );
             }
         }
     }
 }
 
-pub struct McpRegistry {
-    pub tools: Arc<RwLock<BTreeMap<String, Vec<rig::tool::rmcp::McpTool>>>>,
-    pub services: Arc<RwLock<Vec<tokio::task::JoinHandle<()>>>>,
-}
-
-static REGISTRY: OnceLock<McpRegistry> = OnceLock::new();
-
-pub fn registry() -> &'static McpRegistry {
-    REGISTRY.get_or_init(|| McpRegistry {
-        tools: Arc::new(RwLock::new(BTreeMap::new())),
-        services: Arc::new(RwLock::new(Vec::new())),
-    })
-}
-
-pub async fn init_mcp_tools(config: &'static Config) -> crate::Result<()> {
-    let mcp_tools_config = match &config.mcp_tools {
-        Some(m) => m,
-        None => return Ok(()),
-    };
-
-    let reg = registry();
-
-    for (name, tool_config) in mcp_tools_config {
-        log::info!("Initializing MCP tool/server: {}", name);
-        let handler = McpHandler { server_name: name.clone() };
-
-        match tool_config {
-            McpToolConfig::Stdio { command, args, env } => {
-                let mut cmd = match rmcp::transport::child_process::which_command(command) {
-                    Ok(c) => c,
-                    Err(e) => {
-                        return Err(anyhow::anyhow!("Failed to find executable '{}': {}", command, e));
-                    }
+impl McpToolSet {
+    async fn new(name: &McpToolSetName, config: &McpToolSetConfig) -> crate::Result<Self> {
+        let (inner, service) = match config {
+            McpToolSetConfig::Stdio { command, args, env } => {
+                let cmd = {
+                    let mut cmd = rmcp::transport::child_process::which_command(command)?;
+                    cmd.args(args).envs(env);
+                    cmd
                 };
-                cmd.args(args);
-                for (k, v) in env {
-                    cmd.env(k, v);
+                let transport = rmcp::transport::child_process::TokioChildProcess::new(cmd)?;
+                let mcp_tool_set = McpToolSetInnerShared(Arc::new(McpToolSetInner {
+                    name: name.clone(),
+                    config: config.clone(),
+                    tools: Default::default(),
+                }));
+
+                let (service, mcp_tools) = {
+                    let mcp_tool_set = mcp_tool_set.clone();
+                    let service = mcp_tool_set.serve(transport).await.map_err(|e| {
+                        anyhow::anyhow!("Failed to serve for stdio MCP server '{}': {}", name, e)
+                    })?;
+                    let tools = service.peer().list_all_tools().await.map_err(|e| {
+                        anyhow::anyhow!(
+                            "Failed to list tools for stdio MCP server '{}': {}",
+                            name,
+                            e
+                        )
+                    })?;
+                    let mcp_tools = tools
+                        .into_iter()
+                        .map(|t| {
+                            rig::tool::rmcp::McpTool::from_mcp_server(t, service.peer().clone())
+                        })
+                        .collect_vec();
+                    (service, mcp_tools)
+                };
+
+                {
+                    let mut guard = mcp_tool_set.write().await;
+                    *guard = mcp_tools;
                 }
-                let transport = match rmcp::transport::child_process::TokioChildProcess::new(cmd) {
-                    Ok(t) => t,
-                    Err(e) => {
-                        return Err(anyhow::anyhow!("Failed to spawn child process '{}': {}", command, e));
-                    }
+                (mcp_tool_set, service)
+            }
+            McpToolSetConfig::Sse { url } => {
+                let transport =
+                    rmcp::transport::StreamableHttpClientTransport::from_uri(url.as_str());
+                let mcp_tool_set = McpToolSetInnerShared(Arc::new(McpToolSetInner {
+                    name: name.clone(),
+                    config: config.clone(),
+                    tools: Default::default(),
+                }));
+                let (service, mcp_tools) = {
+                    let mcp_tool_set = mcp_tool_set.clone();
+                    let service = mcp_tool_set.serve(transport).await.map_err(|e| {
+                        anyhow::anyhow!("Failed to serve for SSE MCP server '{}': {}", name, e)
+                    })?;
+                    let tools = service.peer().list_all_tools().await.map_err(|e| {
+                        anyhow::anyhow!("Failed to list tools for SSE MCP server '{}': {}", name, e)
+                    })?;
+                    let mcp_tools = tools
+                        .into_iter()
+                        .map(|t| {
+                            rig::tool::rmcp::McpTool::from_mcp_server(t, service.peer().clone())
+                        })
+                        .collect_vec();
+                    (service, mcp_tools)
                 };
-
-                let service = rmcp::ServiceExt::serve(handler, transport)
-                    .await
-                    .map_err(|e| anyhow::anyhow!("Failed to serve stdio MCP client '{}': {}", name, e))?;
-
-                // Fetch initial tools
-                let tools = service.peer().list_all_tools().await
-                    .map_err(|e| anyhow::anyhow!("Failed to list tools for MCP server '{}': {}", name, e))?;
-
-                let mcp_tools = tools
-                    .into_iter()
-                    .map(|t| rig::tool::rmcp::McpTool::from_mcp_server(t, service.peer().clone()))
-                    .collect::<Vec<_>>();
-
-                reg.tools.write().unwrap().insert(name.clone(), mcp_tools);
-
-                // Keep service running in background
-                let name_clone = name.clone();
-                let service_handle = tokio::spawn(async move {
-                    if let Err(e) = service.waiting().await {
-                        log::error!("MCP service '{}' stopped with error: {}", name_clone, e);
-                    }
-                });
-                reg.services.write().unwrap().push(service_handle);
+                {
+                    let mut guard = mcp_tool_set.write().await;
+                    *guard = mcp_tools;
+                }
+                (mcp_tool_set, service)
             }
-            McpToolConfig::Sse { url } => {
-                let transport = rmcp::transport::StreamableHttpClientTransport::from_uri(url.as_str());
-
-                let service = rmcp::ServiceExt::serve(handler, transport)
-                    .await
-                    .map_err(|e| anyhow::anyhow!("Failed to serve SSE MCP client '{}' at '{}': {}", name, url, e))?;
-
-                // Fetch initial tools
-                let tools = service.peer().list_all_tools().await
-                    .map_err(|e| anyhow::anyhow!("Failed to list tools for SSE MCP server '{}': {}", name, e))?;
-
-                let mcp_tools = tools
-                    .into_iter()
-                    .map(|t| rig::tool::rmcp::McpTool::from_mcp_server(t, service.peer().clone()))
-                    .collect::<Vec<_>>();
-
-                reg.tools.write().unwrap().insert(name.clone(), mcp_tools);
-
-                // Keep service running in background
-                let name_clone = name.clone();
-                let service_handle = tokio::spawn(async move {
-                    if let Err(e) = service.waiting().await {
-                        log::error!("MCP service '{}' stopped with error: {}", name_clone, e);
-                    }
-                });
-                reg.services.write().unwrap().push(service_handle);
-            }
-        }
+        };
+        let join_handle = {
+            // Keep service running in background
+            let name_clone = name.clone();
+            let join_handle = tokio::spawn(async move {
+                if let Err(e) = service.waiting().await {
+                    log::error!("MCP service '{}' stopped with error: {}", name_clone, e);
+                }
+            });
+            join_handle
+        };
+        Ok(Self { inner, join_handle })
     }
-
-    Ok(())
 }
 
-pub fn get_mcp_tools() -> Vec<Box<dyn rig::tool::ToolDyn>> {
-    let reg = registry();
-    let guard = reg.tools.read().unwrap();
-    let mut result = Vec::new();
-    for tools in guard.values() {
-        for tool in tools {
-            result.push(Box::new(tool.clone()) as Box<dyn rig::tool::ToolDyn>);
+impl McpRegistry {
+    pub async fn init(config: &'static Config) -> crate::Result<McpRegistry> {
+        let mut mcp_tool_set = HashMap::new();
+        for (name, config) in config.mcp_tools.iter().flat_map(|it| it.deref()) {
+            match McpToolSet::new(name, config).await {
+                Ok(dst) => {
+                    mcp_tool_set.insert(name.clone(), dst);
+                }
+                Err(err) => {
+                    log::warn!("Failed to init mcp server '{name}', err: {err} ");
+                    continue;
+                }
+            }
         }
+        Ok(McpRegistry {
+            config,
+            mcp_tool_set,
+        })
     }
-    result
+
+    pub async fn tools(&self) -> crate::Result<Vec<Box<dyn ToolDyn>>> {
+        let mut vec = vec![];
+        for (_, toolset) in &self.mcp_tool_set {
+            let guard = toolset.read().await;
+            let mut tools = guard
+                .iter()
+                .map(|it| Box::new(it.clone()) as Box<dyn ToolDyn>)
+                .collect_vec();
+            vec.append(&mut tools);
+        }
+        Ok(vec)
+    }
+
+    #[allow(unused)]
+    pub async fn join(self) -> crate::Result<()> {
+        for (name, toolset) in self.mcp_tool_set {
+            if let Err(err) = toolset.join().await {
+                log::warn!("Failed to join mcp server '{name}', err: {err} ");
+                continue;
+            }
+        }
+        Ok(())
+    }
 }

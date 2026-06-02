@@ -1,3 +1,4 @@
+use std::sync::Arc;
 use crate::agent::llm_agent::LlmAgent;
 use crate::agent::session_history::{HistoryMessage, StoreOption};
 use crate::agent::{HistoryCompactResult, HistoryCompactVal, SessionCompactSupport};
@@ -20,7 +21,7 @@ where
     P: ModelProvider<Client = C> + 'static + Send + Sync,
 {
     async fn session_compact(
-        &self,
+        self: Arc<Self>,
         channel_message_sender: Sender<crate::Result<ChannelMessage>>,
         session_id: &SessionId,
         compact_ratio: f32,
@@ -46,7 +47,7 @@ where
             let tail_tokens = original_usage.total_tokens - head_tokens;
             ((head.to_vec(), head_tokens), (tail.to_vec(), tail_tokens))
         };
-        let agent = match self
+        let agent = match Arc::clone(&self)
             .create_agent(
                 session_id,
                 ReasoningEffort::Minimal,
@@ -67,7 +68,7 @@ Execute the 'slimming' maintenance of the conversation history immediately, gene
 {}
                             "#,
                 session_id,
-                include_str!("../prompt/history_compact_prompt.md")
+                include_str!("../../../resources/HISTORY_COMPACT.md")
             ),
             head.clone(),
         )

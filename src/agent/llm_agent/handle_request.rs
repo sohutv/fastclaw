@@ -9,6 +9,7 @@ use rig::client::CompletionClient;
 use rig::completion::Message;
 use rig::message::UserContent;
 use rig::streaming::{StreamedAssistantContent, StreamingChat};
+use std::sync::Arc;
 use tokio_stream::StreamExt;
 
 impl<C, P> LlmAgent<C, P>
@@ -17,7 +18,7 @@ where
     P: ModelProvider<Client = C> + 'static + Send + Sync,
 {
     pub(super) async fn handle_request(
-        &self,
+        self: Arc<Self>,
         AgentRequest {
             ref session_id,
             mut message,
@@ -36,8 +37,7 @@ where
                 message: AgentResponse::Start,
             }))
             .await;
-        let agent = match self
-            .create_agent(
+        let agent = match Arc::clone(&self).create_agent(
                 session_id,
                 self.agent_settings.reasoning_effort,
                 addi_system_prompt.as_deref(),
@@ -99,7 +99,7 @@ where
                     let usage = final_resp.usage();
                     let append_history = final_resp.history().expect("unexpected empty history!!!");
                     if with_history {
-                        self.handle_history(
+                        Arc::clone(&self).handle_history(
                             channel_message_sender.clone(),
                             session_id,
                             &usage,

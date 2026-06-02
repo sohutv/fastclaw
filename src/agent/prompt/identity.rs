@@ -1,5 +1,5 @@
 use crate::agent::AgentContext;
-use crate::agent::prompt::Prompt;
+use crate::type_::SystemPrompt;
 use itertools::Itertools;
 use log::error;
 use std::path::Path;
@@ -34,7 +34,7 @@ impl IdentityPrompt {
     pub async fn build(
         &self,
         AgentContext { workspace, .. }: &AgentContext,
-    ) -> crate::Result<Prompt> {
+    ) -> crate::Result<SystemPrompt> {
         let prompt = self.build_actual(&workspace.path).await?;
         Ok(prompt.into())
     }
@@ -44,7 +44,7 @@ impl IdentityPrompt {
         #[cfg(feature = "lumen_fox")]
         {
             let lumen_fox_md = include_str!("../../../resources/lumen_fox.md");
-            vec.push((None,  lumen_fox_md.to_string()));
+            vec.push((None, lumen_fox_md.to_string()));
         }
         for (filename, default_content) in IDENTITY_MD_FILES {
             let filepath = workspace_dir.join(filename);
@@ -66,7 +66,8 @@ impl IdentityPrompt {
                     r#"### {}
 {}
 "#,
-                    filename.unwrap_or_default(), content
+                    filename.unwrap_or_default(),
+                    content
                 )
             })
             .join("\n");

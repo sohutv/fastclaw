@@ -4,20 +4,21 @@ use derive_more::{Deref, Display, From, FromStr, Into};
 use rig::completion::Usage;
 use rig::message::{Message, Reasoning, ToolCall};
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use std::fmt::Display;
 use std::sync::Arc;
+use tokio::sync::RwLock;
 use tokio::sync::mpsc::Sender;
 
 mod llm_agent;
 mod prompt;
-
 mod session_history;
 pub use session_history::{HistoryManager, JsonlHistoryManager};
 
 use crate::ModelName;
 use crate::config::{Config, Workspace};
 use crate::memory::MemoryManager;
-use crate::model_provider::{ModelProviderName, ModelSettings, ReasoningEffort};
+use crate::model_provider::{ModelProviderName, ModelProviders, ModelSettings, ReasoningEffort};
 
 mod tool_filter {
     use async_trait::async_trait;
@@ -65,18 +66,20 @@ mod tool_filter {
 }
 
 pub use tool_filter::ToolFilter;
+use crate::tools::mcp_tool::McpRegistry;
+use crate::type_::SystemPrompt;
 
 #[async_trait]
 pub trait SessionCompactSupport: Send + Sync {
     async fn session_compact(
-        &self,
+        self: Arc<Self>,
         channel_message_sender: Sender<crate::Result<ChannelMessage>>,
         session_id: &SessionId,
         compact_ratio: f32,
     ) -> HistoryCompactResult;
 }
 #[async_trait]
-pub trait Agent: SessionCompactSupport + Send + Sync {
+pub trait Agent: SessionCompactSupport + AgentClone + Send + Sync {
     async fn start(self: Arc<Self>) -> crate::Result<Arc<dyn Agent>>;
 
     async fn get_channel_sender(
@@ -87,6 +90,48 @@ pub trait Agent: SessionCompactSupport + Send + Sync {
 
     #[allow(unused)]
     fn model_settings(&self) -> &ModelSettings;
+
+    async fn fork_child(
+        &self,
+        id: AgentId,
+        model_provider: &ModelProviderName,
+        model_name: &ModelName,
+        system_prompt: Option<SystemPrompt>,
+    ) -> crate::Result<Arc<dyn Agent>> {
+        let context = self.agent_context();
+        let mut children = context.children.write().await;
+        if let Some(agent) = children.get(&id) {
+            Ok(Arc::clone(agent))
+        } else {
+            let agent = match context.config.model_provider(model_provider)? {
+                ModelProviders::OpenaiCompatible(model_provider) => {
+                    model_provider
+                        .create_agent(
+                            id,
+                            context.config,
+                            model_name.clone(),
+                            Arc::clone(&context.history_manager),
+                            Arc::clone(&context.memory_manager),
+                            context.workspace,
+                            system_prompt,
+                            context.mcp_registry,
+                        )
+                        .await?
+                }
+            };
+            let agent = Arc::new(agent) as Arc<dyn Agent>;
+            children.insert(agent.id().clone(), Arc::clone(&agent));
+            Ok(agent)
+        }
+    }
+
+    fn id(&self) -> &AgentId;
+    fn agent_context(&self) -> Arc<AgentContext>;
+}
+
+#[async_trait]
+pub trait AgentClone: Send + Sync {
+    async fn clone_with(&self, id: AgentId) -> crate::Result<Arc<dyn Agent>>;
 }
 
 #[allow(unused)]
@@ -96,9 +141,14 @@ pub struct AgentContext {
     pub workspace: &'static Workspace,
     pub history_manager: Arc<dyn HistoryManager>,
     pub memory_manager: Arc<MemoryManager>,
+    pub children: Arc<RwLock<HashMap<AgentId, Arc<dyn Agent>>>>,
+    pub system_prompt: Option<SystemPrompt>,
+    pub mcp_registry: &'static McpRegistry,
 }
 
-#[derive(Debug, Clone, Deref, Eq, PartialEq, Ord, PartialOrd, Display, Serialize, Deserialize)]
+#[derive(
+    Debug, Clone, Deref, Eq, PartialEq, Ord, PartialOrd, Display, Serialize, Deserialize, Hash,
+)]
 pub struct AgentId(String);
 
 impl<S: Into<String>> From<S> for AgentId {
@@ -118,6 +168,8 @@ pub trait LlmAgentSupplier {
         history_manager: Arc<dyn HistoryManager>,
         memory_manager: Arc<MemoryManager>,
         workspace: &'static Workspace,
+        system_prompt: Option<SystemPrompt>,
+        mcp_registry: &'static McpRegistry,
     ) -> crate::Result<Self::A>;
 }
 

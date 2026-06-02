@@ -1,7 +1,7 @@
 use crate::ModelName;
 use crate::agent::{
-    Agent, AgentContext, AgentId, AgentRequest, AgentRequestContext, AgentSettings, HistoryManager,
-    LlmAgentSupplier, Workspace,
+    Agent, AgentClone, AgentContext, AgentId, AgentRequest, AgentRequestContext, AgentSettings,
+    HistoryManager, LlmAgentSupplier, Workspace,
 };
 use crate::config::Config;
 use crate::memory::MemoryManager;
@@ -11,6 +11,8 @@ use async_trait::async_trait;
 use rig::client::CompletionClient;
 use std::sync::Arc;
 use tokio::sync::mpsc::Sender;
+use crate::tools::mcp_tool::McpRegistry;
+use crate::type_::SystemPrompt;
 
 mod create_agent;
 mod handle_history;
@@ -48,6 +50,8 @@ where
         history_manager: Arc<dyn HistoryManager>,
         memory_manager: Arc<MemoryManager>,
         workspace: &'static Workspace,
+        system_prompt: Option<SystemPrompt>,
+        mcp_registry: &'static McpRegistry,
     ) -> crate::Result<Self::A> {
         Ok(LlmAgent::new(
             agent_id.into(),
@@ -57,6 +61,8 @@ where
             history_manager,
             memory_manager,
             workspace,
+            system_prompt,
+            mcp_registry
         )
         .await?)
     }
@@ -75,12 +81,17 @@ where
         history_manager: Arc<dyn HistoryManager>,
         memory_manager: Arc<MemoryManager>,
         workspace: &'static Workspace,
+        system_prompt: Option<SystemPrompt>,
+        mcp_registry: &'static McpRegistry,
     ) -> crate::Result<Self> {
         let ctx = Arc::new(AgentContext {
             config,
             workspace,
             history_manager,
             memory_manager,
+            children: Default::default(),
+            system_prompt,
+            mcp_registry,
         });
         Ok(Self {
             model_settings: model_provider
@@ -99,22 +110,28 @@ where
             channel_sender: Default::default(),
         })
     }
+}
 
-    #[allow(unused)]
-    pub async fn fork<ID: Into<AgentId>>(&self) -> crate::Result<Self> {
-        self.fork_with(self.id.clone()).await
-    }
-
-    pub async fn fork_with<ID: Into<AgentId>>(&self, agent_id: ID) -> crate::Result<Self> {
-        Ok(Self {
-            id: agent_id.into(),
+#[async_trait]
+impl<C, P> AgentClone for LlmAgent<C, P>
+where
+    C: 'static + CompletionClient + Send + Sync,
+    P: 'static + ModelProvider<Client = C> + Send + Sync,
+{
+    async fn clone_with(&self, id: AgentId) -> crate::Result<Arc<dyn Agent>> {
+        if id.eq(&self.id) {
+            return Err(anyhow!("clone agent failed, duplicated id: {id}"));
+        }
+        let agent = Self {
+            id,
             model_settings: self.model_settings.clone(),
             agent_settings: self.agent_settings.clone(),
             model_name: self.model_name.clone(),
             model_provider: self.model_provider.clone(),
             ctx: self.ctx.clone(),
             channel_sender: Default::default(),
-        })
+        };
+        Ok(Arc::new(agent))
     }
 }
 
@@ -135,7 +152,7 @@ where
             let self_ = Arc::clone(&self);
             tokio::spawn(async move {
                 while let Some((request, ctx)) = rx.recv().await {
-                    self_.handle_request(request, ctx).await
+                    Arc::clone(&self_).handle_request(request, ctx).await
                 }
             });
             *sender = Some(tx);
@@ -162,5 +179,12 @@ where
 
     fn model_settings(&self) -> &ModelSettings {
         &self.model_settings
+    }
+
+    fn id(&self) -> &AgentId {
+        &self.id
+    }
+    fn agent_context(&self) -> Arc<AgentContext> {
+        Arc::clone(&self.ctx)
     }
 }

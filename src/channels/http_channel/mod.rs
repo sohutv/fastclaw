@@ -196,6 +196,7 @@ struct ChatRecvSSEParams {
 #[derive(Clone, Serialize, Deserialize, Default)]
 #[serde(default)]
 struct ChatSendParams {}
+
 #[derive(Clone, Copy, Serialize, Deserialize)]
 enum ChatRespType {
     #[serde(rename = "completable")]
@@ -252,7 +253,7 @@ impl HttpChannel {
             client,
         }): State<AppState>,
         Path(resp_type): Path<ChatRespType>,
-        _: Query<ChatSendParams>,
+        Query(_): Query<ChatSendParams>,
         Json(data): Json<HttpReqMessage>,
     ) -> Result<axum::response::Response, StatusCode> {
         let session_id = SessionId::try_from((data.user_id.deref(), &http_channel.config))

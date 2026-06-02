@@ -1,5 +1,5 @@
-use crate::agent::{Agent, ToolFilter};
 use crate::agent::llm_agent::LlmAgent;
+use crate::agent::{Agent, ToolFilter};
 use crate::channels::{ChannelMessage, SessionId};
 use crate::model_provider::{ModelProvider, ReasoningEffort};
 use crate::tools::ToolContext;
@@ -16,7 +16,7 @@ where
     P: ModelProvider<Client = C> + 'static + Send + Sync,
 {
     pub(super) async fn create_agent<TF>(
-        &self,
+        self: Arc<Self>,
         session_id: &SessionId,
         reasoning_effort: ReasoningEffort,
         addi_system_prompt: Option<&str>,
@@ -32,13 +32,16 @@ where
             .model_settings
             .reasoning_effort_mapping
             .from(reasoning_effort);
+        let preamble = if let Some(dst) = &self.ctx.system_prompt {
+            &*dst
+        } else {
+            &*super::super::prompt::PromptSection::Identity
+                .build(&self.ctx)
+                .await?
+        };
         let agent = model_client
             .agent(&*self.model_name)
-            .preamble(
-                &*super::super::prompt::PromptSection::Identity
-                    .build(&self.ctx)
-                    .await?,
-            )
+            .preamble(preamble)
             .append_preamble(&format!(
                 r#"
 # MetaData
@@ -51,10 +54,9 @@ where
                 let filter = tool_filter.into();
                 crate::tools::FunctionTool::required_tools(ToolContext {
                     session_id: session_id.clone(),
-                    agent: {
-                        Arc::new(self.fork_with("tool-call").await?).start().await?
-                    },
+                    parent_agent: Arc::clone(&self) as Arc<dyn Agent>,
                     channel_message_sender,
+                    mcp_registry: self.ctx.mcp_registry,
                 })
                 .await?
                 .into_iter()

@@ -1,7 +1,7 @@
-use crate::ModelName;
 use crate::agent::{AgentId, AgentSettings};
 use crate::config::logger::LogConfig;
 use crate::model_provider::{ModelProviderName, ModelProviders};
+use crate::ModelName;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
@@ -36,7 +36,7 @@ pub struct Config {
     pub storage: Option<StorageConfigs>,
     pub embedding: Option<EmbeddingConfigs>,
     #[serde(default)]
-    pub mcp_tools: Option<std::collections::BTreeMap<String, crate::tools::McpToolConfig>>,
+    pub mcp_tools: Option<McpToolSetConfigs>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -53,3 +53,4 @@ impl Default for HeartbeatConfig {
 
 mod workspace;
 pub use workspace::*;
+use crate::tools::mcp_tool::McpToolSetConfigs;

@@ -1,4 +1,4 @@
-use crate::agent::{Agent, HistoryManager, JsonlHistoryManager, LlmAgentSupplier};
+use crate::agent::{Agent, AgentClone, HistoryManager, JsonlHistoryManager, LlmAgentSupplier};
 use crate::channels;
 use crate::channels::Channel;
 use crate::cli::CmdRunner;
@@ -6,6 +6,7 @@ use crate::config::{Config, Workspace};
 use crate::heartbeat::Heartbeat;
 use crate::memory::MemoryManager;
 use crate::model_provider::ModelProviders;
+use crate::tools::mcp_tool::McpRegistry;
 use anyhow::anyhow;
 use clap::Args;
 use derive_more::FromStr;
@@ -57,7 +58,7 @@ impl CmdRunner for Start {
             config
         };
         let _ = config.init_logger(&workdir)?;
-        crate::tools::mcp_tool::init_mcp_tools(config).await?;
+        let mcp_registry = Box::leak(Box::new(McpRegistry::init(config).await?));
         let workspace = { Box::leak(Box::new(Workspace::init(workdir).await?)) };
         let history_manager: Arc<dyn HistoryManager> =
             Arc::new(JsonlHistoryManager::new(config, workspace).await?);
@@ -73,15 +74,14 @@ impl CmdRunner for Start {
                             Arc::clone(&history_manager),
                             Arc::clone(&memory_manager),
                             workspace,
+                            None,
+                            mcp_registry,
                         )
                         .await?
                 }
             };
-            let heartbeat_agent = main_agent.fork_with("heartbeat").await?;
-            (
-                Arc::new(main_agent) as Arc<dyn Agent>,
-                Arc::new(heartbeat_agent) as Arc<dyn Agent>,
-            )
+            let heartbeat_agent = main_agent.clone_with("heartbeat".into()).await?;
+            (Arc::new(main_agent) as Arc<dyn Agent>, heartbeat_agent)
         };
 
         enum JoinHandle {
@@ -132,8 +132,7 @@ impl CmdRunner for Start {
                 ChannelType::Http => {
                     info!("Starting HttpStreamable channel");
                     let channel =
-                        channels::http_channel::HttpChannel::new(config, workspace)
-                            .await?;
+                        channels::http_channel::HttpChannel::new(config, workspace).await?;
                     let join_handle = start_channel(
                         config,
                         workspace,
