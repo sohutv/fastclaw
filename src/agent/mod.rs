@@ -1,4 +1,5 @@
 use crate::channels::{ChannelMessage, SessionId};
+use anyhow::anyhow;
 use async_trait::async_trait;
 use derive_more::{Deref, Display, From, FromStr, Into};
 use rig::completion::Usage;
@@ -65,9 +66,9 @@ mod tool_filter {
     }
 }
 
-pub use tool_filter::ToolFilter;
 use crate::tools::mcp_tool::McpRegistry;
 use crate::type_::SystemPrompt;
+pub use tool_filter::ToolFilter;
 
 #[async_trait]
 pub trait SessionCompactSupport: Send + Sync {
@@ -123,6 +124,16 @@ pub trait Agent: SessionCompactSupport + AgentClone + Send + Sync {
             children.insert(agent.id().clone(), Arc::clone(&agent));
             Ok(agent)
         }
+    }
+
+    async fn drop_child(&self, id: &AgentId) -> crate::Result<Arc<dyn Agent>> {
+        let context = self.agent_context();
+        let child = {
+            let mut children = context.children.write().await;
+            children.remove(id)
+        }
+        .ok_or(anyhow!("child {} agent not exist", id))?;
+        Ok(child)
     }
 
     fn id(&self) -> &AgentId;

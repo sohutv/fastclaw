@@ -16,6 +16,7 @@ impl WechatChannel {
         inbound_message: Option<&WechatMessage>,
         ChannelMessage {
             session_id,
+            agent_id: _,
             message,
         }: &ChannelMessage,
         curr_state: AgentRespState,

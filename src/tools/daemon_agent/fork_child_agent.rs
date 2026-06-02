@@ -1,28 +1,28 @@
 use crate::agent::AgentId;
 use crate::model_provider::ModelProviderName;
 use crate::tools::{ToolCallError, ToolCallRsult, ToolContext};
-use crate::type_::{ModelName, SystemPrompt};
-use itertools::Itertools;
+use crate::type_::{ModelName, Prompt, SystemPrompt};
 use log::info;
 use rig::completion::ToolDefinition;
 use rig::tool::Tool;
 use serde_json::json;
 
 #[derive(Clone)]
-pub struct ForkDaemonAgentTool {
+pub struct ForkChildAgentTool {
     pub ctx: ToolContext,
 }
 
 #[derive(Debug, Clone, serde::Deserialize)]
 #[allow(unused)]
 pub struct Args {
+    id: Option<AgentId>,
     model_provider: ModelProviderName,
     model_name: ModelName,
-    skill_names: Vec<String>,
+    skill_names: Vec<Prompt>,
 }
 
 #[allow(async_fn_in_trait)]
-impl Tool for ForkDaemonAgentTool {
+impl Tool for ForkChildAgentTool {
     const NAME: &'static str = "fork-daemon-agent";
     type Error = ToolCallError;
     type Args = Args;
@@ -36,6 +36,10 @@ impl Tool for ForkDaemonAgentTool {
             parameters: json!({
                 "type": "object",
                 "properties": {
+                    "id":{
+                        "type": "string",
+                        "description": "Optional ID for the new agent. If not provided, a UUID will be generated"
+                    },
                     "model_provider": {
                         "type": "string",
                         "description": "The name of the model provider to use for the new agent"
@@ -62,10 +66,13 @@ impl Tool for ForkDaemonAgentTool {
             "Forking agent with model_provider: {:?}, model_name: {:?}",
             args.model_provider, args.model_name
         );
-        let id: AgentId = uuid::Uuid::new_v4().into();
-        // todo zwh
-        let system_prompt = SystemPrompt::from("");
-        let addi_system_prompt = args.skill_names.into_iter().join("\n");
+        let id: AgentId = args.id.unwrap_or_else(|| uuid::Uuid::new_v4().into());
+        let system_prompt = SystemPrompt::from("").append_line(
+            args.skill_names
+                .into_iter()
+                .reduce(|l, r| l.append_line(r))
+                .unwrap_or_default(),
+        );
         match self
             .ctx
             .parent_agent

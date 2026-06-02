@@ -1,4 +1,4 @@
-use crate::agent::Agent;
+use crate::agent::{Agent, AgentId};
 use crate::channels::{AgentRespState, Channel, ChannelContext, ChannelMessage, SessionId};
 use crate::config::{Config, Workspace};
 use anyhow::anyhow;
@@ -78,18 +78,21 @@ pub struct Transport {
     #[allow(unused)]
     id: uuid::Uuid,
     #[allow(unused)]
+    agent_id: AgentId,
+    #[allow(unused)]
     session_id: SessionId,
     #[deref]
     sender: Sender<HttpRespMessage>,
 }
 
 impl Transport {
-    fn new(session_id: &SessionId) -> (Self, Receiver<HttpRespMessage>) {
+    fn new(session_id: &SessionId, agent_id: AgentId) -> (Self, Receiver<HttpRespMessage>) {
         let (sender, rx) = tokio::sync::mpsc::channel(64);
         (
             Self {
                 id: uuid::Uuid::new_v4(),
                 session_id: session_id.clone(),
+                agent_id,
                 sender,
             },
             rx,
@@ -98,7 +101,7 @@ impl Transport {
 }
 
 #[derive(Deref, Default)]
-pub struct Client(Mutex<HashMap<UserId, Vec<Transport>>>);
+pub struct Client(Mutex<HashMap<UserId, HashMap<AgentId, Vec<Transport>>>>);
 #[derive(Clone)]
 struct AppState {
     http_channel: Arc<HttpChannel>,
@@ -191,11 +194,16 @@ impl Channel for HttpChannel {
 #[derive(Clone, Serialize, Deserialize)]
 struct ChatRecvSSEParams {
     user_id: UserId,
+    /// default to main
+    agent_id: Option<AgentId>,
 }
 
-#[derive(Clone, Serialize, Deserialize, Default)]
-#[serde(default)]
-struct ChatSendParams {}
+#[derive(Clone, Serialize, Deserialize)]
+struct ChatSendParams {
+    user_id: UserId,
+    /// default to main
+    agent_id: Option<AgentId>,
+}
 
 #[derive(Clone, Copy, Serialize, Deserialize)]
 enum ChatRespType {
@@ -212,19 +220,25 @@ impl HttpChannel {
         State(AppState {
             http_channel,
             client,
+            agent,
             ..
         }): State<AppState>,
-        Query(ChatRecvSSEParams { user_id }): Query<ChatRecvSSEParams>,
+        Query(ChatRecvSSEParams { user_id, agent_id }): Query<ChatRecvSSEParams>,
     ) -> Result<axum::response::Response, StatusCode> {
         let session_id =
             SessionId::try_from((user_id.deref(), &http_channel.config)).map_err(|err| {
                 warn!("handle_chat_recv failed, err: {err}");
                 StatusCode::FORBIDDEN
             })?;
+        let agent_id = agent_id.as_ref().unwrap_or(agent.id());
         let rx = {
             let mut transports = client.lock().await;
-            let vec = transports.entry(user_id.clone()).or_insert(vec![]);
-            let (transport, rx) = Transport::new(&session_id);
+            let vec = transports
+                .entry(user_id.clone())
+                .or_insert(Default::default())
+                .entry(agent_id.clone())
+                .or_insert(Default::default());
+            let (transport, rx) = Transport::new(&session_id, agent_id.clone());
             vec.push(transport);
             rx
         };
@@ -253,24 +267,27 @@ impl HttpChannel {
             client,
         }): State<AppState>,
         Path(resp_type): Path<ChatRespType>,
-        Query(_): Query<ChatSendParams>,
+        Query(ChatSendParams { user_id, agent_id }): Query<ChatSendParams>,
         Json(data): Json<HttpReqMessage>,
     ) -> Result<axum::response::Response, StatusCode> {
-        let session_id = SessionId::try_from((data.user_id.deref(), &http_channel.config))
-            .map_err(|err| {
+        let session_id =
+            SessionId::try_from((user_id.deref(), &http_channel.config)).map_err(|err| {
                 warn!("handle_chat_recv failed, err: {err}");
                 StatusCode::FORBIDDEN
             })?;
+        let agent_id = agent_id.as_ref().unwrap_or(agent.id());
         match resp_type {
             ChatRespType::SSE => {
                 let transports_exist = {
                     let transports = client.lock().await;
-                    transports.get(&data.user_id).is_some()
+                    transports
+                        .get(&user_id)
+                        .and_then(|it| it.get(agent_id))
+                        .is_some()
                 };
                 if !transports_exist {
                     warn!(
-                        "handle_chat_recv failed, transports not exist, user_id: {}",
-                        &data.user_id
+                        "handle_chat_recv failed, transports not exist, user_id: {user_id}, agent_id: {agent_id}",
                     );
                     return Err(StatusCode::FORBIDDEN);
                 }
@@ -284,9 +301,9 @@ impl HttpChannel {
                 Ok(StatusCode::OK.into_response())
             }
             ChatRespType::Streamable => {
-                let (transport, rx) = Transport::new(&session_id);
+                let (transport, rx) = Transport::new(&session_id, agent_id.clone());
                 let client = Arc::new(Client(Mutex::new(hash_map!(
-                    data.user_id.clone() => vec![transport],
+                    user_id.clone() => hash_map!(agent_id.clone() => vec![transport],),
                 ))));
                 let _ = http_channel
                     .handle_input_message(agent, session_id, client, data.clone())
@@ -295,7 +312,6 @@ impl HttpChannel {
                         warn!("handle_chat_send failed, err: {err}");
                         StatusCode::INTERNAL_SERVER_ERROR
                     })?;
-
                 use futures_util::stream::StreamExt as _;
                 let stream = ReceiverStream::new(rx)
                     .flat_map(|it| stream::iter(it.payloads))
@@ -316,9 +332,9 @@ impl HttpChannel {
                 Ok(response)
             }
             ChatRespType::Completable => {
-                let (transport, mut rx) = Transport::new(&session_id);
+                let (transport, mut rx) = Transport::new(&session_id, agent_id.clone());
                 let client = Arc::new(Client(Mutex::new(hash_map!(
-                    data.user_id.clone() => vec![transport],
+                    user_id.clone() => hash_map!(agent_id.clone() => vec![transport],),
                 ))));
                 let _ = http_channel
                     .handle_input_message(agent, session_id, client, data.clone())
@@ -337,7 +353,7 @@ impl HttpChannel {
                 }
                 Ok(Json(HttpRespMessage {
                     message_id: data.message_id,
-                    user_id: data.user_id,
+                    user_id,
                     payloads,
                 })
                 .into_response())

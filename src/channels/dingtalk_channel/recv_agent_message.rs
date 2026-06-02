@@ -17,6 +17,7 @@ impl DingtalkChannel {
         inbound_message: Option<&MessageData>,
         ChannelMessage {
             session_id,
+            agent_id: _,
             message,
         }: &ChannelMessage,
         curr_state: AgentRespState,

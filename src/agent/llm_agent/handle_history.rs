@@ -55,6 +55,7 @@ where
             let _ = channel_message_sender
                 .send(Ok(ChannelMessage {
                     session_id: session_id.clone(),
+                    agent_id: self.id.clone(),
                     message: AgentResponse::Notify("Trigger history compact...".into()),
                 }))
                 .await;
@@ -80,6 +81,7 @@ where
             let _ = channel_message_sender
                 .send(Ok(ChannelMessage {
                     session_id: session_id.clone(),
+                    agent_id: self.id.clone(),
                     message: AgentResponse::HistoryCompact(result),
                 }))
                 .await;

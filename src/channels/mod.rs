@@ -1,4 +1,4 @@
-use crate::agent::{Agent, AgentRequest, AgentRequestContext, AgentResponse};
+use crate::agent::{Agent, AgentId, AgentRequest, AgentRequestContext, AgentResponse};
 use crate::config::{Config, Workspace};
 use async_trait::async_trait;
 use derive_more::Deref;
@@ -124,6 +124,7 @@ pub struct ChannelContext {
 #[derive(Clone, Deref)]
 pub struct ChannelMessage {
     pub session_id: SessionId,
+    pub agent_id: AgentId,
     #[deref]
     pub message: AgentResponse,
 }

@@ -11,7 +11,6 @@ use uuid::Uuid;
 pub struct HttpReqMessage {
     #[serde(default)]
     pub message_id: MessageId,
-    pub user_id: UserId,
     pub payloads: Vec<Payload>,
 }
 

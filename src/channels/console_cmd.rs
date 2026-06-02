@@ -53,9 +53,11 @@ impl Console {
                     let agent = Arc::clone(&agent);
                     let session_id = session_id.clone();
                     let _ = tokio::spawn(async move {
+                        let agent_id = agent.id().clone();
                         let _ = tx
                             .send(Ok(ChannelMessage {
                                 session_id: session_id.clone(),
+                                agent_id: agent_id.clone(),
                                 message: AgentResponse::Notify(
                                     "正在执行会话压缩...".to_string().into(),
                                 ),
@@ -65,6 +67,7 @@ impl Console {
                         let _ = tx
                             .send(Ok(ChannelMessage {
                                 session_id,
+                                agent_id,
                                 message: AgentResponse::HistoryCompact(result),
                             }))
                             .await;

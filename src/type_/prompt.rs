@@ -1,5 +1,6 @@
 use derive_more::{Deref, Display, From, FromStr, Into};
 use serde::{Deserialize, Serialize};
+use std::ops::Deref;
 
 #[derive(
     Debug,
@@ -16,6 +17,7 @@ use serde::{Deserialize, Serialize};
     PartialOrd,
     Deref,
     Into,
+    Default,
 )]
 pub struct Prompt(pub String);
 
@@ -31,6 +33,18 @@ impl From<super::Text> for Prompt {
     }
 }
 
+impl Prompt {
+    pub fn append_line<P: Into<Prompt>>(&self, prompt: P) -> Prompt {
+        let p = format!(
+            r#"{}
+        {}"#,
+            self,
+            prompt.into()
+        );
+        p.into()
+    }
+}
+
 #[derive(
     Debug,
     Clone,
@@ -46,8 +60,15 @@ impl From<super::Text> for Prompt {
     PartialOrd,
     Deref,
     Into,
+    Default,
 )]
 pub struct SystemPrompt(Prompt);
+
+impl SystemPrompt {
+    pub fn append_line<P: Into<SystemPrompt>>(&self, prompt: P) -> SystemPrompt {
+        self.deref().append_line(prompt.into().0).into()
+    }
+}
 
 impl From<&str> for SystemPrompt {
     fn from(value: &str) -> Self {

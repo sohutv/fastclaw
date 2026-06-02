@@ -34,6 +34,7 @@ where
         let _ = channel_message_sender
             .send(Ok(ChannelMessage {
                 session_id: session_id.clone(),
+                agent_id: self.id.clone(),
                 message: AgentResponse::Start,
             }))
             .await;
@@ -116,6 +117,7 @@ where
                 let _ = channel_message_sender
                     .send(Ok(ChannelMessage {
                         session_id: session_id.clone(),
+                        agent_id: self.id.clone(),
                         message,
                     }))
                     .await;
