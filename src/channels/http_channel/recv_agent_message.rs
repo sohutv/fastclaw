@@ -284,7 +284,7 @@ impl HttpChannel {
 
 impl HttpRespMessage {
     async fn send(self, client: &Client, agent_id: &AgentId) {
-        let mut client = client.lock().await;
+        let mut client = client.write().await;
         if let Some(user_transports) = client.get_mut(&self.user_id) {
             if let Some((agent_id, agent_transports)) = user_transports.remove_entry(agent_id) {
                 let mut updated = vec![];

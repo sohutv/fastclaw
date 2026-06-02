@@ -22,7 +22,7 @@ use derive_more::Deref;
 use futures_util::stream;
 use itertools::Itertools;
 use serde::{Deserialize, Serialize};
-use tokio::sync::Mutex;
+use tokio::sync::RwLock;
 use tokio_stream::wrappers::ReceiverStream;
 
 mod type_;
@@ -101,7 +101,7 @@ impl Transport {
 }
 
 #[derive(Deref, Default)]
-pub struct Client(Mutex<HashMap<UserId, HashMap<AgentId, Vec<Transport>>>>);
+pub struct Client(RwLock<HashMap<UserId, HashMap<AgentId, Vec<Transport>>>>);
 #[derive(Clone)]
 struct AppState {
     http_channel: Arc<HttpChannel>,
@@ -232,7 +232,7 @@ impl HttpChannel {
             })?;
         let agent_id = agent_id.as_ref().unwrap_or(agent.id());
         let rx = {
-            let mut transports = client.lock().await;
+            let mut transports = client.write().await;
             let vec = transports
                 .entry(user_id.clone())
                 .or_insert(Default::default())
@@ -257,6 +257,9 @@ impl HttpChannel {
             axum::http::header::CONTENT_TYPE,
             axum::http::header::HeaderValue::from_static("text/event-stream; charset=utf-8"),
         );
+        info!(
+            "chat response transport connected, session_id: {session_id}, user_id: {user_id}, agent_id: {agent_id}"
+        );
         Ok(response)
     }
 
@@ -276,10 +279,14 @@ impl HttpChannel {
                 StatusCode::FORBIDDEN
             })?;
         let agent_id = agent_id.as_ref().unwrap_or(agent.id());
+        info!(
+            "recv agent request, session_id: {session_id}, user_id: {user_id}, agent_id: {agent_id}, message_id: {}",
+            data.message_id
+        );
         match resp_type {
             ChatRespType::SSE => {
                 let transports_exist = {
-                    let transports = client.lock().await;
+                    let transports = client.read().await;
                     transports
                         .get(&user_id)
                         .and_then(|it| it.get(agent_id))
@@ -287,7 +294,8 @@ impl HttpChannel {
                 };
                 if !transports_exist {
                     warn!(
-                        "handle_chat_recv failed, transports not exist, user_id: {user_id}, agent_id: {agent_id}",
+                        "handle_chat_recv failed, transports not exist, session_id: {session_id}, user_id: {user_id}, agent_id: {agent_id}, message_id: {}",
+                        data.message_id
                     );
                     return Err(StatusCode::FORBIDDEN);
                 }
@@ -302,7 +310,7 @@ impl HttpChannel {
             }
             ChatRespType::Streamable => {
                 let (transport, rx) = Transport::new(&session_id, agent_id.clone());
-                let client = Arc::new(Client(Mutex::new(hash_map!(
+                let client = Arc::new(Client(RwLock::new(hash_map!(
                     user_id.clone() => hash_map!(agent_id.clone() => vec![transport],),
                 ))));
                 let _ = http_channel
@@ -333,7 +341,7 @@ impl HttpChannel {
             }
             ChatRespType::Completable => {
                 let (transport, mut rx) = Transport::new(&session_id, agent_id.clone());
-                let client = Arc::new(Client(Mutex::new(hash_map!(
+                let client = Arc::new(Client(RwLock::new(hash_map!(
                     user_id.clone() => hash_map!(agent_id.clone() => vec![transport],),
                 ))));
                 let _ = http_channel
