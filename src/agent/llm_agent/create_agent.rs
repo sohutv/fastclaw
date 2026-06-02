@@ -54,6 +54,7 @@ where
                 let filter = tool_filter.into();
                 crate::tools::FunctionTool::required_tools(ToolContext {
                     session_id: session_id.clone(),
+                    config: self.ctx.config,
                     parent_agent: Arc::clone(&self) as Arc<dyn Agent>,
                     channel_message_sender,
                     mcp_registry: self.ctx.mcp_registry,

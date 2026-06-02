@@ -230,6 +230,21 @@ impl HttpChannel {
                 warn!("handle_chat_recv failed, err: {err}");
                 StatusCode::FORBIDDEN
             })?;
+        if let Some(agent_id) = &agent_id {
+            if agent
+                .context()
+                .children
+                .read()
+                .await
+                .get(agent_id)
+                .is_none()
+            {
+                warn!(
+                    "handle_chat_keepalive failed, agent not exist, session_id: {session_id}, user_id: {user_id}, agent_id: {agent_id}",
+                );
+                return Err(StatusCode::FORBIDDEN);
+            }
+        }
         let agent_id = agent_id.as_ref().unwrap_or(agent.id());
         let rx = {
             let mut transports = client.write().await;
@@ -278,6 +293,19 @@ impl HttpChannel {
                 warn!("handle_chat_recv failed, err: {err}");
                 StatusCode::FORBIDDEN
             })?;
+        let agent = if let Some(agent_id) = &agent_id {
+            if let Some(agent) = agent.context().children.read().await.get(agent_id) {
+                Arc::clone(agent)
+            } else {
+                warn!(
+                    "handle_chat failed, agent not exist, session_id: {session_id}, user_id: {user_id}, agent_id: {agent_id}, message_id: {}",
+                    data.message_id
+                );
+                return Err(StatusCode::FORBIDDEN);
+            }
+        } else {
+            agent
+        };
         let agent_id = agent_id.as_ref().unwrap_or(agent.id());
         info!(
             "recv agent request, session_id: {session_id}, user_id: {user_id}, agent_id: {agent_id}, message_id: {}",

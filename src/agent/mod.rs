@@ -120,7 +120,7 @@ pub trait Agent: SessionCompactSupport + AgentClone + Send + Sync {
                         .await?
                 }
             };
-            let agent = Arc::new(agent) as Arc<dyn Agent>;
+            let agent = (Arc::new(agent) as Arc<dyn Agent>).start().await?;
             children.insert(agent.id().clone(), Arc::clone(&agent));
             Ok(agent)
         }

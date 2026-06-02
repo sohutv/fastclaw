@@ -2,7 +2,10 @@ use crate::ModelName;
 use derive_more::{Deref, Display, From, FromStr};
 use rig::client::CompletionClient;
 use serde::{Deserialize, Serialize};
+use std::collections::BTreeMap;
 use std::fmt::Debug;
+use strum::EnumIter;
+
 #[cfg(feature = "model_provider_openai_compatible")]
 pub mod openai_compatible;
 
@@ -17,6 +20,14 @@ pub trait ModelProvider: Clone {
 pub enum ModelProviders {
     #[cfg(feature = "model_provider_openai_compatible")]
     OpenaiCompatible(openai_compatible::OpenaiCompatible),
+}
+
+impl ModelProviders {
+    pub fn models(&self) -> &BTreeMap<ModelName, ModelSettings> {
+        match self {
+            ModelProviders::OpenaiCompatible(provider) => &provider.models,
+        }
+    }
 }
 
 impl Default for ModelProviders {
@@ -57,6 +68,17 @@ pub struct ModelSettings {
     pub embedding: bool,
     pub max_tokens: u64,
     pub reasoning_effort_mapping: ReasoningEffortMapping,
+    pub performance: ModelPerformance,
+}
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, Default, Eq, PartialEq, Display, EnumIter)]
+pub enum ModelPerformance {
+    #[serde(rename = "normal")]
+    #[default]
+    Normal,
+    #[serde(rename = "fast")]
+    Fast,
+    #[serde(rename = "thought")]
+    Thought,
 }
 
 impl Default for ModelSettings {
@@ -73,6 +95,7 @@ impl Default for ModelSettings {
             embedding: false,
             max_tokens: 65536,
             reasoning_effort_mapping: Default::default(),
+            performance: Default::default(),
         }
     }
 }

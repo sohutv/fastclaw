@@ -1,5 +1,5 @@
 use base64::Engine;
-use derive_more::{Deref, From, FromStr};
+use derive_more::{Deref, Display, From, FromStr};
 use serde::{Deserialize, Serialize};
 use std::ops::Deref;
 use std::str::FromStr;
@@ -17,6 +17,7 @@ use std::str::FromStr;
     Ord,
     PartialOrd,
     Default,
+    Display,
 )]
 pub struct ModelName(String);
 

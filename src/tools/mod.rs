@@ -19,6 +19,7 @@ mod image_tool;
 mod media;
 use crate::tools::mcp_tool::McpRegistry;
 use media::*;
+use crate::config::Config;
 
 #[cfg(feature = "cloud_storage_tool")]
 mod cloud_storage_tool;
@@ -40,6 +41,7 @@ pub struct ToolCallError(String);
 #[derive(Clone)]
 pub struct ToolContext {
     pub session_id: SessionId,
+    pub config: &'static Config, 
     pub parent_agent: Arc<dyn Agent>,
     #[allow(unused)]
     pub channel_message_sender: Sender<crate::Result<ChannelMessage>>,
