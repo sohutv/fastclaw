@@ -101,7 +101,11 @@ impl Channel for CliChannel {
                                         ))
                                         .await;
                                     let _ = self_
-                                        .handle_agent_message(Arc::new(()), Some(line.to_string()), &mut message_receiver)
+                                        .handle_agent_message(
+                                            Arc::new(()),
+                                            Some(line.to_string()),
+                                            &mut message_receiver,
+                                        )
                                         .await;
                                 }
                             }
@@ -259,7 +263,7 @@ Reasoning >> ////////
                 println!(
                     r#"
 <<Tokens:{}↑{}↓{}>>
-                    "#,
+"#,
                     usage.total_tokens, usage.input_tokens, usage.output_tokens
                 );
                 Ok(AgentRespState::Final)

@@ -60,7 +60,7 @@ Enhance an image with optional HDR and white balance adjustments.
     }
 
     async fn call(&self, Args { image, hdr, wb }: Self::Args) -> Result<Self::Output, Self::Error> {
-        let Some(image_enhancer_config) = &self.ctx.agent_context().config.image_enhancer else {
+        let Some(image_enhancer_config) = &self.ctx.config.image_enhancer else {
             return Ok(ToolCallRsult::error("image_enhancer not configured"));
         };
         let image_enhancer = match image_enhancer_config.try_into_image_enhancer().await {
@@ -85,7 +85,7 @@ Enhance an image with optional HDR and white balance adjustments.
         {
             Ok(result) => {
                 let image =
-                    if let Some(storage_config) = &self.ctx.agent_context().config.storage {
+                    if let Some(storage_config) = &self.ctx.config.storage {
                         let storage = storage_config
                             .try_into_storage()
                             .await

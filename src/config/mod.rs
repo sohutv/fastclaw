@@ -1,7 +1,7 @@
+use crate::ModelName;
 use crate::agent::{AgentId, AgentSettings};
 use crate::config::logger::LogConfig;
 use crate::model_provider::{ModelProviderName, ModelProviders};
-use crate::ModelName;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
@@ -31,6 +31,7 @@ pub struct Config {
     #[serde(default)]
     pub heartbeat_config: HeartbeatConfig,
     pub websearch: Option<WebsearchConfigs>,
+    pub image_understanding: ImageUnderstandingConfig,
     pub imagegen: Option<ImageGenConfigs>,
     pub image_enhancer: Option<ImageEnhancerConfigs>,
     pub storage: Option<StorageConfigs>,
@@ -52,5 +53,6 @@ impl Default for HeartbeatConfig {
 }
 
 mod workspace;
-pub use workspace::*;
+use crate::tools::ImageUnderstandingConfig;
 use crate::tools::mcp_tool::McpToolSetConfigs;
+pub use workspace::*;

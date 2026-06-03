@@ -49,6 +49,7 @@ impl Default for Config {
             http_config: None,
             heartbeat_config: Default::default(),
             websearch: None,
+            image_understanding: Default::default(),
             imagegen: None,
             image_enhancer: None,
             storage: None,

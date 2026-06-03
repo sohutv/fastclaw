@@ -8,6 +8,18 @@ use rig::OneOrMany;
 use rig::completion::{AssistantContent, ToolDefinition};
 use rig::message::{DocumentSourceKind, ImageDetail, ImageMediaType, Message, UserContent};
 use rig::tool::Tool;
+use serde::{Deserialize, Serialize};
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct Config {
+    pub enable: bool,
+}
+impl Default for Config {
+    fn default() -> Self {
+        Self { enable: true }
+    }
+}
 
 #[derive(Clone)]
 pub struct ImageUnderstandingTool {

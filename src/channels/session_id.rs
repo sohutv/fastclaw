@@ -69,6 +69,7 @@ pub struct SessionSettings {
     pub show_compacting_ignore: bool,
     pub show_error: bool,
     pub show_disconnected: bool,
+    pub show_token_usage: bool,
 }
 
 impl Default for SessionSettings {
@@ -85,6 +86,7 @@ impl Default for SessionSettings {
             show_compacting_ignore: false,
             show_error: true,
             show_disconnected: false,
+            show_token_usage: true,
         }
     }
 }

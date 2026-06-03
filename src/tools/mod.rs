@@ -16,6 +16,7 @@ mod time_tool;
 mod websearch_tool;
 
 mod image_tool;
+pub use image_tool::ImageUnderstandingConfig;
 mod media;
 use crate::tools::mcp_tool::McpRegistry;
 use media::*;
@@ -86,20 +87,20 @@ impl FunctionTool {
         let tools: Vec<Vec<Box<dyn ToolDyn>>> = vec![
             vec![Box::new(shell_tool::ShellTool { ctx: ctx.clone() })],
             vec![Box::new(time_tool::CurrentTimeTool { ctx: ctx.clone() })],
-            if let Some(_) = ctx.agent_context().config.websearch {
+            if let Some(_) = ctx.config.websearch {
                 vec![Box::new(websearch_tool::WebSearchTool { ctx: ctx.clone() })]
             } else {
                 vec![]
             },
             image_tool::ImageTools::create(ctx.clone()).await?,
             #[cfg(feature = "cloud_storage_tool")]
-            if let Some(_) = ctx.agent_context().config.storage {
+            if let Some(_) = ctx.config.storage {
                 cloud_storage_tool::CloudStorageTools::create(ctx.clone()).await?
             } else {
                 vec![]
             },
             TaskTools::create(ctx.clone()).await?,
-            if let Some(_) = ctx.agent_context().config.embedding {
+            if let Some(_) = ctx.config.embedding {
                 vec![Box::new(memory_recall::MemoryRecallTool {
                     ctx: ctx.clone(),
                 })]

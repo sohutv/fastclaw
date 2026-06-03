@@ -144,22 +144,27 @@ impl DingtalkChannel {
             }
             AgentResponse::Final(usage) => {
                 let content = {
-                    let content = MessageContentMarkdown::from((
-                        "回复中...",
+                    let text = buff.join("");
+                    let token_usage = format!(
+                        "*<<Tokens:{}↑{}↓{}>>*",
+                        usage.total_tokens, usage.input_tokens, usage.output_tokens
+                    );
+                    buff.clear();
+                    if session_id.settings().show_token_usage {
                         format!(
                             r#"
-{}
+{text}
 
-*<<Tokens:{}↑{}↓{}>>*
-                    "#,
-                            buff.join(""),
-                            usage.total_tokens,
-                            usage.input_tokens,
-                            usage.output_tokens
-                        ),
-                    ));
-                    buff.clear();
-                    content
+{token_usage}
+"#,
+                        )
+                    } else {
+                        format!(
+                            r#"
+{text}
+"#
+                        )
+                    }
                 };
                 if let Ok(Some(robot_message)) = create_robot_messages_for_agent(
                     session_id,

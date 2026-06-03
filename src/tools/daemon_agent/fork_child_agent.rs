@@ -1,7 +1,7 @@
 use crate::agent::AgentId;
 use crate::model_provider::ModelPerformance;
 use crate::tools::{ToolCallError, ToolCallRsult, ToolContext};
-use crate::type_::{Prompt, SystemPrompt};
+use crate::type_::SystemPrompt;
 use log::info;
 use rig::completion::ToolDefinition;
 use rig::tool::Tool;
@@ -17,8 +17,8 @@ pub struct ForkChildAgentTool {
 #[allow(unused)]
 pub struct Args {
     id: Option<AgentId>,
-    model: Option<ModelPerformance>,
-    skill_names: Vec<Prompt>,
+    model: ModelPerformance,
+    system_prompt: SystemPrompt,
 }
 
 #[allow(async_fn_in_trait)]
@@ -45,22 +45,19 @@ impl Tool for ForkChildAgentTool {
                         "enum": ModelPerformance::iter().map(|it|it.to_string()).collect::<Vec<_>>(),
                         "description": "The performance level of the model to use for the new agent. This will automatically select an appropriate model provider and model name based on the specified performance tier"
                     },
-                    "skill_names": {
-                        "type": "array",
-                        "description": "Optional list of skill names to enable for the new agent",
-                        "items": {
-                            "type": "string"
-                        }
+                    "system_prompt": {
+                        "type": "string",
+                        "description": "The system prompt that defines the behavior, personality, and instructions for the newly forked daemon agent. This will guide how the agent responds and what tasks it can perform",
                     }
                 },
-                "required": ["model_provider", "model_name"],
+                "required": ["model", "system_prompt"],
             }),
         }
     }
 
     async fn call(&self, args: Self::Args) -> Result<Self::Output, Self::Error> {
         let (model_provider, model_name) = {
-            let p = &args.model.unwrap_or_default();
+            let p = args.model;
             let dst = self
                 .ctx
                 .config
@@ -93,12 +90,7 @@ impl Tool for ForkChildAgentTool {
             model_provider, model_name
         );
         let id: AgentId = args.id.unwrap_or_else(|| uuid::Uuid::new_v4().into());
-        let system_prompt = SystemPrompt::from("").append_line(
-            args.skill_names
-                .into_iter()
-                .reduce(|l, r| l.append_line(r))
-                .unwrap_or_default(),
-        );
+        let system_prompt = args.system_prompt.clone();
         match self
             .ctx
             .parent_agent

@@ -58,7 +58,7 @@ Generate images from a text prompt.
     }
 
     async fn call(&self, Args { prompt, images }: Self::Args) -> Result<Self::Output, Self::Error> {
-        let Some(image_gen_config) = &self.ctx.agent_context().config.imagegen else {
+        let Some(image_gen_config) = &self.ctx.config.imagegen else {
             return Ok(ToolCallRsult::error("imagegen not configured"));
         };
         let imagegen = match image_gen_config.try_into_imagegen().await {
@@ -89,7 +89,7 @@ Generate images from a text prompt.
                     return Ok(ToolCallRsult::error("no images generated"));
                 }
                 let images =
-                    if let Some(storage_config) = &self.ctx.agent_context().config.storage {
+                    if let Some(storage_config) = &self.ctx.config.storage {
                         let storage = storage_config
                             .try_into_storage()
                             .await
