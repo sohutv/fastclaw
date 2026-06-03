@@ -6,13 +6,13 @@ use crate::agent::{
 use crate::config::Config;
 use crate::memory::MemoryManager;
 use crate::model_provider::{ModelProvider, ModelSettings};
+use crate::tools::mcp_tool::McpRegistry;
+use crate::type_::SystemPrompt;
 use anyhow::anyhow;
 use async_trait::async_trait;
 use rig::client::CompletionClient;
 use std::sync::Arc;
 use tokio::sync::mpsc::Sender;
-use crate::tools::mcp_tool::McpRegistry;
-use crate::type_::SystemPrompt;
 
 mod create_agent;
 mod handle_history;
@@ -62,7 +62,7 @@ where
             memory_manager,
             workspace,
             system_prompt,
-            mcp_registry
+            mcp_registry,
         )
         .await?)
     }
@@ -148,7 +148,7 @@ where
                 drop(sender);
                 return Ok(self);
             }
-            let (tx, mut rx) = tokio::sync::mpsc::channel(64);
+            let (tx, mut rx) = tokio::sync::mpsc::channel(*self.agent_settings.task_queue_size);
             let self_ = Arc::clone(&self);
             tokio::spawn(async move {
                 while let Some((request, ctx)) = rx.recv().await {
@@ -179,6 +179,10 @@ where
 
     fn model_settings(&self) -> &ModelSettings {
         &self.model_settings
+    }
+
+    fn agent_settings(&self) -> &AgentSettings {
+        &self.agent_settings
     }
 
     fn id(&self) -> &AgentId {

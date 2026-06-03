@@ -297,11 +297,7 @@ impl HttpChannel {
             if let Some(agent) = agent.context().children.read().await.get(agent_id) {
                 Arc::clone(agent)
             } else {
-                warn!(
-                    "handle_chat failed, agent not exist, session_id: {session_id}, user_id: {user_id}, agent_id: {agent_id}, message_id: {}",
-                    data.message_id
-                );
-                return Err(StatusCode::FORBIDDEN);
+                agent
             }
         } else {
             agent

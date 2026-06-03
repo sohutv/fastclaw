@@ -92,6 +92,8 @@ pub trait Agent: SessionCompactSupport + AgentClone + Send + Sync {
     #[allow(unused)]
     fn model_settings(&self) -> &ModelSettings;
 
+    fn agent_settings(&self) -> &AgentSettings;
+
     async fn fork_child(
         &self,
         id: AgentId,
@@ -302,6 +304,23 @@ pub struct AgentSettings {
     pub max_turns: usize,
     pub reasoning_effort: ReasoningEffort,
     pub compact_threshold: f32,
+    pub task_queue_size: TaskQueueSize,
+    pub task_backpressure: TaskBackpressure,
+}
+#[derive(Debug, Clone, Serialize, Deserialize, Deref)]
+pub struct TaskQueueSize(usize);
+impl Default for TaskQueueSize {
+    fn default() -> Self {
+        Self(8)
+    }
+}
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub enum TaskBackpressure {
+    #[serde(alias = "drop")]
+    Drop,
+    #[default]
+    #[serde(alias = "wait")]
+    Wait,
 }
 
 impl Default for AgentSettings {
@@ -315,6 +334,8 @@ impl Default for AgentSettings {
             max_turns: 256,
             compact_threshold: 0.8,
             reasoning_effort: Default::default(),
+            task_queue_size: Default::default(),
+            task_backpressure: Default::default(),
         }
     }
 }

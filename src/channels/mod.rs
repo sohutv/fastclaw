@@ -1,11 +1,15 @@
-use crate::agent::{Agent, AgentId, AgentRequest, AgentRequestContext, AgentResponse};
+use crate::agent::{
+    Agent, AgentId, AgentRequest, AgentRequestContext, AgentResponse, TaskBackpressure,
+};
 use crate::config::{Config, Workspace};
+use anyhow::anyhow;
 use async_trait::async_trait;
 use derive_more::Deref;
-use log::{error, info};
+use log::{error, info, warn};
 use std::sync::Arc;
 use strum::Display;
 use tokio::sync::mpsc::Receiver;
+use tokio::sync::mpsc::error::TrySendError;
 use tokio::task::JoinHandle;
 
 #[cfg(feature = "channel_cli_channel")]
@@ -47,37 +51,50 @@ where
         addi_system_prompt: Option<String>,
     ) -> crate::Result<Receiver<crate::Result<ChannelMessage>>> {
         let (channel_message_sender, channel_message_receiver) = tokio::sync::mpsc::channel(32);
-        tokio::spawn(async move {
-            async fn spawn_agent_task_inner(
-                agent: Arc<dyn Agent>,
-                req: AgentRequest,
-                ctx: AgentRequestContext,
-            ) -> crate::Result<()> {
-                let sender = agent.get_channel_sender().await?;
-                let _ = sender.send((req, ctx)).await?;
-                Ok(())
-            }
-            let task_id = req.id.clone();
-            match spawn_agent_task_inner(
-                agent,
-                req,
-                AgentRequestContext {
-                    channel_message_sender: channel_message_sender,
-                    addi_system_prompt,
-                    tool_filter: Default::default(),
-                    with_history: true,
+        async fn spawn_agent_task_inner(
+            agent: Arc<dyn Agent>,
+            req: AgentRequest,
+            ctx: AgentRequestContext,
+        ) -> crate::Result<()> {
+            let sender = agent.get_channel_sender().await?;
+            match agent.agent_settings().task_backpressure {
+                TaskBackpressure::Drop => match sender.try_send((req, ctx)) {
+                    Ok(()) => Ok(()),
+                    Err(TrySendError::Full((req, _))) => {
+                        warn!("agent task queue is full, drop agent-request: {}", req.id);
+                        Ok(())
+                    }
+                    Err(err) => Err(anyhow!("{err}")),
                 },
-            )
-            .await
-            {
-                Ok(_) => {
-                    info!("Agent run completed, task_id: {}", task_id);
-                }
-                Err(err) => {
-                    error!("Agent run failed, task_id: {}, error: {}", task_id, err);
+                TaskBackpressure::Wait => {
+                    let _ = sender.send((req, ctx)).await?;
+                    Ok(())
                 }
             }
-        });
+        }
+        let task_id = req.id.clone();
+        match spawn_agent_task_inner(
+            agent,
+            req,
+            AgentRequestContext {
+                channel_message_sender,
+                addi_system_prompt,
+                tool_filter: Default::default(),
+                with_history: true,
+            },
+        )
+        .await
+        {
+            Ok(_) => {
+                info!("agent task submit ok, task_id: {}", task_id);
+            }
+            Err(err) => {
+                error!(
+                    "agent task submit  failed, task_id: {}, error: {}",
+                    task_id, err
+                );
+            }
+        }
         Ok(channel_message_receiver)
     }
 
@@ -103,7 +120,9 @@ where
             .await?;
         let self_ = Arc::clone(&self);
         let join_handle = tokio::spawn(async move {
-            let _ = self_.handle_agent_message(client, inbound_message, &mut receiver).await?;
+            let _ = self_
+                .handle_agent_message(client, inbound_message, &mut receiver)
+                .await?;
             Ok(())
         });
         Ok(join_handle)
@@ -160,7 +179,12 @@ async fn create_robot_messages_for_agent<Content, F, InboundMsg, OutboundMsg>(
     outbound_msg_creator: F,
 ) -> crate::Result<Option<OutboundMsg>>
 where
-    F: FnOnce(&SessionId, &ChannelContext, Option<&InboundMsg>, Content) -> crate::Result<OutboundMsg>,
+    F: FnOnce(
+        &SessionId,
+        &ChannelContext,
+        Option<&InboundMsg>,
+        Content,
+    ) -> crate::Result<OutboundMsg>,
 {
     let SessionSettings {
         show_start,
