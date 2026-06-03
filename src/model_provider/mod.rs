@@ -72,12 +72,12 @@ pub struct ModelSettings {
 }
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, Default, Eq, PartialEq, Display, EnumIter)]
 pub enum ModelPerformance {
-    #[serde(rename = "normal")]
+    #[serde(alias = "normal")]
     #[default]
     Normal,
-    #[serde(rename = "fast")]
+    #[serde(alias = "fast")]
     Fast,
-    #[serde(rename = "thought")]
+    #[serde(alias = "thought")]
     Thought,
 }
 
