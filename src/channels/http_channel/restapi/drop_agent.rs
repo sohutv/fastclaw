@@ -39,7 +39,7 @@ pub async fn handle(
     }
     let agent = agent.drop_child(&agent_id).await.map_err(|err| {
         error!("drop agent {agent_id} failed, err: {err}");
-        StatusCode::INTERNAL_SERVER_ERROR
+        StatusCode::BAD_REQUEST
     })?;
     log::info!("drop agent {} ok", agent.id());
     Ok(())

@@ -18,9 +18,22 @@ pub struct DaemonAgentTools;
 
 impl DaemonAgentTools {
     pub async fn create(ctx: ToolContext) -> crate::Result<Vec<Box<dyn ToolDyn>>> {
-        Ok(vec![
-            Box::new(fork_child_agent::ForkChildAgentTool { ctx: ctx.clone() }),
-            Box::new(drop_child_agent::DropChildAgentTool { ctx: ctx.clone() }),
-        ])
+        let DaemonAgentToolsConfig {
+            fork_enable,
+            drop_enable,
+        } = ctx.config.daemon_agent_tools.clone().unwrap_or_default();
+
+        let mut arr: Vec<Box<dyn ToolDyn>> = vec![];
+        if fork_enable {
+            arr.push(Box::new(fork_child_agent::ForkChildAgentTool {
+                ctx: ctx.clone(),
+            }));
+        }
+        if drop_enable {
+            arr.push(Box::new(drop_child_agent::DropChildAgentTool {
+                ctx: ctx.clone(),
+            }));
+        }
+        Ok(arr)
     }
 }
