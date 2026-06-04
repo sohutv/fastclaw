@@ -151,7 +151,7 @@ impl HttpChannel {
         let msg_id = message_id.clone();
         info!("Submit task to agent, msg_id: {}", msg_id);
         match Arc::clone(&self)
-            .submit_agent_task(
+            .append_agent_task(
                 Arc::clone(&client),
                 Arc::clone(&agent),
                 None,

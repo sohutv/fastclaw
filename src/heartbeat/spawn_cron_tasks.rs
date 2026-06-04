@@ -97,7 +97,7 @@ where
             }
             if let TaskScheduleResult::Exec = time_to_exec {
                 match Arc::clone(&self.channel)
-                    .submit_agent_task(
+                    .append_agent_task(
                         Arc::clone(&self.client),
                         Arc::clone(&self.agent),
                         None,

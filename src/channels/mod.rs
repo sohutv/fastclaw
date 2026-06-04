@@ -44,8 +44,28 @@ where
         agent: Arc<dyn Agent>,
     ) -> crate::Result<(Arc<Self>, Arc<Self::Client>, Self::JoinHandle)>;
 
+    /// handle_agent_task
+    /// spawn_agent_task -> spawn(handle_agent_message)
+    async fn append_agent_task(
+        self: Arc<Self>,
+        client: Arc<Self::Client>,
+        agent: Arc<dyn Agent>,
+        addi_system_prompt: Option<String>,
+        inbound_message: Option<Self::InboundMessage>,
+        req: AgentRequest,
+    ) -> crate::Result<JoinHandle<crate::Result<()>>> {
+        let mut receiver = Self::spawn_agent_task(agent, req.clone(), addi_system_prompt).await?;
+        let self_ = Arc::clone(&self);
+        let join_handle = tokio::spawn(async move {
+            let _ = self_
+                .handle_agent_message(client, inbound_message, &mut receiver)
+                .await?;
+            Ok(())
+        });
+        Ok(join_handle)
+    }
+
     async fn spawn_agent_task(
-        &self,
         agent: Arc<dyn Agent>,
         req: AgentRequest,
         addi_system_prompt: Option<String>,
@@ -58,6 +78,10 @@ where
         ) -> crate::Result<()> {
             let sender = agent.get_channel_sender().await?;
             match agent.agent_settings().task_backpressure {
+                TaskBackpressure::Wait => {
+                    let _ = sender.send((req, ctx)).await?;
+                    Ok(())
+                }
                 TaskBackpressure::Drop => match sender.try_send((req, ctx)) {
                     Ok(()) => Ok(()),
                     Err(TrySendError::Full((req, _))) => {
@@ -66,10 +90,6 @@ where
                     }
                     Err(err) => Err(anyhow!("{err}")),
                 },
-                TaskBackpressure::Wait => {
-                    let _ = sender.send((req, ctx)).await?;
-                    Ok(())
-                }
             }
         }
         let task_id = req.id.clone();
@@ -104,29 +124,6 @@ where
         inbound_message: Option<Self::InboundMessage>,
         receiver: &mut Receiver<crate::Result<ChannelMessage>>,
     ) -> crate::Result<()>;
-
-    /// handle_agent_task
-    /// spawn_agent_task -> spawn(handle_agent_message)
-    async fn submit_agent_task(
-        self: Arc<Self>,
-        client: Arc<Self::Client>,
-        agent: Arc<dyn Agent>,
-        addi_system_prompt: Option<String>,
-        inbound_message: Option<Self::InboundMessage>,
-        req: AgentRequest,
-    ) -> crate::Result<JoinHandle<crate::Result<()>>> {
-        let mut receiver = Arc::clone(&self)
-            .spawn_agent_task(agent, req.clone(), addi_system_prompt)
-            .await?;
-        let self_ = Arc::clone(&self);
-        let join_handle = tokio::spawn(async move {
-            let _ = self_
-                .handle_agent_message(client, inbound_message, &mut receiver)
-                .await?;
-            Ok(())
-        });
-        Ok(join_handle)
-    }
 
     fn allow_session_ids(&self) -> crate::Result<Vec<&SessionId>> {
         Ok(vec![])

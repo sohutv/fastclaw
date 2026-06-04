@@ -277,7 +277,7 @@ impl dingtalk_stream::handlers::CallbackHandler for DingTalkCallbackHandler {
         let msg_id = msg_id.clone();
         info!("Submit task to agent, msg_id: {}", msg_id);
         match Arc::clone(&self.channel)
-            .submit_agent_task(
+            .append_agent_task(
                 Arc::clone(&dingtalk_client),
                 Arc::clone(&self.agent),
                 Some(addi_system_prompt),

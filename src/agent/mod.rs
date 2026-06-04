@@ -339,11 +339,11 @@ impl Default for TaskQueueSize {
 }
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub enum TaskBackpressure {
-    #[serde(alias = "drop")]
-    Drop,
     #[default]
     #[serde(alias = "wait")]
     Wait,
+    #[serde(alias = "drop")]
+    Drop,
 }
 
 impl Default for AgentSettings {
