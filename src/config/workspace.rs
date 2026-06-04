@@ -19,6 +19,7 @@ pub struct Workspace {
     pub downloads_path: PathBuf,
     pub sql_pools: Arc<RwLock<HashMap<SessionId, Arc<SqlitePool>>>>,
     pub memory_conns: Arc<RwLock<HashMap<SessionId, Arc<Mutex<Connection>>>>>,
+    pub agent_groups_path: PathBuf,
 }
 
 impl Workspace {
@@ -48,6 +49,10 @@ impl Workspace {
         if !downloads_path.exists() {
             let _ = tokio::fs::create_dir_all(&downloads_path).await?;
         }
+        let agent_groups_path = path.join("agent_groups");
+        if !agent_groups_path.exists() {
+            let _ = tokio::fs::create_dir_all(&agent_groups_path).await?;
+        }
         let self_ = Self {
             path,
             sessions_path,
@@ -55,6 +60,7 @@ impl Workspace {
             downloads_path,
             sql_pools: Default::default(),
             memory_conns: Default::default(),
+            agent_groups_path,
         };
         Ok(self_)
     }

@@ -14,7 +14,7 @@ pub use r#type::*;
 mod config_;
 pub mod logger;
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 #[serde(default)]
 pub struct Config {
     pub default_model_provider: ModelProviderName,
@@ -40,6 +40,7 @@ pub struct Config {
     pub embedding: Option<EmbeddingConfigs>,
     #[serde(default)]
     pub mcp_tools: Option<McpToolSetConfigs>,
+    pub daemon_agent_tools: Option<DaemonAgentToolsConfig>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -55,6 +56,6 @@ impl Default for HeartbeatConfig {
 }
 
 mod workspace;
-use crate::tools::ImageUnderstandingConfig;
 use crate::tools::mcp_tool::McpToolSetConfigs;
+use crate::tools::{DaemonAgentToolsConfig, ImageUnderstandingConfig};
 pub use workspace::*;

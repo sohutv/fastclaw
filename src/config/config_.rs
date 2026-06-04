@@ -1,7 +1,5 @@
 use crate::ModelName;
 use crate::agent::AgentGroup;
-use crate::btree_map;
-use crate::config::logger::LogConfig;
 use crate::config::{AgentSettings, Config};
 use crate::model_provider::{ModelProviderName, ModelProviders};
 use anyhow::anyhow;
@@ -31,32 +29,6 @@ impl Config {
 
     pub fn agent_settings(&self, group: &AgentGroup) -> Option<&AgentSettings> {
         self.agent_settings.get(group)
-    }
-}
-
-impl Default for Config {
-    fn default() -> Self {
-        Self {
-            default_model_provider: Default::default(),
-            default_model: Default::default(),
-            default_show_reasoning: true,
-            agent_groups: vec![],
-            agent_settings: btree_map!(),
-            model_providers: btree_map!(),
-            log_config: LogConfig::default(),
-            dingtalk_config: None,
-            wechat_config: None,
-            #[cfg(feature = "channel_http_channel")]
-            http_config: None,
-            heartbeat_config: Default::default(),
-            websearch: None,
-            image_understanding: Default::default(),
-            imagegen: None,
-            image_enhancer: None,
-            storage: None,
-            embedding: None,
-            mcp_tools: None,
-        }
     }
 }
 

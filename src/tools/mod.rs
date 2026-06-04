@@ -18,15 +18,16 @@ mod websearch_tool;
 mod image_tool;
 pub use image_tool::ImageUnderstandingConfig;
 mod media;
+use crate::config::Config;
 use crate::tools::mcp_tool::McpRegistry;
 use media::*;
-use crate::config::Config;
 
 #[cfg(feature = "cloud_storage_tool")]
 mod cloud_storage_tool;
 mod memory_recall;
 
 mod daemon_agent;
+pub use daemon_agent::DaemonAgentToolsConfig;
 
 #[derive(Debug, Copy, Clone, serde::Deserialize)]
 pub enum RiskLevel {
@@ -42,7 +43,7 @@ pub struct ToolCallError(String);
 #[derive(Clone)]
 pub struct ToolContext {
     pub session_id: SessionId,
-    pub config: &'static Config, 
+    pub config: &'static Config,
     pub parent_agent: Arc<dyn Agent>,
     #[allow(unused)]
     pub channel_message_sender: Sender<crate::Result<ChannelMessage>>,
