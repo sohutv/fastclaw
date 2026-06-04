@@ -1,7 +1,7 @@
 use crate::agent::{AgentId, AgentResponse, HistoryCompactResult, Notify};
 use crate::channels::http_channel::type_::HttpReqMessage;
-use crate::channels::http_channel::{Client, HttpChannel};
-use crate::channels::http_channel::{HttpRespMessage, Payload, UserId};
+use crate::channels::http_channel::{Client, HttpChannel, PayloadText};
+use crate::channels::http_channel::{HttpRespMessage, UserId};
 use crate::channels::{
     AgentRespState, AgentRespType, ChannelContext, ChannelMessage, SessionId,
     create_robot_messages_for_agent,
@@ -54,7 +54,7 @@ impl HttpChannel {
                 )
                 .await
                 {
-                    let _ = robot_message.send(client, agent_id).await;
+                    let _ = robot_message.send(client, session_id, agent_id).await;
                 }
                 Ok(curr_state)
             }
@@ -96,7 +96,7 @@ impl HttpChannel {
                             )
                             .await?
                             {
-                                let _ = robot_message.send(client, agent_id).await;
+                                let _ = robot_message.send(client, session_id, agent_id).await;
                             }
                         }
                     }
@@ -154,7 +154,7 @@ impl HttpChannel {
                 )
                 .await?
                 {
-                    let _ = robot_message.send(client, agent_id).await;
+                    let _ = robot_message.send(client, session_id, agent_id).await;
                 }
                 Ok(AgentRespState::Final)
             }
@@ -169,7 +169,7 @@ impl HttpChannel {
                 )
                 .await?
                 {
-                    let _ = robot_message.send(client, agent_id).await;
+                    let _ = robot_message.send(client, session_id, agent_id).await;
                 }
                 Ok(AgentRespState::Final)
             }
@@ -186,7 +186,7 @@ impl HttpChannel {
                         )
                         .await?
                         {
-                            let _ = robot_message.send(client, agent_id).await;
+                            let _ = robot_message.send(client, session_id, agent_id).await;
                         }
                     }
                     Notify::Markdown { content, .. } => {
@@ -200,7 +200,7 @@ impl HttpChannel {
                         )
                         .await?
                         {
-                            let _ = robot_message.send(client, agent_id).await;
+                            let _ = robot_message.send(client, session_id, agent_id).await;
                         }
                     }
                 }
@@ -228,7 +228,7 @@ impl HttpChannel {
                         )
                         .await?
                         {
-                            let _ = robot_message.send(client, agent_id).await;
+                            let _ = robot_message.send(client, session_id, agent_id).await;
                         }
                     }
                     HistoryCompactResult::Err(err_msg) => {
@@ -242,7 +242,7 @@ impl HttpChannel {
                         )
                         .await?
                         {
-                            let _ = robot_message.send(client, agent_id).await;
+                            let _ = robot_message.send(client, session_id, agent_id).await;
                         }
                     }
                     HistoryCompactResult::Ignore(msg) => {
@@ -260,7 +260,7 @@ impl HttpChannel {
                         )
                         .await?
                         {
-                            let _ = robot_message.send(client, agent_id).await;
+                            let _ = robot_message.send(client, session_id, agent_id).await;
                         }
                     }
                 }
@@ -272,18 +272,16 @@ impl HttpChannel {
 }
 
 impl HttpChannel {
-    fn create_resp_messages<Content: Into<Payload>>(
+    fn create_resp_messages<Content: Into<PayloadText>>(
         session_id: &SessionId,
         _: &ChannelContext,
-        inbound: Option<&HttpReqMessage>,
+        _: Option<&HttpReqMessage>,
         content: Content,
     ) -> crate::Result<HttpRespMessage> {
         let message = match &session_id {
-            SessionId::Master { .. } | SessionId::Anonymous { .. } => HttpRespMessage {
-                message_id: inbound.map(|it| it.message_id.clone()).unwrap_or_default(),
-                user_id: UserId::from(session_id),
-                payloads: vec![content.into()],
-            },
+            SessionId::Master { .. } | SessionId::Anonymous { .. } => {
+                HttpRespMessage::from(content.into())
+            }
             SessionId::Group { .. } => {
                 unreachable!("send robot message to group is not supported by http")
             }
@@ -293,9 +291,10 @@ impl HttpChannel {
 }
 
 impl HttpRespMessage {
-    async fn send(self, client: &Client, agent_id: &AgentId) {
+    async fn send(self, client: &Client, session_id: &SessionId, agent_id: &AgentId) {
         let mut client = client.write().await;
-        if let Some(user_transports) = client.get_mut(&self.user_id) {
+        let user_id = UserId::from(session_id);
+        if let Some(user_transports) = client.get_mut(&user_id) {
             if let Some((agent_id, agent_transports)) = user_transports.remove_entry(agent_id) {
                 let mut updated = vec![];
                 for transport in agent_transports {
@@ -303,7 +302,7 @@ impl HttpRespMessage {
                     if sender.is_closed() {
                         log::warn!(
                             "failed to send resp message, transport had been closed, user_id: {}, agent_id: {} ",
-                            self.user_id,
+                            user_id,
                             agent_id
                         );
                     } else {

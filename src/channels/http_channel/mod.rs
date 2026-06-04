@@ -19,7 +19,6 @@ use tokio::sync::mpsc::{Receiver, Sender};
 
 use crate::channels::http_channel::{HttpReqMessage, HttpRespMessage, UserId};
 use derive_more::Deref;
-use futures_util::stream;
 use itertools::Itertools;
 use serde::{Deserialize, Serialize};
 use tokio::sync::RwLock;
@@ -258,15 +257,10 @@ impl HttpChannel {
             rx
         };
         use futures_util::stream::StreamExt as _;
-        let stream = ReceiverStream::new(rx)
-            .flat_map(|it| stream::iter(it.payloads))
-            .map(|it| {
-                Ok::<_, Infallible>(match serde_json::to_string(&it) {
-                    Ok(json) => Event::default().data(json),
-                    Err(err) => Event::default().event("error").data(err.to_string()),
-                })
-            });
-        let sse = Sse::new(stream).keep_alive(Default::default());
+        let sse = Sse::new(
+            ReceiverStream::new(rx).map(|it| Ok::<_, Infallible>(Event::default().data(&**it))),
+        )
+        .keep_alive(Default::default());
         let mut response = sse.into_response();
         response.headers_mut().insert(
             axum::http::header::CONTENT_TYPE,
@@ -345,15 +339,11 @@ impl HttpChannel {
                         StatusCode::INTERNAL_SERVER_ERROR
                     })?;
                 use futures_util::stream::StreamExt as _;
-                let stream = ReceiverStream::new(rx)
-                    .flat_map(|it| stream::iter(it.payloads))
-                    .map(|it| {
-                        Ok::<_, Infallible>(match serde_json::to_string(&it) {
-                            Ok(json) => Event::default().data(json),
-                            Err(err) => Event::default().event("error").data(err.to_string()),
-                        })
-                    });
-                let sse = Sse::new(stream).keep_alive(Default::default());
+                let sse = Sse::new(
+                    ReceiverStream::new(rx)
+                        .map(|it| Ok::<_, Infallible>(Event::default().data(&**it))),
+                )
+                .keep_alive(Default::default());
                 let mut response = sse.into_response();
                 response.headers_mut().insert(
                     axum::http::header::CONTENT_TYPE,
@@ -376,19 +366,10 @@ impl HttpChannel {
                         StatusCode::INTERNAL_SERVER_ERROR
                     })?;
                 let mut payloads = vec![];
-                while let Some(HttpRespMessage {
-                    payloads: mut array,
-                    ..
-                }) = rx.recv().await
-                {
-                    payloads.append(&mut array);
+                while let Some(resp) = rx.recv().await {
+                    payloads.push(resp)
                 }
-                Ok(Json(HttpRespMessage {
-                    message_id: data.message_id,
-                    user_id,
-                    payloads,
-                })
-                .into_response())
+                Ok(Json(payloads).into_response())
             }
         }
     }

@@ -12,10 +12,11 @@ pub struct LogConfig {
     level: Level,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(untagged)]
+#[derive(Debug, Clone, Serialize, Deserialize, Display)]
 pub enum Logger {
+    #[serde(rename="stdout")]
     Stdout,
+    #[serde(rename="file")]
     File { logs_dir: PathBuf },
 }
 impl Default for Logger {

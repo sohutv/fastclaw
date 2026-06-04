@@ -1,7 +1,7 @@
 use crate::channels::SessionId;
 use crate::type_::Base64Res;
 use anyhow::anyhow;
-use derive_more::{Deref, Display};
+use derive_more::{Deref, Display, From, FromStr, Into};
 use image::{DynamicImage, ImageFormat};
 use serde::{Deserialize, Serialize};
 use std::ops::Deref;
@@ -14,12 +14,8 @@ pub struct HttpReqMessage {
     pub payloads: Vec<Payload>,
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize)]
-pub struct HttpRespMessage {
-    pub message_id: MessageId,
-    pub user_id: UserId,
-    pub payloads: Vec<Payload>,
-}
+#[derive(Debug, Clone, Deserialize, Serialize, From, Deref, Display)]
+pub struct HttpRespMessage(PayloadText);
 
 #[derive(Debug, Clone, Deserialize, Serialize, Display, Eq, PartialEq, Ord, PartialOrd, Hash)]
 #[display("{_0}")]
@@ -52,16 +48,18 @@ impl From<&SessionId> for UserId {
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub enum Payload {
     #[serde(rename = "text")]
-    Text(String),
+    Text(PayloadText),
     #[serde(rename = "json")]
     Json(serde_json::Value),
     #[serde(rename = "image")]
     Image(Base64Image),
 }
+#[derive(Debug, Clone, Deserialize, Serialize, Display, From, FromStr, Deref, Into)]
+pub struct PayloadText(String);
 
-impl From<String> for Payload {
-    fn from(value: String) -> Self {
-        Payload::Text(value)
+impl<T: Into<PayloadText>> From<T> for Payload {
+    fn from(value: T) -> Self {
+        Self::Text(value.into())
     }
 }
 

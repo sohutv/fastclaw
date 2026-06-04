@@ -1,3 +1,4 @@
+use std::ops::Deref;
 use crate::agent::{Agent, AgentRequest};
 use crate::channels::console_cmd::Console;
 use crate::channels::http_channel::{Client, HttpChannel};
@@ -36,7 +37,7 @@ impl HttpChannel {
                             cmd.replace(text.to_string());
                         }
                         if !text.is_empty() {
-                            user_contents.push(UserContent::text(text));
+                            user_contents.push(UserContent::text(text.deref()));
                         }
                     }
                     Payload::Json(json) => match serde_json::to_string(json) {
