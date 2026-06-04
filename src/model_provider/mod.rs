@@ -103,12 +103,16 @@ impl Default for ModelSettings {
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, Display, Default)]
 pub enum ReasoningEffort {
     #[display("minimal")]
+    #[serde(rename="minimal")]
     Minimal,
     #[default]
+    #[serde(rename="low")]
     #[display("low")]
     Low,
+    #[serde(rename="medium")]
     #[display("medium")]
     Medium,
+    #[serde(rename="high")]
     #[display("high")]
     High,
 }

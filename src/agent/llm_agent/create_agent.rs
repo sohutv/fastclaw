@@ -71,11 +71,17 @@ where
                     .max_tokens
                     .unwrap_or(self.model_settings.max_tokens),
             )
-            .additional_params(json!( {
-                "reasoning": {
-                    "effort": reasoning_effort,
+            .additional_params({
+                if self.model_settings.reasoning {
+                    json!( {
+                        "reasoning": {
+                            "effort": reasoning_effort,
+                        }
+                    })
+                } else {
+                    json!({})
                 }
-            }))
+            })
             .build();
         Ok(agent)
     }
