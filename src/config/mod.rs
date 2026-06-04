@@ -1,5 +1,5 @@
 use crate::ModelName;
-use crate::agent::{AgentId, AgentSettings};
+use crate::agent::{AgentGroup, AgentSettings};
 use crate::config::logger::LogConfig;
 use crate::model_provider::{ModelProviderName, ModelProviders};
 use serde::{Deserialize, Serialize};
@@ -15,11 +15,13 @@ mod config_;
 pub mod logger;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
 pub struct Config {
     pub default_model_provider: ModelProviderName,
     pub default_model: ModelName,
     pub default_show_reasoning: bool,
-    pub agent_settings: BTreeMap<AgentId, AgentSettings>,
+    pub agent_groups: Vec<AgentGroup>,
+    pub agent_settings: BTreeMap<AgentGroup, AgentSettings>,
     pub model_providers: BTreeMap<ModelProviderName, ModelProviders>,
     pub log_config: LogConfig,
     #[cfg(feature = "channel_dingtalk_channel")]

@@ -1,4 +1,7 @@
-use crate::agent::{Agent, AgentClone, HistoryManager, JsonlHistoryManager, LlmAgentSupplier};
+use std::ops::Deref;
+use crate::agent::{
+    Agent, AgentClone, AgentId, HistoryManager, JsonlHistoryManager, LlmAgentSupplier,
+};
 use crate::channels;
 use crate::channels::Channel;
 use crate::cli::CmdRunner;
@@ -58,7 +61,7 @@ impl CmdRunner for Start {
             config
         };
         let _ = config.init_logger(&workdir)?;
-        let mcp_registry = Box::leak(Box::new(McpRegistry::init(config).await?));
+        let mcp_registry = Box::leak(Box::new(McpRegistry::new(config)?.init().await?));
         let workspace = { Box::leak(Box::new(Workspace::init(workdir).await?)) };
         let history_manager: Arc<dyn HistoryManager> =
             Arc::new(JsonlHistoryManager::new(config, workspace).await?);
@@ -66,9 +69,12 @@ impl CmdRunner for Start {
         let (main_agent, heartbeat_agent) = {
             let main_agent = match config.default_model_provider()? {
                 ModelProviders::OpenaiCompatible(model_provider) => {
+                    let agent_id = AgentId::from("main");
+                    let group = agent_id.deref().into();
                     model_provider
                         .create_agent(
-                            "main",
+                            &agent_id,
+                            &group,
                             config,
                             config.default_model().clone(),
                             Arc::clone(&history_manager),
@@ -76,6 +82,10 @@ impl CmdRunner for Start {
                             workspace,
                             None,
                             mcp_registry,
+                            config
+                                .agent_settings(&group)
+                                .map(|it| it.clone())
+                                .unwrap_or_default(),
                         )
                         .await?
                 }

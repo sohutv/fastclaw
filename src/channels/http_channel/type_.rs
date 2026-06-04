@@ -15,7 +15,7 @@ pub struct HttpReqMessage {
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize, From, Deref, Display)]
-pub struct HttpRespMessage(PayloadText);
+pub struct HttpRespMessage(Text);
 
 #[derive(Debug, Clone, Deserialize, Serialize, Display, Eq, PartialEq, Ord, PartialOrd, Hash)]
 #[display("{_0}")]
@@ -48,18 +48,40 @@ impl From<&SessionId> for UserId {
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub enum Payload {
     #[serde(rename = "text")]
-    Text(PayloadText),
+    Text(Text),
     #[serde(rename = "json")]
     Json(serde_json::Value),
     #[serde(rename = "image")]
     Image(Base64Image),
+    #[serde(rename = "camera_frame")]
+    CameraFrame(CameraFrame),
 }
 #[derive(Debug, Clone, Deserialize, Serialize, Display, From, FromStr, Deref, Into)]
-pub struct PayloadText(String);
+pub struct Text(String);
 
-impl<T: Into<PayloadText>> From<T> for Payload {
+impl<T: Into<Text>> From<T> for Payload {
     fn from(value: T) -> Self {
         Self::Text(value.into())
+    }
+}
+
+pub use camera_frame::*;
+mod camera_frame {
+    use crate::channels::http_channel::Base64Image;
+    use derive_more::From;
+    use serde::{Deserialize, Serialize};
+
+    #[derive(Debug, Clone, Deserialize, Serialize, From)]
+    pub struct CameraFrame {
+        pub meta: Meta,
+        pub image: Base64Image,
+    }
+
+    #[derive(Debug, Clone, Deserialize, Serialize, From)]
+    #[serde(untagged)]
+    pub enum Meta {
+        Json(serde_json::Value),
+        String(String),
     }
 }
 
@@ -77,7 +99,7 @@ impl Base64Image {
         let extension = *format
             .extensions_str()
             .first()
-            .ok_or(anyhow!(format!("unexpected format")))?;
+            .ok_or(anyhow!("unexpected format"))?;
         Ok(extension)
     }
 }

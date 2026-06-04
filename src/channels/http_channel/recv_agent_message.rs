@@ -1,6 +1,6 @@
 use crate::agent::{AgentId, AgentResponse, HistoryCompactResult, Notify};
 use crate::channels::http_channel::type_::HttpReqMessage;
-use crate::channels::http_channel::{Client, HttpChannel, PayloadText};
+use crate::channels::http_channel::{Client, HttpChannel, Text};
 use crate::channels::http_channel::{HttpRespMessage, UserId};
 use crate::channels::{
     AgentRespState, AgentRespType, ChannelContext, ChannelMessage, SessionId,
@@ -272,7 +272,7 @@ impl HttpChannel {
 }
 
 impl HttpChannel {
-    fn create_resp_messages<Content: Into<PayloadText>>(
+    fn create_resp_messages<Content: Into<Text>>(
         session_id: &SessionId,
         _: &ChannelContext,
         _: Option<&HttpReqMessage>,

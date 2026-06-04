@@ -1,4 +1,4 @@
-use crate::agent::AgentId;
+use crate::agent::{AgentGroup, AgentId};
 use crate::model_provider::ModelPerformance;
 use crate::tools::{ToolCallError, ToolCallRsult, ToolContext};
 use crate::type_::SystemPrompt;
@@ -16,7 +16,7 @@ pub struct ForkChildAgentTool {
 #[derive(Debug, Clone, serde::Deserialize)]
 #[allow(unused)]
 pub struct Args {
-    id: Option<AgentId>,
+    agent_group: AgentGroup,
     model: ModelPerformance,
     system_prompt: SystemPrompt,
 }
@@ -36,10 +36,6 @@ impl Tool for ForkChildAgentTool {
             parameters: json!({
                 "type": "object",
                 "properties": {
-                    "id":{
-                        "type": "string",
-                        "description": "Optional ID for the new agent. If not provided, a UUID will be generated"
-                    },
                     "model": {
                         "type": "string",
                         "enum": ModelPerformance::iter().map(|it|it.to_string()).collect::<Vec<_>>(),
@@ -48,9 +44,14 @@ impl Tool for ForkChildAgentTool {
                     "system_prompt": {
                         "type": "string",
                         "description": "The system prompt that defines the behavior, personality, and instructions for the newly forked daemon agent. This will guide how the agent responds and what tasks it can perform",
-                    }
+                    },
+                    "agent_group":{
+                        "type": "string",
+                        "enum":  self.ctx.config.agent_groups,
+                        "description": "The group to use for the new agent. This determines the agent's configuration profile including temperature, max tokens, and other behavioral parameters"
+                    },
                 },
-                "required": ["model", "system_prompt"],
+                "required": ["model", "system_prompt", "agent_group"],
             }),
         }
     }
@@ -89,12 +90,24 @@ impl Tool for ForkChildAgentTool {
             "Forking agent with model_provider: {:?}, model_name: {:?}",
             model_provider, model_name
         );
-        let id: AgentId = args.id.unwrap_or_else(|| uuid::Uuid::new_v4().into());
+        let id: AgentId = uuid::Uuid::new_v4().into();
         let system_prompt = args.system_prompt.clone();
+        let agent_settings = self
+            .ctx
+            .config
+            .agent_settings(&args.agent_group)
+            .unwrap_or(self.ctx.parent_agent.agent_settings());
         match self
             .ctx
             .parent_agent
-            .fork_child(id.clone(), model_provider, model_name, Some(system_prompt))
+            .fork_child(
+                &id,
+                &args.agent_group,
+                model_provider,
+                model_name,
+                Some(system_prompt),
+                agent_settings.clone(),
+            )
             .await
         {
             Ok(_) => Ok(ToolCallRsult {

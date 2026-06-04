@@ -1,5 +1,5 @@
 use crate::ModelName;
-use crate::agent::AgentId;
+use crate::agent::AgentGroup;
 use crate::btree_map;
 use crate::config::logger::LogConfig;
 use crate::config::{AgentSettings, Config};
@@ -29,8 +29,8 @@ impl Config {
         Ok(self)
     }
 
-    pub fn agent_settings(&self, name: &AgentId) -> Option<&AgentSettings> {
-        self.agent_settings.get(name)
+    pub fn agent_settings(&self, group: &AgentGroup) -> Option<&AgentSettings> {
+        self.agent_settings.get(group)
     }
 }
 
@@ -40,6 +40,7 @@ impl Default for Config {
             default_model_provider: Default::default(),
             default_model: Default::default(),
             default_show_reasoning: true,
+            agent_groups: vec![],
             agent_settings: btree_map!(),
             model_providers: btree_map!(),
             log_config: LogConfig::default(),

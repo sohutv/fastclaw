@@ -38,7 +38,8 @@ where
                 message: AgentResponse::Start,
             }))
             .await;
-        let agent = match Arc::clone(&self).create_agent(
+        let agent = match Arc::clone(&self)
+            .create_agent(
                 session_id,
                 self.agent_settings.reasoning_effort,
                 addi_system_prompt.as_deref(),
@@ -54,14 +55,26 @@ where
                 return;
             }
         };
-        let history: Vec<Message> = if with_history {
+        let history: Vec<Message> = if with_history
+            && let Some(chat_history_limit @ 1..) = self.agent_settings.chat_history_limit
+        {
             let (history, _) = self
                 .ctx
                 .history_manager
                 .load(session_id, &self.id)
                 .await
                 .unwrap_or_default();
-            history.into_iter().map(|it| it.into()).collect_vec()
+            let history = history.into_iter().map(|it| it.into()).collect_vec();
+            if chat_history_limit < history.len() {
+                history
+                    .into_iter()
+                    .rev()
+                    .take(chat_history_limit)
+                    .rev()
+                    .collect_vec()
+            } else {
+                history
+            }
         } else {
             vec![]
         };
@@ -100,13 +113,14 @@ where
                     let usage = final_resp.usage();
                     let append_history = final_resp.history().expect("unexpected empty history!!!");
                     if with_history {
-                        Arc::clone(&self).handle_history(
-                            channel_message_sender.clone(),
-                            session_id,
-                            &usage,
-                            append_history,
-                        )
-                        .await;
+                        Arc::clone(&self)
+                            .handle_history(
+                                channel_message_sender.clone(),
+                                session_id,
+                                &usage,
+                                append_history,
+                            )
+                            .await;
                     }
                     Some(AgentResponse::Final(usage))
                 }

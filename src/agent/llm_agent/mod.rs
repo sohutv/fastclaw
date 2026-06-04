@@ -1,7 +1,7 @@
 use crate::ModelName;
 use crate::agent::{
-    Agent, AgentClone, AgentContext, AgentId, AgentRequest, AgentRequestContext, AgentSettings,
-    HistoryManager, LlmAgentSupplier, Workspace,
+    Agent, AgentClone, AgentContext, AgentGroup, AgentId, AgentRequest, AgentRequestContext,
+    AgentSettings, HistoryManager, LlmAgentSupplier, Workspace,
 };
 use crate::config::Config;
 use crate::memory::MemoryManager;
@@ -26,6 +26,7 @@ where
     P: ModelProvider<Client = C>,
 {
     id: AgentId,
+    group: AgentGroup,
     ctx: Arc<AgentContext>,
     model_provider: P,
     model_name: ModelName,
@@ -42,9 +43,10 @@ where
 {
     type A = LlmAgent<C, P>;
 
-    async fn create_agent<ID: Into<AgentId> + Send>(
+    async fn create_agent(
         &self,
-        agent_id: ID,
+        agent_id: &AgentId,
+        group: &AgentGroup,
         config: &'static Config,
         model: ModelName,
         history_manager: Arc<dyn HistoryManager>,
@@ -52,9 +54,11 @@ where
         workspace: &'static Workspace,
         system_prompt: Option<SystemPrompt>,
         mcp_registry: &'static McpRegistry,
+        agent_settings: AgentSettings,
     ) -> crate::Result<Self::A> {
         Ok(LlmAgent::new(
-            agent_id.into(),
+            agent_id,
+            group,
             config,
             self.clone(),
             model,
@@ -63,6 +67,7 @@ where
             workspace,
             system_prompt,
             mcp_registry,
+            agent_settings,
         )
         .await?)
     }
@@ -74,7 +79,8 @@ where
     P: ModelProvider<Client = C> + 'static + Send + Sync,
 {
     async fn new(
-        agent_id: AgentId,
+        agent_id: &AgentId,
+        group: &AgentGroup,
         config: &'static Config,
         model_provider: P,
         model_name: ModelName,
@@ -83,6 +89,7 @@ where
         workspace: &'static Workspace,
         system_prompt: Option<SystemPrompt>,
         mcp_registry: &'static McpRegistry,
+        agent_settings: AgentSettings,
     ) -> crate::Result<Self> {
         let ctx = Arc::new(AgentContext {
             config,
@@ -98,14 +105,11 @@ where
                 .model_settings(&model_name)
                 .map(|it| it.clone())
                 .ok_or(anyhow!("model settings not found for {}", agent_id))?,
-            agent_settings: ctx
-                .config
-                .agent_settings(&agent_id)
-                .map(|it| it.clone())
-                .unwrap_or_default(),
+            agent_settings,
             model_name,
             model_provider,
-            id: agent_id,
+            id: agent_id.clone(),
+            group: group.clone(),
             ctx,
             channel_sender: Default::default(),
         })
@@ -124,6 +128,7 @@ where
         }
         let agent = Self {
             id,
+            group: self.group.clone(),
             model_settings: self.model_settings.clone(),
             agent_settings: self.agent_settings.clone(),
             model_name: self.model_name.clone(),
@@ -190,5 +195,9 @@ where
     }
     fn agent_context(&self) -> Arc<AgentContext> {
         Arc::clone(&self.ctx)
+    }
+
+    fn agent_group(&self) -> &AgentGroup {
+        &self.group
     }
 }

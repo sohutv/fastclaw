@@ -96,10 +96,12 @@ pub trait Agent: SessionCompactSupport + AgentClone + Send + Sync {
 
     async fn fork_child(
         &self,
-        id: AgentId,
+        id: &AgentId,
+        group: &AgentGroup,
         model_provider: &ModelProviderName,
         model_name: &ModelName,
         system_prompt: Option<SystemPrompt>,
+        agent_settings: AgentSettings,
     ) -> crate::Result<Arc<dyn Agent>> {
         let context = self.agent_context();
         let mut children = context.children.write().await;
@@ -111,6 +113,7 @@ pub trait Agent: SessionCompactSupport + AgentClone + Send + Sync {
                     model_provider
                         .create_agent(
                             id,
+                            group,
                             context.config,
                             model_name.clone(),
                             Arc::clone(&context.history_manager),
@@ -118,6 +121,7 @@ pub trait Agent: SessionCompactSupport + AgentClone + Send + Sync {
                             context.workspace,
                             system_prompt,
                             context.mcp_registry,
+                            agent_settings,
                         )
                         .await?
                 }
@@ -140,6 +144,9 @@ pub trait Agent: SessionCompactSupport + AgentClone + Send + Sync {
 
     fn id(&self) -> &AgentId;
     fn agent_context(&self) -> Arc<AgentContext>;
+
+    #[allow(unused)]
+    fn agent_group(&self) -> &AgentGroup;
 }
 
 #[async_trait]
@@ -173,9 +180,10 @@ impl<S: Into<String>> From<S> for AgentId {
 #[async_trait]
 pub trait LlmAgentSupplier {
     type A: Agent;
-    async fn create_agent<N: Into<AgentId> + Send>(
+    async fn create_agent(
         &self,
-        name: N,
+        agent_id: &AgentId,
+        group: &AgentGroup,
         config: &'static Config,
         model: ModelName,
         history_manager: Arc<dyn HistoryManager>,
@@ -183,6 +191,7 @@ pub trait LlmAgentSupplier {
         workspace: &'static Workspace,
         system_prompt: Option<SystemPrompt>,
         mcp_registry: &'static McpRegistry,
+        agent_settings: AgentSettings,
     ) -> crate::Result<Self::A>;
 }
 
@@ -293,12 +302,24 @@ impl Display for HistoryCompactVal {
     }
 }
 
+#[derive(
+    Debug, Clone, Deref, Eq, PartialEq, Ord, PartialOrd, Display, Serialize, Deserialize, Hash,
+)]
+pub struct AgentGroup(String);
+impl From<AgentId> for AgentGroup {
+    fn from(value: AgentId) -> Self {
+        Self(value.0)
+    }
+}
+impl<S: Into<String>> From<S> for AgentGroup {
+    fn from(value: S) -> Self {
+        Self(value.into())
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct AgentSettings {
-    pub model_provider: Option<ModelProviderName>,
-    pub model: Option<ModelName>,
-    pub show_reasoning: Option<bool>,
     pub max_tokens: Option<u64>,
     pub temperature: f64,
     pub max_turns: usize,
@@ -306,7 +327,9 @@ pub struct AgentSettings {
     pub compact_threshold: f32,
     pub task_queue_size: TaskQueueSize,
     pub task_backpressure: TaskBackpressure,
+    pub chat_history_limit: Option<usize>,
 }
+
 #[derive(Debug, Clone, Serialize, Deserialize, Deref)]
 pub struct TaskQueueSize(usize);
 impl Default for TaskQueueSize {
@@ -326,9 +349,6 @@ pub enum TaskBackpressure {
 impl Default for AgentSettings {
     fn default() -> Self {
         Self {
-            model_provider: None,
-            model: None,
-            show_reasoning: None,
             max_tokens: None,
             temperature: 1.,
             max_turns: 256,
@@ -336,6 +356,7 @@ impl Default for AgentSettings {
             reasoning_effort: Default::default(),
             task_queue_size: Default::default(),
             task_backpressure: Default::default(),
+            chat_history_limit: None,
         }
     }
 }

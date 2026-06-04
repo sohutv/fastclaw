@@ -8,6 +8,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, HashMap};
 use std::ops::Deref;
 use std::sync::Arc;
+use std::time::Duration;
 use tokio::sync::RwLock;
 use tokio::task::JoinHandle;
 
@@ -37,17 +38,20 @@ pub struct McpRegistry {
     #[allow(unused)]
     config: &'static Config,
     #[deref]
-    mcp_tool_set: HashMap<McpToolSetName, McpToolSet>,
+    mcp_tool_set: Arc<RwLock<HashMap<McpToolSetName, McpToolSet>>>,
 }
 
 #[derive(Deref)]
 pub struct McpToolSet {
     #[deref]
     inner: McpToolSetInnerShared,
+    #[allow(unused)]
     join_handle: JoinHandle<()>,
 }
 
 impl McpToolSet {
+
+    #[allow(unused)]
     async fn join(self) -> crate::Result<()> {
         let _ = self.join_handle.await?;
         Ok(())
@@ -192,28 +196,43 @@ impl McpToolSet {
 }
 
 impl McpRegistry {
-    pub async fn init(config: &'static Config) -> crate::Result<McpRegistry> {
-        let mut mcp_tool_set = HashMap::new();
-        for (name, config) in config.mcp_tools.iter().flat_map(|it| it.deref()) {
-            match McpToolSet::new(name, config).await {
-                Ok(dst) => {
-                    mcp_tool_set.insert(name.clone(), dst);
-                }
-                Err(err) => {
-                    log::warn!("Failed to init mcp server '{name}', err: {err} ");
-                    continue;
-                }
-            }
-        }
+    pub fn new(config: &'static Config) -> crate::Result<McpRegistry> {
         Ok(McpRegistry {
             config,
-            mcp_tool_set,
+            mcp_tool_set: Default::default(),
         })
+    }
+
+    pub async fn init(self) -> crate::Result<McpRegistry> {
+        for (name, config) in self.config.mcp_tools.iter().flat_map(|it| it.deref()) {
+            let mcp_tool_set = Arc::clone(&self.mcp_tool_set);
+            let _ = tokio::spawn(async move {
+                loop {
+                    match McpToolSet::new(name, config).await {
+                        Ok(dst) => {
+                            let mut guard = mcp_tool_set.write().await;
+                            guard.insert(name.clone(), dst);
+                            log::info!("Success to init mcp server '{name}'");
+                            return;
+                        }
+                        Err(err) => {
+                            log::warn!(
+                                "Failed to init mcp server '{name}', err: {err}, retry in future"
+                            );
+                            tokio::time::sleep(Duration::from_secs(5)).await;
+                            continue;
+                        }
+                    }
+                }
+            });
+        }
+        Ok(self)
     }
 
     pub async fn tools(&self) -> crate::Result<Vec<Box<dyn ToolDyn>>> {
         let mut vec = vec![];
-        for (_, toolset) in &self.mcp_tool_set {
+        let mcp_tool_set = self.mcp_tool_set.read().await;
+        for (_, toolset) in mcp_tool_set.iter() {
             let guard = toolset.read().await;
             let mut tools = guard
                 .iter()
@@ -222,16 +241,5 @@ impl McpRegistry {
             vec.append(&mut tools);
         }
         Ok(vec)
-    }
-
-    #[allow(unused)]
-    pub async fn join(self) -> crate::Result<()> {
-        for (name, toolset) in self.mcp_tool_set {
-            if let Err(err) = toolset.join().await {
-                log::warn!("Failed to join mcp server '{name}', err: {err} ");
-                continue;
-            }
-        }
-        Ok(())
     }
 }

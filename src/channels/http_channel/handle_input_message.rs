@@ -1,7 +1,6 @@
-use std::ops::Deref;
 use crate::agent::{Agent, AgentRequest};
 use crate::channels::console_cmd::Console;
-use crate::channels::http_channel::{Client, HttpChannel};
+use crate::channels::http_channel::{CameraFrame, Client, HttpChannel};
 use crate::channels::http_channel::{HttpReqMessage, Payload};
 use crate::channels::{Channel, SessionId};
 use base64::Engine;
@@ -9,6 +8,7 @@ use log::{info, warn};
 use rig::OneOrMany;
 use rig::completion::Message;
 use rig::message::{DocumentSourceKind, Image, ImageDetail, ImageMediaType, UserContent};
+use std::ops::Deref;
 use std::sync::Arc;
 use zerocopy::IntoBytes;
 
@@ -88,6 +88,34 @@ impl HttpChannel {
                             )
                             .into(),
                         ))
+                    }
+                    Payload::CameraFrame(CameraFrame { meta, image }) => {
+                        img_idx += 1;
+                        user_contents.push(UserContent::Image(Image {
+                            data: DocumentSourceKind::Base64(
+                                base64::engine::general_purpose::STANDARD.encode(&image.content),
+                            ),
+                            media_type: Some(ImageMediaType::PNG),
+                            detail: Some(ImageDetail::Auto),
+                            additional_params: None,
+                        }));
+                        match serde_json::to_string(meta) {
+                            Ok(text) => {
+                                if !text.is_empty() {
+                                    user_contents.push(UserContent::Text(
+                                        format!(
+                                            "- **camera frame meta of the {}-th input image**: {}",
+                                            img_idx, text
+                                        )
+                                        .into(),
+                                    ));
+                                }
+                            }
+                            Err(err) => {
+                                warn!("write camera frame meta to text failed, err: {err}");
+                                continue;
+                            }
+                        }
                     }
                 }
             }
