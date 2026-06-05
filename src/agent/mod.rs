@@ -1,6 +1,7 @@
 use crate::channels::{ChannelMessage, SessionId};
 use anyhow::anyhow;
 use async_trait::async_trait;
+use chrono::Local;
 use derive_more::{Deref, Display, From, FromStr, Into};
 use rig::OneOrMany;
 use rig::completion::Usage;
@@ -37,9 +38,37 @@ pub trait SessionCompactSupport: Send + Sync {
 }
 
 pub struct AgentRequestPkg {
-    pub req: AgentRequest,
-    pub ctx: AgentRequestContext,
-    pub ack_sender: Option<tokio::sync::oneshot::Sender<()>>,
+    req: AgentRequest,
+    ctx: AgentRequestContext,
+    ack_sender: Option<tokio::sync::oneshot::Sender<()>>,
+    create_time: chrono::DateTime<Local>,
+}
+
+impl AgentRequestPkg {
+    pub fn new(
+        req: AgentRequest,
+        ctx: AgentRequestContext,
+        ack_sender: Option<tokio::sync::oneshot::Sender<()>>,
+    ) -> Self {
+        Self {
+            req,
+            ctx,
+            ack_sender,
+            create_time: Local::now(),
+        }
+    }
+
+    pub fn new_with_ack(
+        req: AgentRequest,
+        ctx: AgentRequestContext,
+    ) -> (Self, tokio::sync::oneshot::Receiver<()>) {
+        let (ack_sender, ack) = tokio::sync::oneshot::channel();
+        (Self::new(req, ctx, Some(ack_sender)), ack)
+    }
+
+    pub fn new_without_ack(req: AgentRequest, ctx: AgentRequestContext) -> Self {
+        Self::new(req, ctx, None)
+    }
 }
 
 #[async_trait]

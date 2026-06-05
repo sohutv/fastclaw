@@ -75,12 +75,7 @@ where
             ctx: AgentRequestContext,
         ) -> crate::Result<()> {
             let sender = agent.get_channel_sender().await?;
-            let (ack_sender, ack) = tokio::sync::oneshot::channel();
-            let pkg = AgentRequestPkg {
-                req,
-                ctx,
-                ack_sender: Some(ack_sender),
-            };
+            let (pkg, ack) = AgentRequestPkg::new_with_ack(req,ctx);
             let _ = sender.send(pkg).await?;
             let _ = ack.await?;
             Ok(())

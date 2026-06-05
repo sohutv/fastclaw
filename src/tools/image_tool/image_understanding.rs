@@ -114,8 +114,8 @@ impl ImageUnderstandingTool {
         channel_message_sender: tokio::sync::mpsc::Sender<crate::Result<ChannelMessage>>,
         Args { prompt, images }: Args,
     ) -> crate::Result<()> {
-        let pkg = AgentRequestPkg {
-            req: AgentRequest {
+        let pkg = AgentRequestPkg::new_without_ack(
+            AgentRequest {
                 id: uuid::Uuid::new_v4().into(),
                 session_id: self.ctx.session_id.clone(),
                 message: vec![OneOrMany::many({
@@ -139,14 +139,13 @@ impl ImageUnderstandingTool {
                     vec
                 })?],
             },
-            ctx: AgentRequestContext {
+            AgentRequestContext {
                 channel_message_sender,
                 addi_system_prompt: None,
                 tool_filter: ToolFilter::from(|_| None),
                 with_history: false,
             },
-            ack_sender: None,
-        };
+        );
         let agent_settings = AgentSettings {
             task_backpressure: TaskBackpressure::Latest,
             ..self.ctx.parent_agent.agent_settings().clone()

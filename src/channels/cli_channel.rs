@@ -88,22 +88,21 @@ impl Channel for CliChannel {
                                         .get_channel_sender()
                                         .await
                                         .unwrap()
-                                        .send(AgentRequestPkg {
-                                            req: AgentRequest {
+                                        .send(AgentRequestPkg::new_without_ack(
+                                            AgentRequest {
                                                 id: Default::default(),
                                                 session_id: self_.session_id.clone(),
                                                 message: vec![OneOrMany::one(UserContent::text(
                                                     line,
                                                 ))],
                                             },
-                                            ctx: AgentRequestContext {
+                                            AgentRequestContext {
                                                 channel_message_sender: message_sender.clone(),
                                                 addi_system_prompt: None,
                                                 tool_filter: Default::default(),
                                                 with_history: true,
                                             },
-                                            ack_sender: None,
-                                        })
+                                        ))
                                         .await;
                                     let _ = self_
                                         .handle_agent_message(
