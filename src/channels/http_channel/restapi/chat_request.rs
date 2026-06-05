@@ -91,17 +91,15 @@ pub async fn handle(
             Ok(StatusCode::OK.into_response())
         }
         ChatRespType::Push => {
-            tokio::spawn(async move {
-                match channel
-                    .handle_input_message(agent, session_id, client, data.clone())
-                    .await
-                {
-                    Ok(_) => {}
-                    Err(err) => {
-                        warn!("{err}")
-                    }
+            match channel
+                .handle_input_message(agent, session_id, client, data.clone())
+                .await
+            {
+                Ok(_) => {}
+                Err(err) => {
+                    warn!("{err}")
                 }
-            });
+            }
             Ok(StatusCode::OK.into_response())
         }
         ChatRespType::Streamable => {

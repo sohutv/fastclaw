@@ -8,7 +8,6 @@ use log::{error, info};
 use std::sync::Arc;
 use strum::Display;
 use tokio::sync::mpsc::Receiver;
-use tokio::task::JoinHandle;
 
 #[cfg(feature = "channel_cli_channel")]
 pub mod cli_channel;
@@ -51,16 +50,13 @@ where
         addi_system_prompt: Option<String>,
         inbound_message: Option<Self::InboundMessage>,
         req: AgentRequest,
-    ) -> crate::Result<JoinHandle<crate::Result<()>>> {
+    ) -> crate::Result<()> {
         let mut receiver = Self::spawn_agent_task(agent, req.clone(), addi_system_prompt).await?;
         let self_ = Arc::clone(&self);
-        let join_handle = tokio::spawn(async move {
-            let _ = self_
-                .handle_agent_message(client, inbound_message, &mut receiver)
-                .await?;
-            Ok(())
-        });
-        Ok(join_handle)
+        let _ = self_
+            .handle_agent_message(client, inbound_message, &mut receiver)
+            .await?;
+        Ok(())
     }
 
     async fn spawn_agent_task(
@@ -75,7 +71,7 @@ where
             ctx: AgentRequestContext,
         ) -> crate::Result<()> {
             let sender = agent.get_channel_sender().await?;
-            let (pkg, ack) = AgentRequestPkg::new_with_ack(req,ctx);
+            let (pkg, ack) = AgentRequestPkg::new_with_ack(req, ctx);
             let _ = sender.send(pkg).await?;
             let _ = ack.await?;
             Ok(())
