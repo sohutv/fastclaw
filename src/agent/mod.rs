@@ -284,6 +284,7 @@ pub struct AgentSettings {
     pub task_queue_size: TaskQueueSize,
     pub task_backpressure: TaskBackpressure,
     pub chat_history_limit: Option<usize>,
+    pub history_compact_enable: bool,
     pub tool_filter: Option<ToolNameFilter>,
 }
 
@@ -314,6 +315,7 @@ impl Default for AgentSettings {
             task_queue_size: Default::default(),
             task_backpressure: Default::default(),
             chat_history_limit: None,
+            history_compact_enable: true,
             tool_filter: None,
         }
     }

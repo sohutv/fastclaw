@@ -114,7 +114,7 @@ where
                     let append_history = final_resp.history().expect("unexpected empty history!!!");
                     if with_history {
                         Arc::clone(&self)
-                            .handle_history(
+                            .append_history(
                                 channel_message_sender.clone(),
                                 session_id,
                                 &usage,

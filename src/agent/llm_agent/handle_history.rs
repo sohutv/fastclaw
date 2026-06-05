@@ -15,7 +15,7 @@ where
     C: CompletionClient + 'static + Send + Sync,
     P: ModelProvider<Client = C> + 'static + Send + Sync,
 {
-    pub(super) async fn handle_history(
+    pub(super) async fn append_history(
         self: Arc<Self>,
         channel_message_sender: Sender<crate::Result<ChannelMessage>>,
         session_id: &SessionId,
@@ -45,46 +45,50 @@ where
                 );
             }
         }
-        let max_tokens = self
-            .agent_settings
-            .max_tokens
-            .unwrap_or(self.model_settings.max_tokens);
-        if usage.total_tokens
-            >= ((max_tokens as f32 * self.agent_settings.compact_threshold) as u64)
-        {
-            let _ = channel_message_sender
-                .send(Ok(ChannelMessage {
-                    session_id: session_id.clone(),
-                    agent_id: self.id.clone(),
-                    message: AgentResponse::Notify("Trigger history compact...".into()),
-                }))
-                .await;
+        if self.agent_settings.history_compact_enable {
+            let max_tokens = self
+                .agent_settings
+                .max_tokens
+                .unwrap_or(self.model_settings.max_tokens);
+            if usage.total_tokens
+                >= ((max_tokens as f32 * self.agent_settings.compact_threshold) as u64)
+            {
+                let _ = channel_message_sender
+                    .send(Ok(ChannelMessage {
+                        session_id: session_id.clone(),
+                        agent_id: self.id.clone(),
+                        message: AgentResponse::Notify("Trigger history compact...".into()),
+                    }))
+                    .await;
 
-            let result = Arc::clone(&self)
-                .session_compact(
-                    channel_message_sender.clone(),
-                    session_id,
-                    self.agent_settings.compact_threshold,
-                )
-                .await;
-            match &result {
-                HistoryCompactResult::Ok(val) => {
-                    info!("Compact session{session_id} history ok, {val}");
+                let result = Arc::clone(&self)
+                    .session_compact(
+                        channel_message_sender.clone(),
+                        session_id,
+                        self.agent_settings.compact_threshold,
+                    )
+                    .await;
+                match &result {
+                    HistoryCompactResult::Ok(val) => {
+                        info!("Compact session{session_id} history ok, {val}");
+                    }
+                    HistoryCompactResult::Ignore(msg) => {
+                        info!(
+                            "Compact session{session_id} ignore with {msg}, no history to compact"
+                        );
+                    }
+                    HistoryCompactResult::Err(err) => {
+                        warn!("Compact session{session_id} failed, err: {err}");
+                    }
                 }
-                HistoryCompactResult::Ignore(msg) => {
-                    info!("Compact session{session_id} ignore with {msg}, no history to compact");
-                }
-                HistoryCompactResult::Err(err) => {
-                    warn!("Compact session{session_id} failed, err: {err}");
-                }
+                let _ = channel_message_sender
+                    .send(Ok(ChannelMessage {
+                        session_id: session_id.clone(),
+                        agent_id: self.id.clone(),
+                        message: AgentResponse::HistoryCompact(result),
+                    }))
+                    .await;
             }
-            let _ = channel_message_sender
-                .send(Ok(ChannelMessage {
-                    session_id: session_id.clone(),
-                    agent_id: self.id.clone(),
-                    message: AgentResponse::HistoryCompact(result),
-                }))
-                .await;
         }
     }
 }

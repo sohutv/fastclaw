@@ -91,13 +91,17 @@ pub async fn handle(
             Ok(StatusCode::OK.into_response())
         }
         ChatRespType::Push => {
-            let _ = channel
-                .handle_input_message(agent, session_id, client, data.clone())
-                .await
-                .map_err(|err| {
-                    warn!("handle_chat_send failed, err: {err}");
-                    StatusCode::INTERNAL_SERVER_ERROR
-                })?;
+            tokio::spawn(async move {
+                match channel
+                    .handle_input_message(agent, session_id, client, data.clone())
+                    .await
+                {
+                    Ok(_) => {}
+                    Err(err) => {
+                        warn!("{err}")
+                    }
+                }
+            });
             Ok(StatusCode::OK.into_response())
         }
         ChatRespType::Streamable => {
