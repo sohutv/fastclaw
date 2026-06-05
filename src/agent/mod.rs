@@ -41,6 +41,7 @@ pub struct AgentRequestPkg {
     req: AgentRequest,
     ctx: AgentRequestContext,
     ack_sender: Option<tokio::sync::oneshot::Sender<()>>,
+    #[allow(unused)]
     create_time: chrono::DateTime<Local>,
 }
 

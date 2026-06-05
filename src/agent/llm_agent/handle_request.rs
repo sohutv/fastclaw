@@ -1,10 +1,10 @@
 use crate::agent::llm_agent::LlmAgent;
 use crate::agent::{
-    AgentRequest, AgentRequestContext, AgentRequestPkg, AgentResponse,
-    TaskBackpressure,
+    AgentRequest, AgentRequestContext, AgentRequestPkg, AgentResponse, TaskBackpressure,
 };
 use crate::channels::ChannelMessage;
 use crate::model_provider::ModelProvider;
+use futures_util::StreamExt;
 use itertools::Itertools;
 use log::warn;
 use rig::OneOrMany;
@@ -16,7 +16,6 @@ use rig::streaming::{StreamedAssistantContent, StreamingChat};
 use std::ops::Deref;
 use std::sync::Arc;
 use tokio::sync::mpsc::Receiver;
-use tokio_stream::StreamExt;
 
 impl<C, P> LlmAgent<C, P>
 where
