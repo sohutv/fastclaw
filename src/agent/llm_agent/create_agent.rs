@@ -79,6 +79,8 @@ where
             .additional_params({
                 if self.model_settings.reasoning {
                     json!( {
+                        // 此参数的设置需要配置成json
+                        "reasoning_effort": reasoning_effort,
                         "reasoning": {
                             "effort": reasoning_effort,
                         }

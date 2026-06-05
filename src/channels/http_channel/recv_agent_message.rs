@@ -7,6 +7,7 @@ use crate::channels::{
     create_robot_messages_for_agent,
 };
 use anyhow::anyhow;
+use log::info;
 use rig::completion::{AssistantContent, Message};
 use rig::message::{ReasoningContent, ToolCall, ToolFunction};
 
@@ -41,15 +42,19 @@ impl HttpChannel {
                     &self.ctx,
                     AgentRespType::ToolCall,
                     inbound_message,
-                    format!(
-                        r#"### 工具调用: {name}...
+                    {
+                        let text = format!(
+                            r#"### 工具调用: {name}...
 ```
 {}
 ```json
 "#,
-                        serde_json::to_string_pretty(arguments)
-                            .unwrap_or_else(|err| format!("Error serializing arguments: {}", err))
-                    ),
+                            serde_json::to_string_pretty(arguments)
+                                .unwrap_or_else(|err| format!("Error serializing arguments: {}", err))
+                        );
+                        info!("[{:?}] agent resp {text}", inbound_message.map(|it|&it.message_id));
+                        text
+                    },
                     HttpChannel::create_resp_messages,
                 )
                 .await
@@ -80,11 +85,15 @@ impl HttpChannel {
                             let content = {
                                 let content = buff.join("");
                                 buff.clear();
-                                format!(
-                                    r#"### 我的想法..
+                                {
+                                    let text =                                 format!(
+                                        r#"### 我的想法..
 {content}
 "#
-                                )
+                                    );
+                                    info!("[{:?}] agent resp {text}", inbound_message.map(|it|&it.message_id));
+                                    text
+                                }
                             };
                             if let Some(robot_message) = create_robot_messages_for_agent(
                                 session_id,
@@ -123,6 +132,7 @@ impl HttpChannel {
             AgentResponse::Final(usage) => {
                 let content = {
                     let text = buff.join("");
+                    info!("[{:?}] agent resp {text}", inbound_message.map(|it|&it.message_id));
                     let token_usage = format!(
                         "*<<Tokens:{}↑{}↓{}>>*",
                         usage.total_tokens, usage.input_tokens, usage.output_tokens

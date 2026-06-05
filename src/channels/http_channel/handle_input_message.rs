@@ -164,12 +164,11 @@ impl HttpChannel {
             .await
         {
             Ok(_) => {
-                let msg = format!("Submit agent task ok, msg_id: {}", msg_id);
-                info!("{msg}");
+                info!("Submit agent task ok, msg_id: {msg_id}");
                 Ok(())
             }
             Err(err) => {
-                warn!("Agent run failed, msg_id: {}, error: {}", msg_id, err);
+                warn!("Agent run failed, msg_id: {msg_id}, error: {err}");
                 Ok(())
             }
         }

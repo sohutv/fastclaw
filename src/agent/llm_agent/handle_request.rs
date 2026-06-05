@@ -6,7 +6,7 @@ use crate::channels::ChannelMessage;
 use crate::model_provider::ModelProvider;
 use futures_util::StreamExt;
 use itertools::Itertools;
-use log::warn;
+use log::{info, warn};
 use rig::OneOrMany;
 use rig::agent::MultiTurnStreamItem;
 use rig::client::CompletionClient;
@@ -34,10 +34,13 @@ where
                         create_time: _,
                     }) = rx.recv().await
                     {
+                        let id = req.id.clone();
+                        info!("[Pending] handle_request recv AgentRequestPkg {}", id);
                         let _ = Arc::clone(&self_).handle_request_actual(req, ctx).await;
                         if let Some(ack_sender) = ack_sender {
                             let _ = ack_sender.send(());
                         }
+                        info!("[Pending] handle_request ack AgentRequestPkg {} ok", id);
                     }
                 });
             }
@@ -52,10 +55,13 @@ where
                         create_time: _,
                     }) = rx.recv().await
                     {
+                        let id = req.id.clone();
+                        info!("[Latest] handle_request recv AgentRequestPkg {}", id);
                         let _ = watch_tx.send(Some((req, ctx)));
                         if let Some(ack_sender) = ack_sender {
                             let _ = ack_sender.send(());
                         }
+                        info!("[Latest] handle_request ack AgentRequestPkg {} ok", id);
                     }
                 });
                 tokio::spawn(async move {
@@ -64,7 +70,10 @@ where
                             let dst = watch_rx.borrow();
                             dst.deref().clone()
                         } {
+                            let id = req.id.clone();
+                            info!("[Latest] handle_request changed AgentRequestPkg {}", id);
                             let _ = Arc::clone(&self_).handle_request_actual(req, ctx).await;
+                            info!("[Latest] handle_request changed AgentRequestPkg {} ok", id);
                         }
                     }
                 });

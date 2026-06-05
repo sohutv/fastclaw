@@ -53,9 +53,11 @@ where
     ) -> crate::Result<()> {
         let mut receiver = Self::spawn_agent_task(agent, req.clone(), addi_system_prompt).await?;
         let self_ = Arc::clone(&self);
-        let _ = self_
-            .handle_agent_message(client, inbound_message, &mut receiver)
-            .await?;
+        let _ = tokio::spawn(async move {
+            let _ = self_
+                .handle_agent_message(client, inbound_message, &mut receiver)
+                .await;
+        });
         Ok(())
     }
 
@@ -70,10 +72,13 @@ where
             req: AgentRequest,
             ctx: AgentRequestContext,
         ) -> crate::Result<()> {
+            let id = req.id.clone();
+            info!("spawn_agent_task_inner send {}", id);
             let sender = agent.get_channel_sender().await?;
             let (pkg, ack) = AgentRequestPkg::new_with_ack(req, ctx);
             let _ = sender.send(pkg).await?;
             let _ = ack.await?;
+            info!("spawn_agent_task_inner send {} ok", id);
             Ok(())
         }
         let task_id = req.id.clone();
