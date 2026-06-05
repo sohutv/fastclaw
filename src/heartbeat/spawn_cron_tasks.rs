@@ -3,9 +3,10 @@ use crate::channels::{Anonymous, Channel, SessionId};
 use crate::tools::{TaskSchedule, TaskTools};
 use chrono::Duration;
 use log::{error, info, warn};
-use rig::completion::Message;
 use std::str::FromStr;
 use std::sync::Arc;
+use rig::message::UserContent;
+use rig::OneOrMany;
 
 impl<C, Client> super::Heartbeat<C, Client>
 where
@@ -105,7 +106,7 @@ where
                         AgentRequest {
                             id: Default::default(),
                             session_id: session_id.clone(),
-                            message: Message::user(format!(
+                            message: vec![OneOrMany::one(UserContent::text(format!(
                                 r#"
 **Execute task immediately**: task_id: {}
 - **CurrentTime**: {}
@@ -118,7 +119,7 @@ where
                                 &task.id,
                                 now.to_rfc3339(),
                                 task.full_desc()
-                            )),
+                            )))],
                         },
                     )
                     .await

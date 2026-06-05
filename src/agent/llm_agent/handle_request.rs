@@ -4,6 +4,7 @@ use crate::channels::ChannelMessage;
 use crate::model_provider::ModelProvider;
 use itertools::Itertools;
 use log::warn;
+use rig::OneOrMany;
 use rig::agent::MultiTurnStreamItem;
 use rig::client::CompletionClient;
 use rig::completion::Message;
@@ -21,7 +22,7 @@ where
         self: Arc<Self>,
         AgentRequest {
             ref session_id,
-            mut message,
+            message,
             ..
         }: AgentRequest,
         AgentRequestContext {
@@ -78,20 +79,27 @@ where
         } else {
             vec![]
         };
-        let message = match message {
-            Message::System { .. } => message,
-            Message::User {
-                ref mut content, ..
-            } => {
-                content.push(UserContent::text(format!(
-                    "- **Current DateTime**: {}",
-                    chrono::Local::now().to_rfc3339()
-                )));
-                message
+        #[inline(always)]
+        fn merge_user_message(messages: Vec<OneOrMany<UserContent>>) -> Message {
+            match OneOrMany::many(
+                messages
+                    .into_iter()
+                    .flatten()
+                    .chain(vec![UserContent::text(format!(
+                        "- **Current DateTime**: {}",
+                        chrono::Local::now().to_rfc3339()
+                    ))])
+                    .collect_vec(),
+            ) {
+                Ok(content) => Message::User { content },
+                Err(_) => {
+                    unreachable!("unreachable empty list error");
+                }
             }
-            Message::Assistant { .. } => message,
-        };
-        let mut stream = agent.stream_chat(message, history).await;
+        }
+        let mut stream = agent
+            .stream_chat(merge_user_message(message), history)
+            .await;
         while let Some(result) = stream.next().await {
             let response = match result {
                 Ok(MultiTurnStreamItem::StreamAssistantItem(content)) => match content {

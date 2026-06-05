@@ -6,7 +6,6 @@ use crate::channels::{Channel, SessionId};
 use base64::Engine;
 use log::{info, warn};
 use rig::OneOrMany;
-use rig::completion::Message;
 use rig::message::{DocumentSourceKind, Image, ImageDetail, ImageMediaType, UserContent};
 use std::ops::Deref;
 use std::sync::Arc;
@@ -159,9 +158,7 @@ impl HttpChannel {
                 AgentRequest {
                     id: msg_id.to_string().into(),
                     session_id: session_id.clone(),
-                    message: Message::User {
-                        content: user_content,
-                    },
+                    message: vec![user_content],
                 },
             )
             .await

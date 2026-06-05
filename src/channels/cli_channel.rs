@@ -6,12 +6,13 @@ use anyhow::anyhow;
 use async_trait::async_trait;
 use log::warn;
 use rig::completion::Message;
-use rig::message::{AssistantContent, ReasoningContent, ToolCall, ToolFunction};
+use rig::message::{AssistantContent, ReasoningContent, ToolCall, ToolFunction, UserContent};
 use rustyline::DefaultEditor;
 use rustyline::error::ReadlineError;
 use std::io::{Write, stdout};
 use std::sync::Arc;
 use std::thread::JoinHandle;
+use rig::OneOrMany;
 use tokio::sync::mpsc::Receiver;
 
 #[derive(Clone)]
@@ -81,7 +82,6 @@ impl Channel for CliChannel {
                                             Err(_) => {}
                                         }
                                     }
-                                    let message = Message::user(line);
                                     let _ = agent
                                         .get_channel_sender()
                                         .await
@@ -90,7 +90,7 @@ impl Channel for CliChannel {
                                             AgentRequest {
                                                 id: Default::default(),
                                                 session_id: self_.session_id.clone(),
-                                                message,
+                                                message: vec![OneOrMany::one(UserContent::text(line))],
                                             },
                                             AgentRequestContext {
                                                 channel_message_sender: message_sender.clone(),

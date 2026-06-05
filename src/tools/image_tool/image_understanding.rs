@@ -125,28 +125,26 @@ impl ImageUnderstandingTool {
                 AgentRequest {
                     id: uuid::Uuid::new_v4().into(),
                     session_id: self.ctx.session_id.clone(),
-                    message: Message::User {
-                        content: OneOrMany::many({
-                            let mut vec = Vec::with_capacity(images.len() + 1);
-                            vec.push(UserContent::text(prompt));
-                            for image in images {
-                                let data = {
-                                    let image = image.try_into_image().await?;
-                                    let data = image.as_png().await?;
-                                    data
-                                };
-                                vec.push(UserContent::Image(rig::completion::message::Image {
-                                    data: DocumentSourceKind::Base64(
-                                        base64::engine::general_purpose::STANDARD.encode(&data),
-                                    ),
-                                    media_type: Some(ImageMediaType::PNG),
-                                    detail: Some(ImageDetail::Auto),
-                                    additional_params: None,
-                                }));
-                            }
-                            vec
-                        })?,
-                    },
+                    message: vec![OneOrMany::many({
+                        let mut vec = Vec::with_capacity(images.len() + 1);
+                        vec.push(UserContent::text(prompt));
+                        for image in images {
+                            let data = {
+                                let image = image.try_into_image().await?;
+                                let data = image.as_png().await?;
+                                data
+                            };
+                            vec.push(UserContent::Image(rig::completion::message::Image {
+                                data: DocumentSourceKind::Base64(
+                                    base64::engine::general_purpose::STANDARD.encode(&data),
+                                ),
+                                media_type: Some(ImageMediaType::PNG),
+                                detail: Some(ImageDetail::Auto),
+                                additional_params: None,
+                            }));
+                        }
+                        vec
+                    })?],
                 },
                 AgentRequestContext {
                     channel_message_sender,

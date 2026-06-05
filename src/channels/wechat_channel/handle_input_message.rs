@@ -5,7 +5,6 @@ use crate::channels::wechat_channel::WechatChannel;
 use base64::Engine;
 use log::{info, warn};
 use rig::OneOrMany;
-use rig::completion::Message;
 use rig::message::{DocumentSourceKind, Image, ImageDetail, ImageMediaType, UserContent};
 use std::io::Cursor;
 use std::ops::Deref;
@@ -214,9 +213,7 @@ impl WechatChannel {
                 AgentRequest {
                     id: msg_id.to_string().into(),
                     session_id: self.wechat_config.session_id.clone(),
-                    message: Message::User {
-                        content: user_content,
-                    },
+                    message: vec![user_content],
                 },
             )
             .await

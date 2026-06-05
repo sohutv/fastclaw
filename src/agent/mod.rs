@@ -3,11 +3,12 @@ use anyhow::anyhow;
 use async_trait::async_trait;
 use derive_more::{Deref, Display, From, FromStr, Into};
 use rig::completion::Usage;
-use rig::message::{Message, Reasoning, ToolCall};
+use rig::message::{Message, Reasoning, ToolCall, UserContent};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fmt::Display;
 use std::sync::Arc;
+use rig::OneOrMany;
 use tokio::sync::RwLock;
 use tokio::sync::mpsc::Sender;
 
@@ -157,7 +158,7 @@ pub struct AgentRequest {
     pub session_id: SessionId,
     #[deref]
     #[into]
-    pub message: Message,
+    pub message: Vec<OneOrMany<UserContent>>,
 }
 
 #[derive(Clone)]

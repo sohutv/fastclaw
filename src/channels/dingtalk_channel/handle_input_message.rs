@@ -25,7 +25,6 @@ use dingtalk_stream::{
 };
 use log::{info, warn};
 use rig::OneOrMany;
-use rig::completion::Message;
 use rig::message::{DocumentSourceKind, Image, ImageDetail, ImageMediaType, UserContent};
 use std::io::Cursor;
 use std::ops::Deref;
@@ -285,9 +284,7 @@ impl dingtalk_stream::handlers::CallbackHandler for DingTalkCallbackHandler {
                 AgentRequest {
                     id: msg_id.to_string().into(),
                     session_id,
-                    message: Message::User {
-                        content: user_contents,
-                    },
+                    message: vec![user_contents],
                 },
             )
             .await
