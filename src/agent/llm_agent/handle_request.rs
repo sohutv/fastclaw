@@ -18,7 +18,7 @@ where
     C: CompletionClient + 'static + Send + Sync,
     P: ModelProvider<Client = C> + 'static + Send + Sync,
 {
-    pub(super) async fn handle_request(
+    pub(super) async fn handle_request_(
         self: Arc<Self>,
         AgentRequest {
             ref session_id,

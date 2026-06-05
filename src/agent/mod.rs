@@ -46,6 +46,8 @@ pub struct AgentRequestPkg {
 pub trait Agent: SessionCompactSupport + AgentClone + Send + Sync {
     async fn start(self: Arc<Self>) -> crate::Result<Arc<dyn Agent>>;
 
+    async fn handle_request(self: Arc<Self>, req: AgentRequest, ctx: AgentRequestContext);
+
     async fn get_channel_sender(&self) -> crate::Result<Sender<AgentRequestPkg>>;
 
     fn context(&self) -> &AgentContext;
@@ -311,6 +313,18 @@ pub enum TaskBackpressure {
     Pending,
     #[serde(alias = "latest")]
     Latest,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+pub enum TaskAggWindow {
+    SlidingWindow(usize),
+    TumblingWindow(usize),
+}
+
+impl Default for TaskAggWindow {
+    fn default() -> Self {
+        Self::TumblingWindow(1)
+    }
 }
 
 impl Default for AgentSettings {

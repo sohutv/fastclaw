@@ -1,8 +1,5 @@
 use crate::ModelName;
-use crate::agent::{
-    Agent, AgentClone, AgentContext, AgentGroup, AgentId, AgentRequestPkg, AgentSettings,
-    HistoryManager, LlmAgentSupplier, TaskBackpressure, Workspace,
-};
+use crate::agent::{Agent, AgentClone, AgentContext, AgentGroup, AgentId, AgentRequest, AgentRequestContext, AgentRequestPkg, AgentSettings, HistoryManager, LlmAgentSupplier, TaskBackpressure, Workspace};
 use crate::config::Config;
 use crate::memory::MemoryManager;
 use crate::model_provider::{ModelProvider, ModelSettings};
@@ -213,6 +210,10 @@ where
             *sender = Some(tx);
         }
         Ok(self)
+    }
+
+    async fn handle_request(self: Arc<Self>, req: AgentRequest, ctx: AgentRequestContext) {
+        self.handle_request_(req,ctx).await
     }
 
     async fn get_channel_sender(&self) -> crate::Result<Sender<AgentRequestPkg>> {
