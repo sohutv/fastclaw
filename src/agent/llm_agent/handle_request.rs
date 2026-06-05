@@ -1,6 +1,8 @@
-use std::ops::Deref;
 use crate::agent::llm_agent::LlmAgent;
-use crate::agent::{AgentRequest, AgentRequestContext, AgentRequestPkg, AgentResponse, TaskBackpressure};
+use crate::agent::{
+    AgentRequest, AgentRequestContext, AgentRequestPkg, AgentResponse,
+    TaskBackpressure,
+};
 use crate::channels::ChannelMessage;
 use crate::model_provider::ModelProvider;
 use itertools::Itertools;
@@ -11,6 +13,7 @@ use rig::client::CompletionClient;
 use rig::completion::Message;
 use rig::message::UserContent;
 use rig::streaming::{StreamedAssistantContent, StreamingChat};
+use std::ops::Deref;
 use std::sync::Arc;
 use tokio::sync::mpsc::Receiver;
 use tokio_stream::StreamExt;
@@ -20,17 +23,17 @@ where
     C: CompletionClient + 'static + Send + Sync,
     P: ModelProvider<Client = C> + 'static + Send + Sync,
 {
-    pub(super) async fn handle_request(self: Arc<Self>, mut rx:Receiver<AgentRequestPkg>) {
+    pub(super) async fn handle_request(self: Arc<Self>, mut rx: Receiver<AgentRequestPkg>) {
         match self.agent_settings.task_backpressure {
             TaskBackpressure::Pending => {
                 let self_ = Arc::clone(&self);
                 tokio::spawn(async move {
                     while let Some(AgentRequestPkg {
-                                       req,
-                                       ctx,
-                                       ack_sender,
-                                        create_time:_,
-                                   }) = rx.recv().await
+                        req,
+                        ctx,
+                        ack_sender,
+                        create_time: _,
+                    }) = rx.recv().await
                     {
                         let _ = Arc::clone(&self_).handle_request_actual(req, ctx).await;
                         if let Some(ack_sender) = ack_sender {
@@ -44,11 +47,11 @@ where
                 let (watch_tx, mut watch_rx) = tokio::sync::watch::channel(None);
                 tokio::spawn(async move {
                     while let Some(AgentRequestPkg {
-                                       req,
-                                       ctx,
-                                       ack_sender,
-                                       create_time:_,
-                                   }) = rx.recv().await
+                        req,
+                        ctx,
+                        ack_sender,
+                        create_time: _,
+                    }) = rx.recv().await
                     {
                         let _ = watch_tx.send(Some((req, ctx)));
                         if let Some(ack_sender) = ack_sender {
@@ -70,7 +73,7 @@ where
         }
     }
 
-    pub(super) async fn handle_request_actual(
+    async fn handle_request_actual(
         self: Arc<Self>,
         AgentRequest {
             ref session_id,
