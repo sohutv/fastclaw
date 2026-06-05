@@ -1,7 +1,7 @@
 use crate::ModelName;
 use crate::agent::{
-    Agent, AgentClone, AgentContext, AgentGroup, AgentId, AgentRequest, AgentRequestContext,
-    AgentSettings, HistoryManager, LlmAgentSupplier, Workspace,
+    Agent, AgentClone, AgentContext, AgentGroup, AgentId, AgentRequestPkg, AgentSettings,
+    HistoryManager, LlmAgentSupplier, TaskBackpressure, Workspace,
 };
 use crate::config::Config;
 use crate::memory::MemoryManager;
@@ -11,7 +11,9 @@ use crate::type_::SystemPrompt;
 use anyhow::anyhow;
 use async_trait::async_trait;
 use rig::client::CompletionClient;
+use std::ops::Deref;
 use std::sync::Arc;
+use tokio::sync::RwLock;
 use tokio::sync::mpsc::Sender;
 
 mod create_agent;
@@ -32,7 +34,7 @@ where
     model_name: ModelName,
     pub model_settings: ModelSettings,
     agent_settings: AgentSettings,
-    channel_sender: Arc<tokio::sync::RwLock<Option<Sender<(AgentRequest, AgentRequestContext)>>>>,
+    channel_sender: Arc<RwLock<Option<Sender<AgentRequestPkg>>>>,
 }
 
 #[async_trait]
@@ -122,7 +124,11 @@ where
     C: 'static + CompletionClient + Send + Sync,
     P: 'static + ModelProvider<Client = C> + Send + Sync,
 {
-    async fn clone_with(&self, id: AgentId) -> crate::Result<Arc<dyn Agent>> {
+    async fn clone_with(
+        &self,
+        id: AgentId,
+        agent_settings: Option<AgentSettings>,
+    ) -> crate::Result<Arc<dyn Agent>> {
         if id.eq(&self.id) {
             return Err(anyhow!("clone agent failed, duplicated id: {id}"));
         }
@@ -130,7 +136,11 @@ where
             id,
             group: self.group.clone(),
             model_settings: self.model_settings.clone(),
-            agent_settings: self.agent_settings.clone(),
+            agent_settings: if let Some(agent_settings) = agent_settings {
+                agent_settings
+            } else {
+                self.agent_settings.clone()
+            },
             model_name: self.model_name.clone(),
             model_provider: self.model_provider.clone(),
             ctx: self.ctx.clone(),
@@ -154,20 +164,58 @@ where
                 return Ok(self);
             }
             let (tx, mut rx) = tokio::sync::mpsc::channel(*self.agent_settings.task_queue_size);
-            let self_ = Arc::clone(&self);
-            tokio::spawn(async move {
-                while let Some((request, ctx)) = rx.recv().await {
-                    Arc::clone(&self_).handle_request(request, ctx).await
+
+            match self.agent_settings.task_backpressure {
+                TaskBackpressure::Pending => {
+                    let self_ = Arc::clone(&self);
+                    tokio::spawn(async move {
+                        while let Some(AgentRequestPkg {
+                            req,
+                            ctx,
+                            ack_sender,
+                        }) = rx.recv().await
+                        {
+                            let _ = Arc::clone(&self_).handle_request(req, ctx).await;
+                            if let Some(ack_sender) = ack_sender {
+                                let _ = ack_sender.send(());
+                            }
+                        }
+                    });
                 }
-            });
+                TaskBackpressure::Latest => {
+                    let self_ = Arc::clone(&self);
+                    let (watch_tx, mut watch_rx) = tokio::sync::watch::channel(None);
+                    tokio::spawn(async move {
+                        while let Some(AgentRequestPkg {
+                            req,
+                            ctx,
+                            ack_sender,
+                        }) = rx.recv().await
+                        {
+                            let _ = watch_tx.send(Some((req, ctx)));
+                            if let Some(ack_sender) = ack_sender {
+                                let _ = ack_sender.send(());
+                            }
+                        }
+                    });
+                    tokio::spawn(async move {
+                        while let Ok(_) = watch_rx.changed().await {
+                            if let Some((req, ctx)) = {
+                                let dst = watch_rx.borrow();
+                                dst.deref().clone()
+                            } {
+                                let _ = Arc::clone(&self_).handle_request(req, ctx).await;
+                            }
+                        }
+                    });
+                }
+            }
             *sender = Some(tx);
         }
         Ok(self)
     }
 
-    async fn get_channel_sender(
-        &self,
-    ) -> crate::Result<Sender<(AgentRequest, AgentRequestContext)>> {
+    async fn get_channel_sender(&self) -> crate::Result<Sender<AgentRequestPkg>> {
         let sender = self.channel_sender.read().await;
         if let Some(sender) = &*sender {
             Ok(sender.clone())

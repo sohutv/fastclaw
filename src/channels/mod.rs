@@ -1,15 +1,13 @@
 use crate::agent::{
-    Agent, AgentId, AgentRequest, AgentRequestContext, AgentResponse, TaskBackpressure,
+    Agent, AgentId, AgentRequest, AgentRequestContext, AgentRequestPkg, AgentResponse,
 };
 use crate::config::{Config, Workspace};
-use anyhow::anyhow;
 use async_trait::async_trait;
 use derive_more::Deref;
-use log::{error, info, warn};
+use log::{error, info};
 use std::sync::Arc;
 use strum::Display;
 use tokio::sync::mpsc::Receiver;
-use tokio::sync::mpsc::error::TrySendError;
 use tokio::task::JoinHandle;
 
 #[cfg(feature = "channel_cli_channel")]
@@ -77,20 +75,15 @@ where
             ctx: AgentRequestContext,
         ) -> crate::Result<()> {
             let sender = agent.get_channel_sender().await?;
-            match agent.agent_settings().task_backpressure {
-                TaskBackpressure::Wait => {
-                    let _ = sender.send((req, ctx)).await?;
-                    Ok(())
-                }
-                TaskBackpressure::Drop => match sender.try_send((req, ctx)) {
-                    Ok(()) => Ok(()),
-                    Err(TrySendError::Full((req, _))) => {
-                        warn!("agent task queue is full, drop agent-request: {}", req.id);
-                        Ok(())
-                    }
-                    Err(err) => Err(anyhow!("{err}")),
-                },
-            }
+            let (ack_sender, ack) = tokio::sync::oneshot::channel();
+            let pkg = AgentRequestPkg {
+                req,
+                ctx,
+                ack_sender: Some(ack_sender),
+            };
+            let _ = sender.send(pkg).await?;
+            let _ = ack.await?;
+            Ok(())
         }
         let task_id = req.id.clone();
         match spawn_agent_task_inner(

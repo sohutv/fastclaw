@@ -2,30 +2,29 @@ use crate::channels::{ChannelMessage, SessionId};
 use anyhow::anyhow;
 use async_trait::async_trait;
 use derive_more::{Deref, Display, From, FromStr, Into};
+use rig::OneOrMany;
 use rig::completion::Usage;
 use rig::message::{Message, Reasoning, ToolCall, UserContent};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fmt::Display;
 use std::sync::Arc;
-use rig::OneOrMany;
 use tokio::sync::RwLock;
 use tokio::sync::mpsc::Sender;
 
 mod llm_agent;
 mod prompt;
 mod session_history;
-pub use session_history::{HistoryManager, JsonlHistoryManager};
-
 use crate::ModelName;
 use crate::config::{Config, Workspace};
 use crate::memory::MemoryManager;
 use crate::model_provider::{ModelProviderName, ModelProviders, ModelSettings, ReasoningEffort};
+pub use session_history::{HistoryManager, JsonlHistoryManager};
 
-use crate::tools::tool_filter::ToolNameFilter;
 use crate::tools::mcp_tool::McpRegistry;
-use crate::type_::SystemPrompt;
 pub use crate::tools::tool_filter::ToolFilter;
+use crate::tools::tool_filter::ToolNameFilter;
+use crate::type_::SystemPrompt;
 
 #[async_trait]
 pub trait SessionCompactSupport: Send + Sync {
@@ -36,13 +35,18 @@ pub trait SessionCompactSupport: Send + Sync {
         compact_ratio: f32,
     ) -> HistoryCompactResult;
 }
+
+pub struct AgentRequestPkg {
+    pub req: AgentRequest,
+    pub ctx: AgentRequestContext,
+    pub ack_sender: Option<tokio::sync::oneshot::Sender<()>>,
+}
+
 #[async_trait]
 pub trait Agent: SessionCompactSupport + AgentClone + Send + Sync {
     async fn start(self: Arc<Self>) -> crate::Result<Arc<dyn Agent>>;
 
-    async fn get_channel_sender(
-        &self,
-    ) -> crate::Result<Sender<(AgentRequest, AgentRequestContext)>>;
+    async fn get_channel_sender(&self) -> crate::Result<Sender<AgentRequestPkg>>;
 
     fn context(&self) -> &AgentContext;
 
@@ -108,7 +112,11 @@ pub trait Agent: SessionCompactSupport + AgentClone + Send + Sync {
 
 #[async_trait]
 pub trait AgentClone: Send + Sync {
-    async fn clone_with(&self, id: AgentId) -> crate::Result<Arc<dyn Agent>>;
+    async fn clone_with(
+        &self,
+        id: AgentId,
+        agent_settings: Option<AgentSettings>,
+    ) -> crate::Result<Arc<dyn Agent>>;
 }
 
 #[allow(unused)]
@@ -296,13 +304,13 @@ impl Default for TaskQueueSize {
         Self(8)
     }
 }
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, Default)]
 pub enum TaskBackpressure {
     #[default]
-    #[serde(alias = "wait")]
-    Wait,
-    #[serde(alias = "drop")]
-    Drop,
+    #[serde(alias = "pending")]
+    Pending,
+    #[serde(alias = "latest")]
+    Latest,
 }
 
 impl Default for AgentSettings {

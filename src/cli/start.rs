@@ -90,7 +90,7 @@ impl CmdRunner for Start {
                         .await?
                 }
             };
-            let heartbeat_agent = main_agent.clone_with("heartbeat".into()).await?;
+            let heartbeat_agent = main_agent.clone_with("heartbeat".into(), None).await?;
             (Arc::new(main_agent) as Arc<dyn Agent>, heartbeat_agent)
         };
 

@@ -1,10 +1,13 @@
-use crate::agent::{Agent, AgentRequest, AgentRequestContext, AgentResponse, Notify};
+use crate::agent::{
+    Agent, AgentRequest, AgentRequestContext, AgentRequestPkg, AgentResponse, Notify,
+};
 use crate::channels::console_cmd::Console;
 use crate::channels::{Channel, ChannelContext, ChannelMessage, SessionId};
 use crate::config::{Config, Workspace};
 use anyhow::anyhow;
 use async_trait::async_trait;
 use log::warn;
+use rig::OneOrMany;
 use rig::completion::Message;
 use rig::message::{AssistantContent, ReasoningContent, ToolCall, ToolFunction, UserContent};
 use rustyline::DefaultEditor;
@@ -12,7 +15,6 @@ use rustyline::error::ReadlineError;
 use std::io::{Write, stdout};
 use std::sync::Arc;
 use std::thread::JoinHandle;
-use rig::OneOrMany;
 use tokio::sync::mpsc::Receiver;
 
 #[derive(Clone)]
@@ -86,19 +88,22 @@ impl Channel for CliChannel {
                                         .get_channel_sender()
                                         .await
                                         .unwrap()
-                                        .send((
-                                            AgentRequest {
+                                        .send(AgentRequestPkg {
+                                            req: AgentRequest {
                                                 id: Default::default(),
                                                 session_id: self_.session_id.clone(),
-                                                message: vec![OneOrMany::one(UserContent::text(line))],
+                                                message: vec![OneOrMany::one(UserContent::text(
+                                                    line,
+                                                ))],
                                             },
-                                            AgentRequestContext {
+                                            ctx: AgentRequestContext {
                                                 channel_message_sender: message_sender.clone(),
                                                 addi_system_prompt: None,
                                                 tool_filter: Default::default(),
                                                 with_history: true,
                                             },
-                                        ))
+                                            ack_sender: None,
+                                        })
                                         .await;
                                     let _ = self_
                                         .handle_agent_message(

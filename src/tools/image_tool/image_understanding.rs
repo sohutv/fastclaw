@@ -1,4 +1,7 @@
-use crate::agent::{AgentRequest, AgentRequestContext, AgentResponse, ToolFilter};
+use crate::agent::{
+    AgentRequest, AgentRequestContext, AgentRequestPkg, AgentResponse, AgentSettings,
+    TaskBackpressure, ToolFilter,
+};
 use crate::channels::ChannelMessage;
 use crate::tools::{ToolCallError, ToolCallRsult, ToolContext};
 use crate::type_::Prompt;
@@ -66,8 +69,7 @@ impl Tool for ImageUnderstandingTool {
     }
 
     async fn call(&self, args: Self::Args) -> Result<Self::Output, Self::Error> {
-        let (tx, mut rx) = tokio::sync::mpsc::channel(32);
-
+        let (tx, mut rx) = tokio::sync::mpsc::channel(1);
         if let Err(err) = self.send_request(tx, args).await {
             error!("{err}");
             return Err(ToolCallError(format!("{err}")));
@@ -112,47 +114,53 @@ impl ImageUnderstandingTool {
         channel_message_sender: tokio::sync::mpsc::Sender<crate::Result<ChannelMessage>>,
         Args { prompt, images }: Args,
     ) -> crate::Result<()> {
+        let pkg = AgentRequestPkg {
+            req: AgentRequest {
+                id: uuid::Uuid::new_v4().into(),
+                session_id: self.ctx.session_id.clone(),
+                message: vec![OneOrMany::many({
+                    let mut vec = Vec::with_capacity(images.len() + 1);
+                    vec.push(UserContent::text(prompt));
+                    for image in images {
+                        let data = {
+                            let image = image.try_into_image().await?;
+                            let data = image.as_png().await?;
+                            data
+                        };
+                        vec.push(UserContent::Image(rig::completion::message::Image {
+                            data: DocumentSourceKind::Base64(
+                                base64::engine::general_purpose::STANDARD.encode(&data),
+                            ),
+                            media_type: Some(ImageMediaType::PNG),
+                            detail: Some(ImageDetail::Auto),
+                            additional_params: None,
+                        }));
+                    }
+                    vec
+                })?],
+            },
+            ctx: AgentRequestContext {
+                channel_message_sender,
+                addi_system_prompt: None,
+                tool_filter: ToolFilter::from(|_| None),
+                with_history: false,
+            },
+            ack_sender: None,
+        };
+        let agent_settings = AgentSettings {
+            task_backpressure: TaskBackpressure::Latest,
+            ..self.ctx.parent_agent.agent_settings().clone()
+        };
         let _ = self
             .ctx
             .parent_agent
-            .clone_with("tool-call".into())
+            .clone_with("tool-call".into(), Some(agent_settings))
             .await?
             .start()
             .await?
             .get_channel_sender()
             .await?
-            .send((
-                AgentRequest {
-                    id: uuid::Uuid::new_v4().into(),
-                    session_id: self.ctx.session_id.clone(),
-                    message: vec![OneOrMany::many({
-                        let mut vec = Vec::with_capacity(images.len() + 1);
-                        vec.push(UserContent::text(prompt));
-                        for image in images {
-                            let data = {
-                                let image = image.try_into_image().await?;
-                                let data = image.as_png().await?;
-                                data
-                            };
-                            vec.push(UserContent::Image(rig::completion::message::Image {
-                                data: DocumentSourceKind::Base64(
-                                    base64::engine::general_purpose::STANDARD.encode(&data),
-                                ),
-                                media_type: Some(ImageMediaType::PNG),
-                                detail: Some(ImageDetail::Auto),
-                                additional_params: None,
-                            }));
-                        }
-                        vec
-                    })?],
-                },
-                AgentRequestContext {
-                    channel_message_sender,
-                    addi_system_prompt: None,
-                    tool_filter: ToolFilter::from(|_| None),
-                    with_history: false,
-                },
-            ))
+            .send(pkg)
             .await?;
         Ok(())
     }
