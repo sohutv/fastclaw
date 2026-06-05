@@ -1,5 +1,8 @@
 use crate::ModelName;
-use crate::agent::{Agent, AgentClone, AgentContext, AgentGroup, AgentId, AgentRequest, AgentRequestContext, AgentRequestPkg, AgentSettings, HistoryManager, LlmAgentSupplier, TaskBackpressure, Workspace};
+use crate::agent::{
+    Agent, AgentClone, AgentContext, AgentGroup, AgentId, AgentRequestPkg, AgentSettings,
+    HistoryManager, LlmAgentSupplier, Workspace,
+};
 use crate::config::Config;
 use crate::memory::MemoryManager;
 use crate::model_provider::{ModelProvider, ModelSettings};
@@ -8,7 +11,6 @@ use crate::type_::SystemPrompt;
 use anyhow::anyhow;
 use async_trait::async_trait;
 use rig::client::CompletionClient;
-use std::ops::Deref;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 use tokio::sync::mpsc::Sender;
@@ -160,60 +162,11 @@ where
                 drop(sender);
                 return Ok(self);
             }
-            let (tx, mut rx) = tokio::sync::mpsc::channel(*self.agent_settings.task_queue_size);
-
-            match self.agent_settings.task_backpressure {
-                TaskBackpressure::Pending => {
-                    let self_ = Arc::clone(&self);
-                    tokio::spawn(async move {
-                        while let Some(AgentRequestPkg {
-                            req,
-                            ctx,
-                            ack_sender,
-                        }) = rx.recv().await
-                        {
-                            let _ = Arc::clone(&self_).handle_request(req, ctx).await;
-                            if let Some(ack_sender) = ack_sender {
-                                let _ = ack_sender.send(());
-                            }
-                        }
-                    });
-                }
-                TaskBackpressure::Latest => {
-                    let self_ = Arc::clone(&self);
-                    let (watch_tx, mut watch_rx) = tokio::sync::watch::channel(None);
-                    tokio::spawn(async move {
-                        while let Some(AgentRequestPkg {
-                            req,
-                            ctx,
-                            ack_sender,
-                        }) = rx.recv().await
-                        {
-                            let _ = watch_tx.send(Some((req, ctx)));
-                            if let Some(ack_sender) = ack_sender {
-                                let _ = ack_sender.send(());
-                            }
-                        }
-                    });
-                    tokio::spawn(async move {
-                        while let Ok(_) = watch_rx.changed().await {
-                            if let Some((req, ctx)) = {
-                                let dst = watch_rx.borrow();
-                                dst.deref().clone()
-                            } {
-                                let _ = Arc::clone(&self_).handle_request(req, ctx).await;
-                            }
-                        }
-                    });
-                }
-            }
+            let (tx, rx) = tokio::sync::mpsc::channel(*self.agent_settings.task_queue_size);
+            let _ = Arc::clone(&self).handle_request(rx).await;
             *sender = Some(tx);
         }
         Ok(self)
-    }
-
-    async fn handle_request(self: Arc<Self>, req: AgentRequest, ctx: AgentRequestContext) {
-        self.handle_request_(req,ctx).await
     }
 
     async fn get_channel_sender(&self) -> crate::Result<Sender<AgentRequestPkg>> {

@@ -1,5 +1,6 @@
+use std::ops::Deref;
 use crate::agent::llm_agent::LlmAgent;
-use crate::agent::{AgentRequest, AgentRequestContext, AgentResponse};
+use crate::agent::{AgentRequest, AgentRequestContext, AgentRequestPkg, AgentResponse, TaskBackpressure};
 use crate::channels::ChannelMessage;
 use crate::model_provider::ModelProvider;
 use itertools::Itertools;
@@ -11,6 +12,7 @@ use rig::completion::Message;
 use rig::message::UserContent;
 use rig::streaming::{StreamedAssistantContent, StreamingChat};
 use std::sync::Arc;
+use tokio::sync::mpsc::Receiver;
 use tokio_stream::StreamExt;
 
 impl<C, P> LlmAgent<C, P>
@@ -18,7 +20,55 @@ where
     C: CompletionClient + 'static + Send + Sync,
     P: ModelProvider<Client = C> + 'static + Send + Sync,
 {
-    pub(super) async fn handle_request_(
+    pub(super) async fn handle_request(self: Arc<Self>, mut rx:Receiver<AgentRequestPkg>) {
+        match self.agent_settings.task_backpressure {
+            TaskBackpressure::Pending => {
+                let self_ = Arc::clone(&self);
+                tokio::spawn(async move {
+                    while let Some(AgentRequestPkg {
+                                       req,
+                                       ctx,
+                                       ack_sender,
+                                   }) = rx.recv().await
+                    {
+                        let _ = Arc::clone(&self_).handle_request_actual(req, ctx).await;
+                        if let Some(ack_sender) = ack_sender {
+                            let _ = ack_sender.send(());
+                        }
+                    }
+                });
+            }
+            TaskBackpressure::Latest => {
+                let self_ = Arc::clone(&self);
+                let (watch_tx, mut watch_rx) = tokio::sync::watch::channel(None);
+                tokio::spawn(async move {
+                    while let Some(AgentRequestPkg {
+                                       req,
+                                       ctx,
+                                       ack_sender,
+                                   }) = rx.recv().await
+                    {
+                        let _ = watch_tx.send(Some((req, ctx)));
+                        if let Some(ack_sender) = ack_sender {
+                            let _ = ack_sender.send(());
+                        }
+                    }
+                });
+                tokio::spawn(async move {
+                    while let Ok(_) = watch_rx.changed().await {
+                        if let Some((req, ctx)) = {
+                            let dst = watch_rx.borrow();
+                            dst.deref().clone()
+                        } {
+                            let _ = Arc::clone(&self_).handle_request_actual(req, ctx).await;
+                        }
+                    }
+                });
+            }
+        }
+    }
+
+    pub(super) async fn handle_request_actual(
         self: Arc<Self>,
         AgentRequest {
             ref session_id,

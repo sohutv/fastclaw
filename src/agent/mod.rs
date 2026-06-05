@@ -46,8 +46,6 @@ pub struct AgentRequestPkg {
 pub trait Agent: SessionCompactSupport + AgentClone + Send + Sync {
     async fn start(self: Arc<Self>) -> crate::Result<Arc<dyn Agent>>;
 
-    async fn handle_request(self: Arc<Self>, req: AgentRequest, ctx: AgentRequestContext);
-
     async fn get_channel_sender(&self) -> crate::Result<Sender<AgentRequestPkg>>;
 
     fn context(&self) -> &AgentContext;
