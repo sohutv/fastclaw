@@ -51,7 +51,12 @@ where
             ))
             .append_preamble(addi_system_prompt.unwrap_or_default())
             .tools({
-                let filter = tool_filter.into();
+                let filter = self
+                    .agent_settings
+                    .tool_filter.clone()
+                    .map(|it| ToolFilter::from(it))
+                    .unwrap_or_default()
+                    .and(tool_filter.into());
                 crate::tools::FunctionTool::required_tools(ToolContext {
                     session_id: session_id.clone(),
                     config: self.ctx.config,

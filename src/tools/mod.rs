@@ -27,6 +27,8 @@ mod cloud_storage_tool;
 mod memory_recall;
 
 mod daemon_agent;
+pub mod tool_filter;
+
 pub use daemon_agent::DaemonAgentToolsConfig;
 
 #[derive(Debug, Copy, Clone, serde::Deserialize)]

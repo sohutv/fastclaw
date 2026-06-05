@@ -21,11 +21,10 @@ use crate::config::{Config, Workspace};
 use crate::memory::MemoryManager;
 use crate::model_provider::{ModelProviderName, ModelProviders, ModelSettings, ReasoningEffort};
 
-pub mod tool_filter;
-
+use crate::tools::tool_filter::ToolNameFilter;
 use crate::tools::mcp_tool::McpRegistry;
 use crate::type_::SystemPrompt;
-pub use tool_filter::ToolFilter;
+pub use crate::tools::tool_filter::ToolFilter;
 
 #[async_trait]
 pub trait SessionCompactSupport: Send + Sync {
@@ -285,6 +284,7 @@ pub struct AgentSettings {
     pub task_queue_size: TaskQueueSize,
     pub task_backpressure: TaskBackpressure,
     pub chat_history_limit: Option<usize>,
+    pub tool_filter: Option<ToolNameFilter>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Deref)]
@@ -314,6 +314,7 @@ impl Default for AgentSettings {
             task_queue_size: Default::default(),
             task_backpressure: Default::default(),
             chat_history_limit: None,
+            tool_filter: None,
         }
     }
 }

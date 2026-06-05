@@ -1,4 +1,5 @@
 use crate::config::Config;
+use crate::tools::tool_filter::ToolNameFilter;
 use derive_more::{Deref, Display};
 use itertools::Itertools;
 use rig::tool::ToolDyn;
@@ -28,9 +29,13 @@ pub enum McpToolSetConfig {
         args: Vec<String>,
         #[serde(default)]
         env: BTreeMap<String, String>,
+        tool_filter: Option<ToolNameFilter>,
     },
     #[serde(rename = "sse")]
-    Sse { url: String },
+    Sse {
+        url: String,
+        tool_filter: Option<ToolNameFilter>,
+    },
 }
 
 #[derive(Deref)]
@@ -50,7 +55,6 @@ pub struct McpToolSet {
 }
 
 impl McpToolSet {
-
     #[allow(unused)]
     async fn join(self) -> crate::Result<()> {
         let _ = self.join_handle.await?;
@@ -110,7 +114,12 @@ impl rmcp::handler::client::ClientHandler for McpToolSetInnerShared {
 impl McpToolSet {
     async fn new(name: &McpToolSetName, config: &McpToolSetConfig) -> crate::Result<Self> {
         let (inner, service) = match config {
-            McpToolSetConfig::Stdio { command, args, env } => {
+            McpToolSetConfig::Stdio {
+                command,
+                args,
+                env,
+                tool_filter: _,
+            } => {
                 let cmd = {
                     let mut cmd = rmcp::transport::child_process::which_command(command)?;
                     cmd.args(args).envs(env);
@@ -150,7 +159,10 @@ impl McpToolSet {
                 }
                 (mcp_tool_set, service)
             }
-            McpToolSetConfig::Sse { url } => {
+            McpToolSetConfig::Sse {
+                url,
+                tool_filter: _,
+            } => {
                 let transport =
                     rmcp::transport::StreamableHttpClientTransport::from_uri(url.as_str());
                 let mcp_tool_set = McpToolSetInnerShared(Arc::new(McpToolSetInner {
