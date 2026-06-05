@@ -38,6 +38,15 @@ pub enum McpToolSetConfig {
     },
 }
 
+impl McpToolSetConfig {
+    fn tool_filter(&self) -> &Option<ToolNameFilter> {
+        match self {
+            McpToolSetConfig::Stdio { tool_filter, .. } => tool_filter,
+            McpToolSetConfig::Sse { tool_filter, .. } => tool_filter,
+        }
+    }
+}
+
 #[derive(Deref)]
 pub struct McpRegistry {
     #[allow(unused)]
@@ -74,6 +83,34 @@ pub struct McpToolSetInner {
 #[derive(Deref, Clone)]
 pub struct McpToolSetInnerShared(Arc<McpToolSetInner>);
 
+impl ToolNameFilter {
+    fn mcp_tool_filter(&self, tool: rmcp::model::Tool) -> Option<rmcp::model::Tool> {
+        let dst_tool_name = &tool.name;
+        match self {
+            ToolNameFilter::Accepts(tool_names) => {
+                if tool_names
+                    .iter()
+                    .any(|it| it.eq_ignore_ascii_case(dst_tool_name))
+                {
+                    Some(tool)
+                } else {
+                    None
+                }
+            }
+            ToolNameFilter::Rejects(tool_names) => {
+                if tool_names
+                    .iter()
+                    .any(|it| it.eq_ignore_ascii_case(dst_tool_name))
+                {
+                    None
+                } else {
+                    Some(tool)
+                }
+            }
+        }
+    }
+}
+
 impl rmcp::handler::client::ClientHandler for McpToolSetInnerShared {
     fn get_info(&self) -> rmcp::model::ClientInfo {
         rmcp::model::ClientInfo::new(
@@ -90,9 +127,11 @@ impl rmcp::handler::client::ClientHandler for McpToolSetInnerShared {
         match context.peer.list_all_tools().await {
             Ok(tools) => {
                 let mut guard = self.write().await;
+                let tool_filter = self.config.tool_filter().clone().unwrap_or_default();
                 *guard = tools
                     .into_iter()
-                    .map(|t| rig::tool::rmcp::McpTool::from_mcp_server(t, context.peer.clone()))
+                    .flat_map(|it| tool_filter.mcp_tool_filter(it))
+                    .map(|it| rig::tool::rmcp::McpTool::from_mcp_server(it, context.peer.clone()))
                     .collect::<Vec<_>>();
                 log::info!(
                     "MCP server '{}' updated with {} tools.",
@@ -144,8 +183,10 @@ impl McpToolSet {
                             e
                         )
                     })?;
+                    let tool_filter = config.tool_filter().clone().unwrap_or_default();
                     let mcp_tools = tools
                         .into_iter()
+                        .flat_map(|it| tool_filter.mcp_tool_filter(it))
                         .map(|t| {
                             rig::tool::rmcp::McpTool::from_mcp_server(t, service.peer().clone())
                         })
@@ -178,8 +219,10 @@ impl McpToolSet {
                     let tools = service.peer().list_all_tools().await.map_err(|e| {
                         anyhow::anyhow!("Failed to list tools for SSE MCP server '{}': {}", name, e)
                     })?;
+                    let tool_filter = config.tool_filter().clone().unwrap_or_default();
                     let mcp_tools = tools
                         .into_iter()
+                        .flat_map(|it| tool_filter.mcp_tool_filter(it))
                         .map(|t| {
                             rig::tool::rmcp::McpTool::from_mcp_server(t, service.peer().clone())
                         })
