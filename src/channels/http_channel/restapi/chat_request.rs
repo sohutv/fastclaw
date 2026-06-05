@@ -31,6 +31,8 @@ pub enum ChatRespType {
     SSE,
     #[serde(rename = "streamable")]
     Streamable,
+    #[serde(rename = "push")]
+    Push,
 }
 
 pub async fn handle(
@@ -65,10 +67,12 @@ pub async fn handle(
         ChatRespType::SSE => {
             let transports_exist = {
                 let transports = client.read().await;
-                transports
-                    .get(&user_id)
-                    .and_then(|it| it.get(agent_id))
-                    .is_some()
+                if let Some(dst) = transports.get(&user_id) {
+                    let transports = dst.read().await;
+                    transports.get(agent_id).is_some()
+                } else {
+                    false
+                }
             };
             if !transports_exist {
                 warn!(
@@ -86,10 +90,20 @@ pub async fn handle(
                 })?;
             Ok(StatusCode::OK.into_response())
         }
+        ChatRespType::Push => {
+            let _ = channel
+                .handle_input_message(agent, session_id, client, data.clone())
+                .await
+                .map_err(|err| {
+                    warn!("handle_chat_send failed, err: {err}");
+                    StatusCode::INTERNAL_SERVER_ERROR
+                })?;
+            Ok(StatusCode::OK.into_response())
+        }
         ChatRespType::Streamable => {
             let (transport, rx) = Transport::new(&session_id, agent_id.clone());
             let client = Arc::new(Client(RwLock::new(hash_map!(
-                user_id.clone() => hash_map!(agent_id.clone() => vec![transport],),
+                user_id.clone() => Arc::new(RwLock::new(hash_map!(agent_id.clone() => vec![transport],))),
             ))));
             let _ = channel
                 .handle_input_message(agent, session_id, client, data.clone())
@@ -113,7 +127,7 @@ pub async fn handle(
         ChatRespType::Completable => {
             let (transport, mut rx) = Transport::new(&session_id, agent_id.clone());
             let client = Arc::new(Client(RwLock::new(hash_map!(
-                user_id.clone() => hash_map!(agent_id.clone() => vec![transport],),
+                user_id.clone() => Arc::new(RwLock::new(hash_map!(agent_id.clone() => vec![transport],))),
             ))));
             let _ = channel
                 .handle_input_message(agent, session_id, client, data.clone())

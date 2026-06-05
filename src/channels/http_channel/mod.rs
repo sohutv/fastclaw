@@ -92,7 +92,7 @@ impl Transport {
 }
 
 #[derive(Deref, Default)]
-pub struct Client(RwLock<HashMap<UserId, HashMap<AgentId, Vec<Transport>>>>);
+pub struct Client(RwLock<HashMap<UserId, Arc<RwLock<HashMap<AgentId, Vec<Transport>>>>>>);
 #[derive(Clone)]
 struct AppState {
     channel: Arc<HttpChannel>,
@@ -118,10 +118,6 @@ impl Channel for HttpChannel {
                 .route("/channel/agent", post(restapi::fork_agent::handle))
                 .route("/channel/agent", delete(restapi::drop_agent::handle))
                 .route("/channel/chat", get(restapi::chat_keepalive::handle))
-                .route(
-                    "/channel/chat/keepalive",
-                    get(restapi::chat_keepalive::handle),
-                )
                 .route(
                     "/channel/chat/:resp_type",
                     post(restapi::chat_request::handle),

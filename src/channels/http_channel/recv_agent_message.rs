@@ -292,9 +292,9 @@ impl HttpChannel {
 
 impl HttpRespMessage {
     async fn send(self, client: &Client, session_id: &SessionId, agent_id: &AgentId) {
-        let mut client = client.write().await;
         let user_id = UserId::from(session_id);
-        if let Some(user_transports) = client.get_mut(&user_id) {
+        if let Some(guard) = client.read().await.get(&user_id) {
+            let mut user_transports = guard.write().await;
             if let Some((agent_id, agent_transports)) = user_transports.remove_entry(agent_id) {
                 let mut updated = vec![];
                 for transport in agent_transports {

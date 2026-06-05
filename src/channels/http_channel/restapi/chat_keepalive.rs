@@ -45,9 +45,11 @@ pub async fn handle(
     let agent_id = agent.id();
     let rx = {
         let mut transports = client.write().await;
-        let vec = transports
+        let dst = transports
             .entry(user_id.clone())
-            .or_insert(Default::default())
+            .or_insert(Default::default());
+        let mut user_transports = dst.write().await;
+        let vec = user_transports
             .entry(agent_id.clone())
             .or_insert(Default::default());
         let (transport, rx) = Transport::new(&session_id, agent_id.clone());
