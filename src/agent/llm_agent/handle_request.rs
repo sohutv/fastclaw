@@ -121,12 +121,20 @@ where
                 .unwrap_or_default();
             let history = history.into_iter().map(|it| it.into()).collect_vec();
             if chat_history_limit < history.len() {
-                history
-                    .into_iter()
-                    .rev()
-                    .take(chat_history_limit)
-                    .rev()
-                    .collect_vec()
+                let mut array = Vec::with_capacity(history.len());
+                let mut cnt = 0;
+                for message in history.into_iter().rev() {
+                    if let Message::User { .. } = &message {
+                        array.push(message);
+                        cnt += 1;
+                    } else {
+                        array.push(message);
+                    }
+                    if cnt > chat_history_limit {
+                        break;
+                    }
+                }
+                array
             } else {
                 history
             }
