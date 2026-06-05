@@ -340,7 +340,7 @@ pub enum TaskBackpressure {
     #[default]
     #[serde(alias = "pending")]
     Pending,
-    #[serde(alias = "latest")]
+    #[serde(alias = "latest", alias="drop")]
     Latest,
 }
 
