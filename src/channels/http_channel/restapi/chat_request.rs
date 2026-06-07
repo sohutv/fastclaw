@@ -53,6 +53,8 @@ pub async fn handle(
         if let Some(agent) = agent.context().children.read().await.get(agent_id) {
             Arc::clone(agent)
         } else {
+
+
             agent
         }
     } else {

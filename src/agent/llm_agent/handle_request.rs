@@ -13,8 +13,8 @@ use rig::client::CompletionClient;
 use rig::completion::Message;
 use rig::message::UserContent;
 use rig::streaming::{StreamedAssistantContent, StreamingChat};
-use std::ops::Deref;
 use std::sync::Arc;
+use tokio::sync::Mutex;
 use tokio::sync::mpsc::Receiver;
 
 impl<C, P> LlmAgent<C, P>
@@ -52,7 +52,7 @@ where
             }
             TaskBackpressure::Latest => {
                 let self_ = Arc::clone(&self);
-                let (watch_tx, mut watch_rx) = tokio::sync::watch::channel(None);
+                let (watch_tx, mut watch_rx) = tokio::sync::watch::channel(Default::default());
                 tokio::spawn(async move {
                     while let Some(AgentRequestPkg {
                         req,
@@ -64,7 +64,14 @@ where
                         let id = req.id.clone();
                         info!("[Latest] handle_request recv AgentRequestPkg {}", id);
                         let now = chrono::Local::now();
-                        let _ = watch_tx.send(Some((req, ctx, now)));
+                        let before =
+                            watch_tx.send_replace(Arc::new(Mutex::new(Some((req, ctx, now)))));
+                        tokio::spawn(async move {
+                            let mut guard = before.lock().await;
+                            if let Some(dst) = guard.take() {
+                                drop(dst);
+                            }
+                        });
                         if let Some(ack_sender) = ack_sender {
                             let _ = ack_sender.send(());
                         }
@@ -73,10 +80,11 @@ where
                 });
                 tokio::spawn(async move {
                     while let Ok(_) = watch_rx.changed().await {
-                        if let Some((req, ctx, received_time)) = {
-                            let dst = watch_rx.borrow();
-                            dst.deref().clone()
-                        } {
+                        let dst = {
+                            let borrow_val = watch_rx.borrow().clone();
+                            borrow_val.lock().await.take()
+                        };
+                        if let Some((req, ctx, received_time)) = dst {
                             let id = req.id.clone();
                             let start = chrono::Local::now();
                             let gap = start - received_time;
