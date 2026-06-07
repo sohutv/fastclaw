@@ -10,6 +10,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fmt::Display;
 use std::sync::Arc;
+use rig::providers::openai::responses_api::ReasoningEffort;
 use tokio::sync::RwLock;
 use tokio::sync::mpsc::Sender;
 
@@ -19,7 +20,7 @@ mod session_history;
 use crate::ModelName;
 use crate::config::{Config, Workspace};
 use crate::memory::MemoryManager;
-use crate::model_provider::{ModelProviderName, ModelProviders, ModelSettings, ReasoningEffort};
+use crate::model_provider::{ModelProviderName, ModelProviders, ModelSettings};
 pub use session_history::{HistoryManager, JsonlHistoryManager};
 
 use crate::tools::mcp_tool::McpRegistry;
@@ -340,7 +341,7 @@ pub enum TaskBackpressure {
     #[default]
     #[serde(alias = "pending")]
     Pending,
-    #[serde(alias = "latest", alias="drop")]
+    #[serde(alias = "latest", alias = "drop")]
     Latest,
 }
 

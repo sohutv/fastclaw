@@ -1,9 +1,8 @@
-use std::sync::Arc;
 use crate::agent::llm_agent::LlmAgent;
 use crate::agent::session_history::{HistoryMessage, StoreOption};
 use crate::agent::{HistoryCompactResult, HistoryCompactVal, SessionCompactSupport};
 use crate::channels::{ChannelMessage, SessionId};
-use crate::model_provider::{ModelProvider, ReasoningEffort};
+use crate::model_provider::ModelProvider;
 use anyhow::anyhow;
 use async_trait::async_trait;
 use itertools::Itertools;
@@ -11,6 +10,8 @@ use rig::agent::MultiTurnStreamItem;
 use rig::client::CompletionClient;
 use rig::completion::{AssistantContent, Message, Usage};
 use rig::streaming::StreamingChat;
+use std::sync::Arc;
+use rig::providers::openai::responses_api::ReasoningEffort;
 use tokio::sync::mpsc::Sender;
 use tokio_stream::StreamExt;
 
@@ -50,7 +51,7 @@ where
         let agent = match Arc::clone(&self)
             .create_agent(
                 session_id,
-                ReasoningEffort::Minimal,
+                &ReasoningEffort::None,
                 None,
                 channel_message_sender,
                 |_| None,

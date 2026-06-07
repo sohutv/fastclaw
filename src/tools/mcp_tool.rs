@@ -1,8 +1,11 @@
 use crate::config::Config;
 use crate::tools::tool_filter::ToolNameFilter;
-use derive_more::{Deref, Display};
+use derive_more::{Deref, Display, From};
 use itertools::Itertools;
-use rig::tool::ToolDyn;
+use rig::completion::ToolDefinition;
+use rig::tool::rmcp::McpTool;
+use rig::tool::{ToolDyn, ToolError};
+use rig::wasm_compat::WasmBoxedFuture;
 use rmcp::service::NotificationContext;
 use rmcp::{RoleClient, ServiceExt};
 use serde::{Deserialize, Serialize};
@@ -77,7 +80,7 @@ pub struct McpToolSetInner {
     #[allow(unused)]
     config: McpToolSetConfig,
     #[deref]
-    tools: RwLock<Vec<rig::tool::rmcp::McpTool>>,
+    tools: RwLock<Vec<ProxiedMcpTool>>,
 }
 
 #[derive(Deref, Clone)]
@@ -131,7 +134,7 @@ impl rmcp::handler::client::ClientHandler for McpToolSetInnerShared {
                 *guard = tools
                     .into_iter()
                     .flat_map(|it| tool_filter.mcp_tool_filter(it))
-                    .map(|it| rig::tool::rmcp::McpTool::from_mcp_server(it, context.peer.clone()))
+                    .map(|it| McpTool::from_mcp_server(it, context.peer.clone()).into())
                     .collect::<Vec<_>>();
                 log::info!(
                     "MCP server '{}' updated with {} tools.",
@@ -187,9 +190,7 @@ impl McpToolSet {
                     let mcp_tools = tools
                         .into_iter()
                         .flat_map(|it| tool_filter.mcp_tool_filter(it))
-                        .map(|t| {
-                            rig::tool::rmcp::McpTool::from_mcp_server(t, service.peer().clone())
-                        })
+                        .map(|t| McpTool::from_mcp_server(t, service.peer().clone()).into())
                         .collect_vec();
                     (service, mcp_tools)
                 };
@@ -223,9 +224,7 @@ impl McpToolSet {
                     let mcp_tools = tools
                         .into_iter()
                         .flat_map(|it| tool_filter.mcp_tool_filter(it))
-                        .map(|t| {
-                            rig::tool::rmcp::McpTool::from_mcp_server(t, service.peer().clone())
-                        })
+                        .map(|t| McpTool::from_mcp_server(t, service.peer().clone()).into())
                         .collect_vec();
                     (service, mcp_tools)
                 };
@@ -296,5 +295,22 @@ impl McpRegistry {
             vec.append(&mut tools);
         }
         Ok(vec)
+    }
+}
+
+#[derive(Clone, From, Deref)]
+pub struct ProxiedMcpTool(McpTool);
+
+impl ToolDyn for ProxiedMcpTool {
+    fn name(&self) -> String {
+        self.deref().name()
+    }
+
+    fn definition<'a>(&'a self, prompt: String) -> WasmBoxedFuture<'a, ToolDefinition> {
+        self.deref().definition(prompt)
+    }
+
+    fn call<'a>(&'a self, args: String) -> WasmBoxedFuture<'a, Result<String, ToolError>> {
+        self.deref().call(args)
     }
 }

@@ -1,13 +1,14 @@
 use crate::agent::llm_agent::LlmAgent;
 use crate::agent::{Agent, ToolFilter};
 use crate::channels::{ChannelMessage, SessionId};
-use crate::model_provider::{ModelProvider, ReasoningEffort};
+use crate::model_provider::{ModelProvider};
 use crate::tools::ToolContext;
 use itertools::Itertools;
 use rig::agent::Agent as RigAgent;
 use rig::client::CompletionClient;
 use serde_json::json;
 use std::sync::Arc;
+use rig::providers::openai::responses_api::ReasoningEffort;
 use tokio::sync::mpsc::Sender;
 
 impl<C, P> LlmAgent<C, P>
@@ -18,7 +19,7 @@ where
     pub(super) async fn create_agent<TF>(
         self: Arc<Self>,
         session_id: &SessionId,
-        reasoning_effort: ReasoningEffort,
+        reasoning_effort: &ReasoningEffort,
         addi_system_prompt: Option<&str>,
         channel_message_sender: Sender<crate::Result<ChannelMessage>>,
         tool_filter: TF,
@@ -28,10 +29,6 @@ where
         TF: Into<ToolFilter>,
     {
         let model_client = &self.model_provider.completion_client()?;
-        let reasoning_effort = self
-            .model_settings
-            .reasoning_effort_mapping
-            .from(reasoning_effort);
         let preamble = if let Some(dst) = &self.ctx.system_prompt {
             &*dst
         } else {
@@ -76,14 +73,16 @@ where
                     .max_tokens
                     .unwrap_or(self.model_settings.max_tokens),
             )
+            
             .additional_params({
                 if self.model_settings.reasoning {
                     json!( {
                         // 此参数的设置需要配置成json
                         "reasoning_effort": reasoning_effort,
-                        "reasoning": {
-                            "effort": reasoning_effort,
-                        }
+                        // "reasoning_effort": "low",
+                        // "reasoning": {
+                        //     "effort": reasoning_effort,
+                        // }
                     })
                 } else {
                     json!({})

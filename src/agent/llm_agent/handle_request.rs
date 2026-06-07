@@ -36,11 +36,17 @@ where
                     {
                         let id = req.id.clone();
                         info!("[Pending] handle_request recv AgentRequestPkg {}", id);
+                        let start = chrono::Local::now();
                         let _ = Arc::clone(&self_).handle_request_actual(req, ctx).await;
+                        let elapse = chrono::Local::now() - start;
                         if let Some(ack_sender) = ack_sender {
                             let _ = ack_sender.send(());
                         }
-                        info!("[Pending] handle_request ack AgentRequestPkg {} ok", id);
+                        info!(
+                            "[Pending] handle_request ack AgentRequestPkg {} ok /elapsed: {:?}ms",
+                            id,
+                            elapse.num_milliseconds()
+                        );
                     }
                 });
             }
@@ -57,7 +63,8 @@ where
                     {
                         let id = req.id.clone();
                         info!("[Latest] handle_request recv AgentRequestPkg {}", id);
-                        let _ = watch_tx.send(Some((req, ctx)));
+                        let now = chrono::Local::now();
+                        let _ = watch_tx.send(Some((req, ctx, now)));
                         if let Some(ack_sender) = ack_sender {
                             let _ = ack_sender.send(());
                         }
@@ -66,14 +73,28 @@ where
                 });
                 tokio::spawn(async move {
                     while let Ok(_) = watch_rx.changed().await {
-                        if let Some((req, ctx)) = {
+                        if let Some((req, ctx, received_time)) = {
                             let dst = watch_rx.borrow();
                             dst.deref().clone()
                         } {
                             let id = req.id.clone();
-                            info!("[Latest] handle_request changed AgentRequestPkg {}", id);
+                            let start = chrono::Local::now();
+                            let gap = start - received_time;
+                            info!(
+                                "[Latest] handle_request changed AgentRequestPkg {}, /received_at: {}, gap: {}ms",
+                                id,
+                                received_time,
+                                gap.num_milliseconds(),
+                            );
                             let _ = Arc::clone(&self_).handle_request_actual(req, ctx).await;
-                            info!("[Latest] handle_request changed AgentRequestPkg {} ok", id);
+                            let elapse = chrono::Local::now() - start;
+                            info!(
+                                "[Latest] handle_request changed AgentRequestPkg {} ok, /received_at: {}, gap: {}ms, elapsed: {}ms",
+                                id,
+                                received_time,
+                                gap.num_milliseconds(),
+                                elapse.num_milliseconds()
+                            );
                         }
                     }
                 });
@@ -105,7 +126,7 @@ where
         let agent = match Arc::clone(&self)
             .create_agent(
                 session_id,
-                self.agent_settings.reasoning_effort,
+                &self.agent_settings.reasoning_effort,
                 addi_system_prompt.as_deref(),
                 channel_message_sender.clone(),
                 tool_filter,
@@ -168,9 +189,8 @@ where
                 }
             }
         }
-        let mut stream = agent
-            .stream_chat(merge_user_message(message), history)
-            .await;
+        let input_message = merge_user_message(message);
+        let mut stream = agent.stream_chat(input_message, history).await;
         while let Some(result) = stream.next().await {
             let response = match result {
                 Ok(MultiTurnStreamItem::StreamAssistantItem(content)) => match content {
