@@ -1,7 +1,7 @@
 use crate::config::Config;
-use crate::tools::ToolContext;
 use crate::tools::tool_filter::ToolNameFilter;
-use derive_more::{Deref, Display, From};
+use crate::tools::ToolContext;
+use derive_more::{Deref, Display};
 use itertools::Itertools;
 use rig::completion::ToolDefinition;
 use rig::tool::rmcp::McpTool as RigMcpTool;
@@ -14,7 +14,6 @@ use std::collections::{BTreeMap, HashMap};
 use std::ops::Deref;
 use std::sync::Arc;
 use std::time::Duration;
-use futures_core::future::BoxFuture;
 use tokio::sync::RwLock;
 use tokio::task::JoinHandle;
 
@@ -64,6 +63,7 @@ pub struct McpRegistry {
 pub struct McpToolSet {
     #[deref]
     inner: McpToolSetInnerShared,
+    config: McpToolSetConfig,
     #[allow(unused)]
     join_handle: JoinHandle<()>,
 }
@@ -247,7 +247,11 @@ impl McpToolSet {
             });
             join_handle
         };
-        Ok(Self { inner, join_handle })
+        Ok(Self {
+            inner,
+            join_handle,
+            config: config.clone(),
+        })
     }
 }
 
@@ -289,12 +293,14 @@ impl McpRegistry {
         let mut vec = vec![];
         let mcp_tool_set = self.mcp_tool_set.read().await;
         for (_, toolset) in mcp_tool_set.iter() {
+            let config = &toolset.config;
             let guard = toolset.read().await;
             let mut tools = guard
                 .iter()
                 .map(|it| {
                     Box::new(McpTool {
                         ctx: ctx.clone(),
+                        config: config.clone(),
                         tool: it.clone(),
                     }) as Box<dyn ToolDyn>
                 })
@@ -308,6 +314,8 @@ impl McpRegistry {
 #[derive(Clone, Deref)]
 pub struct McpTool {
     ctx: ToolContext,
+    #[allow(unused)]
+    config: McpToolSetConfig,
     #[deref]
     tool: RigMcpTool,
 }
@@ -322,17 +330,19 @@ impl ToolDyn for McpTool {
     }
 
     fn call<'a>(&'a self, mut args: String) -> WasmBoxedFuture<'a, Result<String, ToolError>> {
-        Box::pin(async{
-            if let Some(request)= &self.ctx.agent_request{
-                let mut json= serde_json::from_str::<serde_json::Value>(&args).map_err(|err|ToolError::JsonError(
-                    err
-                ))?;
-                if let serde_json::Value::Object(json) = &mut json{
+        Box::pin(async {
+            if let Some(request) = &self.ctx.agent_request {
+                let mut json = serde_json::from_str::<serde_json::Value>(&args)
+                    .map_err(|err| ToolError::JsonError(err))?;
+                if let serde_json::Value::Object(json) = &mut json {
                     let _ = json.insert(
-                        "messages".to_string(), serde_json::to_value(&request.message).map_err(|err|ToolError::JsonError(err))?,
+                        "messages".to_string(),
+                        serde_json::to_value(&request.message)
+                            .map_err(|err| ToolError::JsonError(err))?,
                     );
                 }
-                let _ = args = serde_json::to_string(&json).map_err(|err|ToolError::JsonError(err))?;
+                let _ =
+                    args = serde_json::to_string(&json).map_err(|err| ToolError::JsonError(err))?;
             }
             self.deref().call(args).await
         })
