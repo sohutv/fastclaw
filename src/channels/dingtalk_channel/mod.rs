@@ -89,6 +89,7 @@ impl Channel for DingtalkChannel {
     async fn handle_agent_message(
         &self,
         dingtalk: Arc<DingTalkStream>,
+        agent: Arc<dyn Agent>,
         inbound_message: Option<Self::InboundMessage>,
         receiver: &mut Receiver<crate::Result<ChannelMessage>>,
     ) -> crate::Result<()> {
@@ -100,6 +101,7 @@ impl Channel for DingtalkChannel {
                     match self
                         .handle_agent_message_actual(
                             &dingtalk,
+                            &*agent,
                             inbound_message.as_ref(),
                             &message,
                             state,
@@ -136,6 +138,16 @@ impl Channel for DingtalkChannel {
 
 impl DingtalkChannel {
     fn create_robot_messages<Content: Into<MessageContent>>(
+        _: &dyn Agent,
+        session_id: &SessionId,
+        ctx: &ChannelContext,
+        data: Option<&MessageData>,
+        content: Content,
+    ) -> crate::Result<RobotMessage> {
+        Self::create_robot_messages_actual(session_id, ctx, data, content)
+    }
+
+    fn create_robot_messages_actual<Content: Into<MessageContent>>(
         session_id: &SessionId,
         _: &ChannelContext,
         _: Option<&MessageData>,

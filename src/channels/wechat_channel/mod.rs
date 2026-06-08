@@ -115,6 +115,7 @@ impl Channel for WechatChannel {
     async fn handle_agent_message(
         &self,
         wechat: Arc<WechatClient>,
+        agent: Arc<dyn Agent>,
         inbound_message: Option<Self::InboundMessage>,
         receiver: &mut Receiver<crate::Result<ChannelMessage>>,
     ) -> crate::Result<()> {
@@ -127,6 +128,7 @@ impl Channel for WechatChannel {
                     match self
                         .handle_agent_message_actual(
                             &wechat,
+                            &*agent,
                             typing_ticket.as_ref(),
                             inbound_message.as_ref(),
                             &message,
@@ -162,6 +164,7 @@ impl Channel for WechatChannel {
 
 impl WechatChannel {
     fn create_robot_messages<Content: Into<MessageItems>>(
+        _: &dyn Agent,
         session_id: &SessionId,
         _: &ChannelContext,
         _: Option<&WechatMessage>,

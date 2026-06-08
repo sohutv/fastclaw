@@ -107,6 +107,7 @@ impl Channel for CliChannel {
                                     let _ = self_
                                         .handle_agent_message(
                                             Arc::new(()),
+                                            Arc::clone(&agent),
                                             Some(line.to_string()),
                                             &mut message_receiver,
                                         )
@@ -132,6 +133,7 @@ impl Channel for CliChannel {
     async fn handle_agent_message(
         &self,
         _: Arc<Self::Client>,
+        _: Arc<dyn Agent>,
         _: Option<Self::InboundMessage>,
         receiver: &mut Receiver<crate::Result<ChannelMessage>>,
     ) -> crate::Result<()> {

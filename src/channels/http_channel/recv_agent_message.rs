@@ -1,6 +1,6 @@
-use crate::agent::{AgentId, AgentResponse, HistoryCompactResult, Notify};
+use crate::agent::{Agent, AgentId, AgentResponse, HistoryCompactResult, Notify};
 use crate::channels::http_channel::type_::HttpReqMessage;
-use crate::channels::http_channel::{Client, HttpChannel, Payload, Text};
+use crate::channels::http_channel::{Client, HttpChannel, Payload};
 use crate::channels::http_channel::{HttpRespMessage, UserId};
 use crate::channels::{
     AgentRespState, AgentRespType, ChannelContext, ChannelMessage, SessionId,
@@ -15,6 +15,7 @@ impl HttpChannel {
     pub(super) async fn handle_agent_message_actual(
         &self,
         client: &Client,
+        agent: &dyn Agent,
         inbound_message: Option<&HttpReqMessage>,
         ChannelMessage {
             session_id,
@@ -38,6 +39,7 @@ impl HttpChannel {
                 ..
             }) => {
                 if let Ok(Some(robot_message)) = create_robot_messages_for_agent(
+                    agent,
                     session_id,
                     &self.ctx,
                     AgentRespType::ToolCall,
@@ -104,6 +106,7 @@ impl HttpChannel {
                                 }
                             };
                             if let Some(robot_message) = create_robot_messages_for_agent(
+                                agent,
                                 session_id,
                                 &self.ctx,
                                 AgentRespType::Reasoning,
@@ -166,6 +169,7 @@ impl HttpChannel {
                     }
                 };
                 if let Some(robot_message) = create_robot_messages_for_agent(
+                    agent,
                     session_id,
                     &self.ctx,
                     AgentRespType::Content,
@@ -181,6 +185,7 @@ impl HttpChannel {
             }
             AgentResponse::Error(error) => {
                 if let Some(robot_message) = create_robot_messages_for_agent(
+                    agent,
                     session_id,
                     &self.ctx,
                     AgentRespType::Error,
@@ -198,6 +203,7 @@ impl HttpChannel {
                 match notify {
                     Notify::Text(text) => {
                         if let Some(robot_message) = create_robot_messages_for_agent(
+                            agent,
                             session_id,
                             &self.ctx,
                             AgentRespType::Notify,
@@ -212,6 +218,7 @@ impl HttpChannel {
                     }
                     Notify::Markdown { content, .. } => {
                         if let Some(robot_message) = create_robot_messages_for_agent(
+                            agent,
                             session_id,
                             &self.ctx,
                             AgentRespType::Notify,
@@ -231,6 +238,7 @@ impl HttpChannel {
                 match result {
                     HistoryCompactResult::Ok(val) => {
                         if let Some(robot_message) = create_robot_messages_for_agent(
+                            agent,
                             session_id,
                             &self.ctx,
                             AgentRespType::HistoryCompactOk,
@@ -254,6 +262,7 @@ impl HttpChannel {
                     }
                     HistoryCompactResult::Err(err_msg) => {
                         if let Some(robot_message) = create_robot_messages_for_agent(
+                            agent,
                             session_id,
                             &self.ctx,
                             AgentRespType::HistoryCompactErr,
@@ -268,6 +277,7 @@ impl HttpChannel {
                     }
                     HistoryCompactResult::Ignore(msg) => {
                         if let Some(robot_message) = create_robot_messages_for_agent(
+                            agent,
                             session_id,
                             &self.ctx,
                             AgentRespType::HistoryCompactIgnore,
@@ -293,15 +303,22 @@ impl HttpChannel {
 }
 
 impl HttpChannel {
-    fn create_resp_messages<Content: Into<Text>>(
+    fn create_resp_messages(
+        agent: &dyn Agent,
         session_id: &SessionId,
         _: &ChannelContext,
         input: Option<&HttpReqMessage>,
-        content: Content,
+        content: String,
     ) -> crate::Result<HttpRespMessage> {
+        let output = if let Some(_) = &agent.agent_settings().output_schema {
+            let json = serde_json::from_str(&content)?;
+            Payload::Json(json)
+        } else {
+            Payload::Text(content.into())
+        };
         let message = match &session_id {
             SessionId::Master { .. } | SessionId::Anonymous { .. } => HttpRespMessage {
-                output: Payload::Text(content.into()),
+                output,
                 input: input.map(|it| it.clone()),
             },
             SessionId::Group { .. } => {

@@ -127,7 +127,7 @@ impl HttpChannel {
                     let client = Arc::clone(&client);
                     let _ = tokio::spawn(async move {
                         let _ = self_
-                            .handle_agent_message(client, Some(data), &mut receiver)
+                            .handle_agent_message(client, Arc::clone(&agent), Some(data), &mut receiver)
                             .await;
                     });
                     return Ok(());

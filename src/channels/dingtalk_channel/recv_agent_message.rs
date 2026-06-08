@@ -1,5 +1,5 @@
 use super::super::{AgentRespState, AgentRespType};
-use crate::agent::{AgentResponse, HistoryCompactResult, Notify};
+use crate::agent::{Agent, AgentResponse, HistoryCompactResult, Notify};
 use crate::channels::dingtalk_channel::DingtalkChannel;
 use crate::channels::{ChannelContext, ChannelMessage, SessionId};
 use anyhow::anyhow;
@@ -14,6 +14,7 @@ impl DingtalkChannel {
     pub(super) async fn handle_agent_message_actual(
         &self,
         dingtalk: &DingTalkStream,
+        agent: &dyn Agent,
         inbound_message: Option<&MessageData>,
         ChannelMessage {
             session_id,
@@ -28,6 +29,7 @@ impl DingtalkChannel {
                 if let AgentRespState::Wait = curr_state {
                     buff.clear();
                     if let Ok(Some(robot_message)) = create_robot_messages_for_agent(
+                        agent,
                         session_id,
                         &self.ctx,
                         AgentRespType::Start,
@@ -49,6 +51,7 @@ impl DingtalkChannel {
                 ..
             }) => {
                 if let Ok(Some(robot_message)) = create_robot_messages_for_agent(
+                    agent,
                     session_id,
                     &self.ctx,
                     AgentRespType::ToolCall,
@@ -109,6 +112,7 @@ impl DingtalkChannel {
                                 ))
                             };
                             if let Ok(Some(robot_message)) = create_robot_messages_for_agent(
+                                agent,
                                 session_id,
                                 &self.ctx,
                                 AgentRespType::Reasoning,
@@ -167,6 +171,7 @@ impl DingtalkChannel {
                     }
                 };
                 if let Ok(Some(robot_message)) = create_robot_messages_for_agent(
+                    agent,
                     session_id,
                     &self.ctx,
                     AgentRespType::Content,
@@ -182,6 +187,7 @@ impl DingtalkChannel {
             }
             AgentResponse::Error(error) => {
                 if let Ok(Some(robot_message)) = create_robot_messages_for_agent(
+                    agent,
                     session_id,
                     &self.ctx,
                     AgentRespType::Error,
@@ -199,6 +205,7 @@ impl DingtalkChannel {
                 match notify {
                     Notify::Text(text) => {
                         if let Ok(Some(robot_message)) = create_robot_messages_for_agent(
+                            agent,
                             session_id,
                             &self.ctx,
                             AgentRespType::Notify,
@@ -213,6 +220,7 @@ impl DingtalkChannel {
                     }
                     Notify::Markdown { title, content } => {
                         if let Ok(Some(robot_message)) = create_robot_messages_for_agent(
+                            agent,
                             session_id,
                             &self.ctx,
                             AgentRespType::Notify,
@@ -232,6 +240,7 @@ impl DingtalkChannel {
                 match result {
                     HistoryCompactResult::Ok(val) => {
                         if let Ok(Some(robot_message)) = create_robot_messages_for_agent(
+                            agent,
                             session_id,
                             &self.ctx,
                             AgentRespType::HistoryCompactOk,
@@ -259,6 +268,7 @@ impl DingtalkChannel {
                     }
                     HistoryCompactResult::Err(err_msg) => {
                         if let Ok(Some(robot_message)) = create_robot_messages_for_agent(
+                            agent,
                             session_id,
                             &self.ctx,
                             AgentRespType::HistoryCompactErr,
@@ -273,6 +283,7 @@ impl DingtalkChannel {
                     }
                     HistoryCompactResult::Ignore(msg) => {
                         if let Ok(Some(robot_message)) = create_robot_messages_for_agent(
+                            agent,
                             session_id,
                             &self.ctx,
                             AgentRespType::HistoryCompactIgnore,
@@ -302,6 +313,7 @@ impl DingtalkChannel {
 }
 
 async fn create_robot_messages_for_agent<Content, F, OutboundMsg>(
+    agent: &dyn Agent,
     session_id: &SessionId,
     ctx: &ChannelContext,
     resp_type: AgentRespType,
@@ -311,6 +323,7 @@ async fn create_robot_messages_for_agent<Content, F, OutboundMsg>(
 ) -> crate::Result<Option<OutboundMsg>>
 where
     F: FnOnce(
+        &dyn Agent,
         &SessionId,
         &ChannelContext,
         Option<&MessageData>,
@@ -326,6 +339,7 @@ where
         return Ok(None);
     };
     super::super::create_robot_messages_for_agent(
+        agent,
         &session_id,
         ctx,
         resp_type,

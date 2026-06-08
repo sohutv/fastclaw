@@ -218,9 +218,10 @@ impl dingtalk_stream::handlers::CallbackHandler for DingTalkCallbackHandler {
                 Ok(mut receiver) => {
                     let channel = Arc::clone(&self.channel);
                     let client = Arc::clone(&dingtalk_client);
+                    let agent =Arc::clone(&self.agent);
                     let inbound_message = inbound_message.clone();
                     let _ = tokio::spawn(async move {
-                        let _ = channel.handle_agent_message(client, Some(inbound_message), &mut receiver).await;
+                        let _ = channel.handle_agent_message(client, agent, Some(inbound_message), &mut receiver).await;
                     });
                     return Ok(HandlerResp::Text("cmd submitted".to_string()));
                 }
@@ -346,7 +347,7 @@ impl LifecycleListener for DingTalkCallbackHandler {
             if !session_id.settings().show_connected {
                 continue;
             }
-            let Ok(message) = DingtalkChannel::create_robot_messages(
+            let Ok(message) = DingtalkChannel::create_robot_messages_actual(
                 &session_id,
                 &self.channel.ctx,
                 None,
@@ -379,7 +380,7 @@ Connected to dingtalk websocket
             }
             match result {
                 Ok(_) => {
-                    let Ok(message) = DingtalkChannel::create_robot_messages(
+                    let Ok(message) = DingtalkChannel::create_robot_messages_actual(
                         &session_id,
                         &self.channel.ctx,
                         None,
@@ -390,7 +391,7 @@ Connected to dingtalk websocket
                     let _ = client.send_message(message).await;
                 }
                 Err(err) => {
-                    let Ok(message) = DingtalkChannel::create_robot_messages(
+                    let Ok(message) = DingtalkChannel::create_robot_messages_actual(
                         &session_id,
                         &self.channel.ctx,
                         None,

@@ -146,6 +146,7 @@ impl Channel for HttpChannel {
     async fn handle_agent_message(
         &self,
         client: Arc<Client>,
+        agent: Arc<dyn Agent>,
         inbound_message: Option<Self::InboundMessage>,
         receiver: &mut Receiver<crate::Result<ChannelMessage>>,
     ) -> crate::Result<()> {
@@ -157,6 +158,7 @@ impl Channel for HttpChannel {
                     match self
                         .handle_agent_message_actual(
                             &client,
+                            &*agent,
                             inbound_message.as_ref(),
                             &message,
                             state,

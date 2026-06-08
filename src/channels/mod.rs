@@ -51,11 +51,12 @@ where
         inbound_message: Option<Self::InboundMessage>,
         req: AgentRequest,
     ) -> crate::Result<()> {
-        let mut receiver = Self::spawn_agent_task(agent, req.clone(), addi_system_prompt).await?;
+        let mut receiver =
+            Self::spawn_agent_task(Arc::clone(&agent), req.clone(), addi_system_prompt).await?;
         let self_ = Arc::clone(&self);
         let _ = tokio::spawn(async move {
             let _ = self_
-                .handle_agent_message(client, inbound_message, &mut receiver)
+                .handle_agent_message(client, agent, inbound_message, &mut receiver)
                 .await;
         });
         Ok(())
@@ -110,6 +111,7 @@ where
     async fn handle_agent_message(
         &self,
         client: Arc<Self::Client>,
+        agent: Arc<dyn Agent>,
         inbound_message: Option<Self::InboundMessage>,
         receiver: &mut Receiver<crate::Result<ChannelMessage>>,
     ) -> crate::Result<()>;
@@ -157,6 +159,7 @@ enum AgentRespState {
 }
 
 async fn create_robot_messages_for_agent<Content, F, InboundMsg, OutboundMsg>(
+    agent: &dyn Agent,
     session_id: &SessionId,
     ctx: &ChannelContext,
     resp_type: AgentRespType,
@@ -166,6 +169,7 @@ async fn create_robot_messages_for_agent<Content, F, InboundMsg, OutboundMsg>(
 ) -> crate::Result<Option<OutboundMsg>>
 where
     F: FnOnce(
+        &dyn Agent,
         &SessionId,
         &ChannelContext,
         Option<&InboundMsg>,
@@ -227,6 +231,6 @@ where
             };
         }
     }
-    let msg = outbound_msg_creator(&session_id, ctx, inbound_msg, content)?;
+    let msg = outbound_msg_creator(agent, &session_id, ctx, inbound_msg, content)?;
     Ok(Some(msg))
 }

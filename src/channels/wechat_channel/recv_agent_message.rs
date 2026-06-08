@@ -1,5 +1,5 @@
 use super::super::{AgentRespState, AgentRespType};
-use crate::agent::{AgentResponse, HistoryCompactResult, Notify};
+use crate::agent::{Agent, AgentResponse, HistoryCompactResult, Notify};
 use crate::channels::wechat_channel::WechatChannel;
 use crate::channels::{ChannelMessage, create_robot_messages_for_agent};
 use anyhow::anyhow;
@@ -12,6 +12,7 @@ impl WechatChannel {
     pub(super) async fn handle_agent_message_actual(
         &self,
         wechat: &WechatClient,
+        agent: &dyn Agent,
         typing_ticket: Option<&TypingTicket>,
         inbound_message: Option<&WechatMessage>,
         ChannelMessage {
@@ -39,6 +40,7 @@ impl WechatChannel {
                 ..
             }) => {
                 if let Ok(Some(robot_message)) = create_robot_messages_for_agent(
+                    agent,
                     session_id,
                     &self.ctx,
                     AgentRespType::ToolCall,
@@ -91,6 +93,7 @@ impl WechatChannel {
                                 )
                             };
                             if let Some(robot_message) = create_robot_messages_for_agent(
+                                agent,
                                 session_id,
                                 &self.ctx,
                                 AgentRespType::Reasoning,
@@ -149,6 +152,7 @@ impl WechatChannel {
                     }
                 };
                 if let Some(robot_message) = create_robot_messages_for_agent(
+                    agent,
                     session_id,
                     &self.ctx,
                     AgentRespType::Content,
@@ -164,6 +168,7 @@ impl WechatChannel {
             }
             AgentResponse::Error(error) => {
                 if let Some(robot_message) = create_robot_messages_for_agent(
+                    agent,
                     session_id,
                     &self.ctx,
                     AgentRespType::Error,
@@ -181,6 +186,7 @@ impl WechatChannel {
                 match notify {
                     Notify::Text(text) => {
                         if let Some(robot_message) = create_robot_messages_for_agent(
+                            agent,
                             session_id,
                             &self.ctx,
                             AgentRespType::Notify,
@@ -195,6 +201,7 @@ impl WechatChannel {
                     }
                     Notify::Markdown { content, .. } => {
                         if let Some(robot_message) = create_robot_messages_for_agent(
+                            agent,
                             session_id,
                             &self.ctx,
                             AgentRespType::Notify,
@@ -214,6 +221,7 @@ impl WechatChannel {
                 match result {
                     HistoryCompactResult::Ok(val) => {
                         if let Some(robot_message) = create_robot_messages_for_agent(
+                            agent,
                             session_id,
                             &self.ctx,
                             AgentRespType::HistoryCompactOk,
@@ -238,6 +246,7 @@ impl WechatChannel {
                     }
                     HistoryCompactResult::Err(err_msg) => {
                         if let Some(robot_message) = create_robot_messages_for_agent(
+                            agent,
                             session_id,
                             &self.ctx,
                             AgentRespType::HistoryCompactErr,
@@ -252,6 +261,7 @@ impl WechatChannel {
                     }
                     HistoryCompactResult::Ignore(msg) => {
                         if let Some(robot_message) = create_robot_messages_for_agent(
+                            agent,
                             session_id,
                             &self.ctx,
                             AgentRespType::HistoryCompactIgnore,
