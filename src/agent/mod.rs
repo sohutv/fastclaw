@@ -11,6 +11,7 @@ use std::collections::HashMap;
 use std::fmt::Display;
 use std::sync::Arc;
 use rig::providers::openai::responses_api::ReasoningEffort;
+use rmcp::schemars;
 use tokio::sync::RwLock;
 use tokio::sync::mpsc::Sender;
 
@@ -327,6 +328,7 @@ pub struct AgentSettings {
     pub chat_history_limit: Option<usize>,
     pub history_compact_enable: bool,
     pub tool_filter: Option<ToolNameFilter>,
+    pub output_schema: Option<schemars::Schema>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Deref)]
@@ -371,6 +373,7 @@ impl Default for AgentSettings {
             chat_history_limit: None,
             history_compact_enable: true,
             tool_filter: None,
+            output_schema: None,
         }
     }
 }

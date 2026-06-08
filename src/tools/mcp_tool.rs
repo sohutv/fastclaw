@@ -226,7 +226,7 @@ impl McpToolSet {
                     let mcp_tools = tools
                         .into_iter()
                         .flat_map(|it| tool_filter.mcp_tool_filter(it))
-                        .map(|t| RigMcpTool::from_mcp_server(t, service.peer().clone()).into())
+                        .map(|t| RigMcpTool::from_mcp_server(t, service.peer().clone()))
                         .collect_vec();
                     (service, mcp_tools)
                 };

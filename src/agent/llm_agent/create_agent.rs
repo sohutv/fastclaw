@@ -37,7 +37,7 @@ where
                 .build(&self.ctx)
                 .await?
         };
-        let agent = model_client
+        let mut builder = model_client
             .agent(&*self.model_name)
             .preamble(preamble)
             .append_preamble(&format!(
@@ -89,8 +89,11 @@ where
                 } else {
                     json!({})
                 }
-            })
-            .build();
+            });
+            if let Some (s) =&self.agent_settings.output_schema{
+                builder = builder.output_schema_raw(s.clone());
+            }
+            let agent = builder.build();
         Ok(agent)
     }
 }
