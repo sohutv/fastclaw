@@ -1,4 +1,4 @@
-use crate::agent::AgentId;
+use crate::agent::{AgentGroup, AgentId};
 use crate::channels::SessionId;
 use crate::channels::http_channel::type_::UserId;
 use crate::channels::http_channel::{AppState, Transport};
@@ -10,7 +10,6 @@ use log::{info, warn};
 use serde::{Deserialize, Serialize};
 use std::convert::Infallible;
 use std::ops::Deref;
-use std::sync::Arc;
 use tokio_stream::wrappers::ReceiverStream;
 
 #[derive(Clone, Serialize, Deserialize)]
@@ -18,33 +17,23 @@ pub struct Params {
     user_id: UserId,
     /// default to main
     agent_id: Option<AgentId>,
+    agent_group: Option<AgentGroup>,
 }
 
 pub async fn handle(
-    State(AppState {
-        channel,
-        client,
-        agent,
-        ..
-    }): State<AppState>,
-    Query(Params { user_id, agent_id }): Query<Params>,
+    State(app_state): State<AppState>,
+    Query(Params { user_id, agent_id, agent_group }): Query<Params>,
 ) -> Result<axum::response::Response, StatusCode> {
-    let session_id = SessionId::try_from((user_id.deref(), &channel.config)).map_err(|err| {
+    let session_id = SessionId::try_from((user_id.deref(), &app_state.channel.config)).map_err(|err| {
         warn!("{err}");
         StatusCode::FORBIDDEN
     })?;
-    let agent = if let Some(agent_id) = &agent_id {
-        if let Some(agent) = agent.context().children.read().await.get(agent_id) {
-            Arc::clone(agent)
-        } else {
-            agent
-        }
-    } else {
-        agent
-    };
+    let agent = super::get_or_create_if_not_present(
+        &app_state, &user_id,agent_id.as_ref(), agent_group.as_ref(),
+    ).await?;
     let agent_id = agent.id();
     let rx = {
-        let mut transports = client.write().await;
+        let mut transports = app_state.client.write().await;
         let dst = transports
             .entry(user_id.clone())
             .or_insert(Default::default());

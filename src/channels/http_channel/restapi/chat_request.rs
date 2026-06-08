@@ -1,4 +1,4 @@
-use crate::agent::AgentId;
+use crate::agent::{AgentGroup, AgentId};
 use crate::channels::SessionId;
 use crate::channels::http_channel::type_::{HttpReqMessage, UserId};
 use crate::channels::http_channel::{AppState, Client, Transport};
@@ -21,6 +21,7 @@ pub struct Param {
     user_id: UserId,
     /// default to main
     agent_id: Option<AgentId>,
+    agent_group: Option<AgentGroup>,
 }
 
 #[derive(Clone, Copy, Serialize, Deserialize)]
@@ -36,31 +37,28 @@ pub enum ChatRespType {
 }
 
 pub async fn handle(
-    State(AppState {
-        channel,
-        agent,
-        client,
-    }): State<AppState>,
+    State(app_state): State<AppState>,
     Path(resp_type): Path<ChatRespType>,
-    Query(Param { user_id, agent_id }): Query<Param>,
+    Query(Param {
+        user_id,
+        agent_id,
+        agent_group,
+    }): Query<Param>,
     Json(data): Json<HttpReqMessage>,
 ) -> Result<axum::response::Response, StatusCode> {
-    let session_id = SessionId::try_from((user_id.deref(), &channel.config)).map_err(|err| {
-        warn!("{err}");
-        StatusCode::FORBIDDEN
-    })?;
-    let agent = if let Some(agent_id) = &agent_id {
-        if let Some(agent) = agent.context().children.read().await.get(agent_id) {
-            Arc::clone(agent)
-        } else {
-
-
-            agent
-        }
-    } else {
-        agent
-    };
-    let agent_id = agent_id.as_ref().unwrap_or(agent.id());
+    let session_id =
+        SessionId::try_from((user_id.deref(), &app_state.channel.config)).map_err(|err| {
+            warn!("{err}");
+            StatusCode::FORBIDDEN
+        })?;
+    let agent = super::get_or_create_if_not_present(
+        &app_state,
+        &user_id,
+        agent_id.as_ref(),
+        agent_group.as_ref(),
+    )
+    .await?;
+    let agent_id = agent.id();
     info!(
         "recv agent request, session_id: {session_id}, user_id: {user_id}, agent_id: {agent_id}, message_id: {}",
         data.message_id
@@ -68,7 +66,7 @@ pub async fn handle(
     match resp_type {
         ChatRespType::SSE => {
             let transports_exist = {
-                let transports = client.read().await;
+                let transports = app_state.client.read().await;
                 if let Some(dst) = transports.get(&user_id) {
                     let transports = dst.read().await;
                     transports.get(agent_id).is_some()
@@ -83,8 +81,14 @@ pub async fn handle(
                 );
                 return Err(StatusCode::FORBIDDEN);
             }
-            let _ = channel
-                .handle_input_message(agent, session_id, client, data.clone())
+            let _ = app_state
+                .channel
+                .handle_input_message(
+                    agent,
+                    session_id,
+                    Arc::clone(&app_state.client),
+                    data.clone(),
+                )
                 .await
                 .map_err(|err| {
                     warn!("handle_chat_send failed, err: {err}");
@@ -93,8 +97,14 @@ pub async fn handle(
             Ok(StatusCode::OK.into_response())
         }
         ChatRespType::Push => {
-            match channel
-                .handle_input_message(agent, session_id, client, data.clone())
+            match app_state
+                .channel
+                .handle_input_message(
+                    agent,
+                    session_id,
+                    Arc::clone(&app_state.client),
+                    data.clone(),
+                )
                 .await
             {
                 Ok(_) => {}
@@ -109,7 +119,8 @@ pub async fn handle(
             let client = Arc::new(Client(RwLock::new(hash_map!(
                 user_id.clone() => Arc::new(RwLock::new(hash_map!(agent_id.clone() => vec![transport],))),
             ))));
-            let _ = channel
+            let _ = app_state
+                .channel
                 .handle_input_message(agent, session_id, client, data.clone())
                 .await
                 .map_err(|err| {
@@ -133,7 +144,8 @@ pub async fn handle(
             let client = Arc::new(Client(RwLock::new(hash_map!(
                 user_id.clone() => Arc::new(RwLock::new(hash_map!(agent_id.clone() => vec![transport],))),
             ))));
-            let _ = channel
+            let _ = app_state
+                .channel
                 .handle_input_message(agent, session_id, client, data.clone())
                 .await
                 .map_err(|err| {
