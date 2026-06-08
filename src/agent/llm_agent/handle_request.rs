@@ -112,11 +112,7 @@ where
 
     async fn handle_request_actual(
         self: Arc<Self>,
-        AgentRequest {
-            ref session_id,
-            message,
-            ..
-        }: AgentRequest,
+        agent_request: AgentRequest,
         AgentRequestContext {
             channel_message_sender,
             addi_system_prompt,
@@ -124,20 +120,22 @@ where
             with_history,
         }: AgentRequestContext,
     ) {
+
         let _ = channel_message_sender
             .send(Ok(ChannelMessage {
-                session_id: session_id.clone(),
+                session_id: agent_request.session_id.clone(),
                 agent_id: self.id.clone(),
                 message: AgentResponse::Start,
             }))
             .await;
-        let agent = match Arc::clone(&self)
+        let agent = match self
             .create_agent(
-                session_id,
+                agent_request.session_id.clone(),
                 &self.agent_settings.reasoning_effort,
                 addi_system_prompt.as_deref(),
                 channel_message_sender.clone(),
                 tool_filter,
+                Some(&agent_request),
             )
             .await
         {
@@ -148,6 +146,11 @@ where
                 return;
             }
         };
+        let AgentRequest {
+            ref session_id,
+            message,
+            ..
+        } = agent_request;
         let history: Vec<Message> = if with_history
             && let Some(chat_history_limit @ 1..) = self.agent_settings.chat_history_limit
         {

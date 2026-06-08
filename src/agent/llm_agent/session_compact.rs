@@ -50,11 +50,12 @@ where
         };
         let agent = match Arc::clone(&self)
             .create_agent(
-                session_id,
+                session_id.clone(),
                 &ReasoningEffort::None,
                 None,
                 channel_message_sender,
                 |_| None,
+                None,
             )
             .await
         {

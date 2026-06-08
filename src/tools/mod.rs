@@ -1,4 +1,4 @@
-use crate::agent::{Agent, AgentContext};
+use crate::agent::{Agent, AgentContext, AgentRequest};
 use crate::channels::{ChannelMessage, SessionId};
 use derive_more::From;
 use rig::tool::ToolDyn;
@@ -50,6 +50,7 @@ pub struct ToolContext {
     #[allow(unused)]
     pub channel_message_sender: Sender<crate::Result<ChannelMessage>>,
     pub mcp_registry: &'static McpRegistry,
+    pub agent_request: Option<AgentRequest>,
 }
 
 impl ToolContext {
@@ -110,7 +111,7 @@ impl FunctionTool {
             } else {
                 vec![]
             },
-            ctx.mcp_registry.tools().await?,
+            ctx.mcp_registry.tools(ctx.clone()).await?,
             daemon_agent::DaemonAgentTools::create(ctx.clone()).await?,
         ];
         Ok(tools.into_iter().flatten().collect())

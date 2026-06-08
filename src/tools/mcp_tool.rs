@@ -1,9 +1,10 @@
 use crate::config::Config;
+use crate::tools::ToolContext;
 use crate::tools::tool_filter::ToolNameFilter;
 use derive_more::{Deref, Display, From};
 use itertools::Itertools;
 use rig::completion::ToolDefinition;
-use rig::tool::rmcp::McpTool;
+use rig::tool::rmcp::McpTool as RigMcpTool;
 use rig::tool::{ToolDyn, ToolError};
 use rig::wasm_compat::WasmBoxedFuture;
 use rmcp::service::NotificationContext;
@@ -13,6 +14,7 @@ use std::collections::{BTreeMap, HashMap};
 use std::ops::Deref;
 use std::sync::Arc;
 use std::time::Duration;
+use futures_core::future::BoxFuture;
 use tokio::sync::RwLock;
 use tokio::task::JoinHandle;
 
@@ -80,7 +82,7 @@ pub struct McpToolSetInner {
     #[allow(unused)]
     config: McpToolSetConfig,
     #[deref]
-    tools: RwLock<Vec<ProxiedMcpTool>>,
+    tools: RwLock<Vec<RigMcpTool>>,
 }
 
 #[derive(Deref, Clone)]
@@ -134,7 +136,7 @@ impl rmcp::handler::client::ClientHandler for McpToolSetInnerShared {
                 *guard = tools
                     .into_iter()
                     .flat_map(|it| tool_filter.mcp_tool_filter(it))
-                    .map(|it| McpTool::from_mcp_server(it, context.peer.clone()).into())
+                    .map(|it| RigMcpTool::from_mcp_server(it, context.peer.clone()))
                     .collect::<Vec<_>>();
                 log::info!(
                     "MCP server '{}' updated with {} tools.",
@@ -190,7 +192,7 @@ impl McpToolSet {
                     let mcp_tools = tools
                         .into_iter()
                         .flat_map(|it| tool_filter.mcp_tool_filter(it))
-                        .map(|t| McpTool::from_mcp_server(t, service.peer().clone()).into())
+                        .map(|t| RigMcpTool::from_mcp_server(t, service.peer().clone()))
                         .collect_vec();
                     (service, mcp_tools)
                 };
@@ -224,7 +226,7 @@ impl McpToolSet {
                     let mcp_tools = tools
                         .into_iter()
                         .flat_map(|it| tool_filter.mcp_tool_filter(it))
-                        .map(|t| McpTool::from_mcp_server(t, service.peer().clone()).into())
+                        .map(|t| RigMcpTool::from_mcp_server(t, service.peer().clone()).into())
                         .collect_vec();
                     (service, mcp_tools)
                 };
@@ -283,14 +285,19 @@ impl McpRegistry {
         Ok(self)
     }
 
-    pub async fn tools(&self) -> crate::Result<Vec<Box<dyn ToolDyn>>> {
+    pub async fn tools(&self, ctx: ToolContext) -> crate::Result<Vec<Box<dyn ToolDyn>>> {
         let mut vec = vec![];
         let mcp_tool_set = self.mcp_tool_set.read().await;
         for (_, toolset) in mcp_tool_set.iter() {
             let guard = toolset.read().await;
             let mut tools = guard
                 .iter()
-                .map(|it| Box::new(it.clone()) as Box<dyn ToolDyn>)
+                .map(|it| {
+                    Box::new(McpTool {
+                        ctx: ctx.clone(),
+                        tool: it.clone(),
+                    }) as Box<dyn ToolDyn>
+                })
                 .collect_vec();
             vec.append(&mut tools);
         }
@@ -298,10 +305,14 @@ impl McpRegistry {
     }
 }
 
-#[derive(Clone, From, Deref)]
-pub struct ProxiedMcpTool(McpTool);
+#[derive(Clone, Deref)]
+pub struct McpTool {
+    ctx: ToolContext,
+    #[deref]
+    tool: RigMcpTool,
+}
 
-impl ToolDyn for ProxiedMcpTool {
+impl ToolDyn for McpTool {
     fn name(&self) -> String {
         self.deref().name()
     }
@@ -310,7 +321,20 @@ impl ToolDyn for ProxiedMcpTool {
         self.deref().definition(prompt)
     }
 
-    fn call<'a>(&'a self, args: String) -> WasmBoxedFuture<'a, Result<String, ToolError>> {
-        self.deref().call(args)
+    fn call<'a>(&'a self, mut args: String) -> WasmBoxedFuture<'a, Result<String, ToolError>> {
+        Box::pin(async{
+            if let Some(request)= &self.ctx.agent_request{
+                let mut json= serde_json::from_str::<serde_json::Value>(&args).map_err(|err|ToolError::JsonError(
+                    err
+                ))?;
+                if let serde_json::Value::Object(json) = &mut json{
+                    let _ = json.insert(
+                        "messages".to_string(), serde_json::to_value(&request.message).map_err(|err|ToolError::JsonError(err))?,
+                    );
+                }
+                let _ = args = serde_json::to_string(&json).map_err(|err|ToolError::JsonError(err))?;
+            }
+            self.deref().call(args).await
+        })
     }
 }
