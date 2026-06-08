@@ -14,8 +14,11 @@ pub struct HttpReqMessage {
     pub payloads: Vec<Payload>,
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize, From, Deref, Display)]
-pub struct HttpRespMessage(Text);
+#[derive(Debug, Clone, Deserialize, Serialize, From)]
+pub struct HttpRespMessage{
+    pub output: Payload,
+    pub input: Option<HttpReqMessage>,
+}
 
 #[derive(Debug, Clone, Deserialize, Serialize, Display, Eq, PartialEq, Ord, PartialOrd, Hash)]
 #[display("{_0}")]

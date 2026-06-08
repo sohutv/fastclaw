@@ -1,6 +1,6 @@
 use crate::agent::{AgentId, AgentResponse, HistoryCompactResult, Notify};
 use crate::channels::http_channel::type_::HttpReqMessage;
-use crate::channels::http_channel::{Client, HttpChannel, Text};
+use crate::channels::http_channel::{Client, HttpChannel, Payload, Text};
 use crate::channels::http_channel::{HttpRespMessage, UserId};
 use crate::channels::{
     AgentRespState, AgentRespType, ChannelContext, ChannelMessage, SessionId,
@@ -49,10 +49,15 @@ impl HttpChannel {
 {}
 ```json
 "#,
-                            serde_json::to_string_pretty(arguments)
-                                .unwrap_or_else(|err| format!("Error serializing arguments: {}", err))
+                            serde_json::to_string_pretty(arguments).unwrap_or_else(|err| format!(
+                                "Error serializing arguments: {}",
+                                err
+                            ))
                         );
-                        info!("[{:?}] agent resp {text}", inbound_message.map(|it|&it.message_id));
+                        info!(
+                            "[{:?}] agent resp {text}",
+                            inbound_message.map(|it| &it.message_id)
+                        );
                         text
                     },
                     HttpChannel::create_resp_messages,
@@ -86,12 +91,15 @@ impl HttpChannel {
                                 let content = buff.join("");
                                 buff.clear();
                                 {
-                                    let text =                                 format!(
+                                    let text = format!(
                                         r#"### 我的想法..
 {content}
 "#
                                     );
-                                    info!("[{:?}] agent resp {text}", inbound_message.map(|it|&it.message_id));
+                                    info!(
+                                        "[{:?}] agent resp {text}",
+                                        inbound_message.map(|it| &it.message_id)
+                                    );
                                     text
                                 }
                             };
@@ -132,7 +140,10 @@ impl HttpChannel {
             AgentResponse::Final(usage) => {
                 let content = {
                     let text = buff.join("");
-                    info!("[{:?}] agent resp {text}", inbound_message.map(|it|&it.message_id));
+                    info!(
+                        "[{:?}] agent resp {text}",
+                        inbound_message.map(|it| &it.message_id)
+                    );
                     let token_usage = format!(
                         "*<<Tokens:{}↑{}↓{}>>*",
                         usage.total_tokens, usage.input_tokens, usage.output_tokens
@@ -285,13 +296,14 @@ impl HttpChannel {
     fn create_resp_messages<Content: Into<Text>>(
         session_id: &SessionId,
         _: &ChannelContext,
-        _: Option<&HttpReqMessage>,
+        input: Option<&HttpReqMessage>,
         content: Content,
     ) -> crate::Result<HttpRespMessage> {
         let message = match &session_id {
-            SessionId::Master { .. } | SessionId::Anonymous { .. } => {
-                HttpRespMessage::from(content.into())
-            }
+            SessionId::Master { .. } | SessionId::Anonymous { .. } => HttpRespMessage {
+                output: Payload::Text(content.into()),
+                input: input.map(|it| it.clone()),
+            },
             SessionId::Group { .. } => {
                 unreachable!("send robot message to group is not supported by http")
             }

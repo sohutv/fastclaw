@@ -10,7 +10,6 @@ use axum::response::sse::Event;
 use axum::response::{IntoResponse, Sse};
 use log::{info, warn};
 use serde::{Deserialize, Serialize};
-use std::convert::Infallible;
 use std::ops::Deref;
 use std::sync::Arc;
 use tokio::sync::RwLock;
@@ -19,8 +18,8 @@ use tokio_stream::wrappers::ReceiverStream;
 #[derive(Clone, Serialize, Deserialize)]
 pub struct Param {
     user_id: UserId,
-    /// default to main
-    agent_id: Option<AgentId>,
+    #[serde(default)]
+    agent_id: AgentId,
     agent_group: Option<AgentGroup>,
 }
 
@@ -54,7 +53,7 @@ pub async fn handle(
     let agent = super::get_or_create_if_not_present(
         &app_state,
         &user_id,
-        agent_id.as_ref(),
+        Some(&agent_id),
         agent_group.as_ref(),
     )
     .await?;
@@ -129,7 +128,7 @@ pub async fn handle(
                 })?;
             use futures_util::stream::StreamExt as _;
             let sse = Sse::new(
-                ReceiverStream::new(rx).map(|it| Ok::<_, Infallible>(Event::default().data(&**it))),
+                ReceiverStream::new(rx).map(|it|Event::default().json_data(it)),
             )
             .keep_alive(Default::default());
             let mut response = sse.into_response();

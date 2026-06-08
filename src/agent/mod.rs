@@ -6,12 +6,12 @@ use derive_more::{Deref, Display, From, FromStr, Into};
 use rig::OneOrMany;
 use rig::completion::Usage;
 use rig::message::{Message, Reasoning, ToolCall, UserContent};
+use rig::providers::openai::responses_api::ReasoningEffort;
+use rmcp::schemars;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fmt::Display;
 use std::sync::Arc;
-use rig::providers::openai::responses_api::ReasoningEffort;
-use rmcp::schemars;
 use tokio::sync::RwLock;
 use tokio::sync::mpsc::Sender;
 
@@ -166,7 +166,14 @@ pub struct AgentContext {
 #[derive(
     Debug, Clone, Deref, Eq, PartialEq, Ord, PartialOrd, Display, Serialize, Deserialize, Hash,
 )]
+#[serde(default)]
 pub struct AgentId(String);
+
+impl Default for AgentId {
+    fn default() -> Self {
+        Self("main".to_string())
+    }
+}
 
 impl<S: Into<String>> From<S> for AgentId {
     fn from(value: S) -> Self {

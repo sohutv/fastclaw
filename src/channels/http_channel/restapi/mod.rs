@@ -33,7 +33,7 @@ pub async fn get_or_create_if_not_present(
         }
     }
     let Some(agent_group) = agent_group else {
-        warn!("cannot create agent without agent_group, agent_idd: {agent_id:?}");
+        warn!("cannot create agent without agent_group, agent_id: {agent_id:?}");
         return Err(StatusCode::BAD_REQUEST);
     };
     if !channel.ctx.config.agent_groups.contains(&agent_group) {

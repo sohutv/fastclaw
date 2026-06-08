@@ -8,29 +8,37 @@ use axum::response::sse::Event;
 use axum::response::{IntoResponse, Sse};
 use log::{info, warn};
 use serde::{Deserialize, Serialize};
-use std::convert::Infallible;
 use std::ops::Deref;
 use tokio_stream::wrappers::ReceiverStream;
 
 #[derive(Clone, Serialize, Deserialize)]
 pub struct Params {
     user_id: UserId,
-    /// default to main
-    agent_id: Option<AgentId>,
+    #[serde(default)]
+    agent_id: AgentId,
     agent_group: Option<AgentGroup>,
 }
 
 pub async fn handle(
     State(app_state): State<AppState>,
-    Query(Params { user_id, agent_id, agent_group }): Query<Params>,
+    Query(Params {
+        user_id,
+        agent_id,
+        agent_group,
+    }): Query<Params>,
 ) -> Result<axum::response::Response, StatusCode> {
-    let session_id = SessionId::try_from((user_id.deref(), &app_state.channel.config)).map_err(|err| {
-        warn!("{err}");
-        StatusCode::FORBIDDEN
-    })?;
+    let session_id =
+        SessionId::try_from((user_id.deref(), &app_state.channel.config)).map_err(|err| {
+            warn!("{err}");
+            StatusCode::FORBIDDEN
+        })?;
     let agent = super::get_or_create_if_not_present(
-        &app_state, &user_id,agent_id.as_ref(), agent_group.as_ref(),
-    ).await?;
+        &app_state,
+        &user_id,
+        Some(&agent_id),
+        agent_group.as_ref(),
+    )
+    .await?;
     let agent_id = agent.id();
     let rx = {
         let mut transports = app_state.client.write().await;
@@ -47,7 +55,9 @@ pub async fn handle(
     };
     use futures_util::stream::StreamExt as _;
     let sse = Sse::new(
-        ReceiverStream::new(rx).map(|it| Ok::<_, Infallible>(Event::default().data(&**it))),
+        ReceiverStream::new(rx).map(|it|{
+            Event::default().json_data(it)
+        }),
     )
     .keep_alive(Default::default());
     let mut response = sse.into_response();
