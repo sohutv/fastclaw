@@ -4,7 +4,6 @@ use rig::client::CompletionClient;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::fmt::Debug;
-use strum::EnumIter;
 
 #[cfg(feature = "model_provider_openai_compatible")]
 pub mod openai_compatible;
@@ -67,19 +66,7 @@ pub struct ModelSettings {
     pub reranker: bool,
     pub embedding: bool,
     pub max_tokens: u64,
-    pub performance: ModelPerformance,
 }
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, Default, Eq, PartialEq, Display, EnumIter)]
-pub enum ModelPerformance {
-    #[serde(alias = "normal")]
-    #[default]
-    Normal,
-    #[serde(alias = "fast")]
-    Fast,
-    #[serde(alias = "thought")]
-    Thought,
-}
-
 impl Default for ModelSettings {
     fn default() -> Self {
         Self {
@@ -93,7 +80,6 @@ impl Default for ModelSettings {
             reranker: false,
             embedding: false,
             max_tokens: 65536,
-            performance: Default::default(),
         }
     }
 }

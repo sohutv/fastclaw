@@ -157,7 +157,7 @@ where
                     } else {
                         array.push(message);
                     }
-                    if cnt > chat_history_limit {
+                    if cnt >= chat_history_limit {
                         break;
                     }
                 }
