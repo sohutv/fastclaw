@@ -91,7 +91,6 @@ impl HttpChannel {
                         if session_id.settings().show_reasoning {
                             let content = {
                                 let content = buff.join("");
-                                buff.clear();
                                 {
                                     let text = format!(
                                         r#"### 我的想法..
@@ -119,6 +118,7 @@ impl HttpChannel {
                                 let _ = robot_message.send(client, session_id, agent_id).await;
                             }
                         }
+                        buff.clear();
                     }
                     _ => {}
                 }
@@ -151,7 +151,6 @@ impl HttpChannel {
                         "*<<Tokens:{}↑{}↓{}>>*",
                         usage.total_tokens, usage.input_tokens, usage.output_tokens
                     );
-                    buff.clear();
                     if session_id.settings().show_token_usage {
                         format!(
                             r#"
@@ -168,6 +167,7 @@ impl HttpChannel {
                         )
                     }
                 };
+                buff.clear();
                 if let Some(robot_message) = create_robot_messages_for_agent(
                     agent,
                     session_id,

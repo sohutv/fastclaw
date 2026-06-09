@@ -100,7 +100,7 @@ impl DingtalkChannel {
                         if session_id.settings().show_reasoning {
                             let content = {
                                 let content = buff.join("");
-                                buff.clear();
+                                
                                 MessageContentMarkdown::from((
                                     "正在思考...",
                                     format!(
@@ -125,6 +125,7 @@ impl DingtalkChannel {
                                 let _ = dingtalk.send_message(robot_message).await;
                             }
                         }
+                        buff.clear();
                     }
                     _ => {}
                 }
@@ -153,7 +154,7 @@ impl DingtalkChannel {
                         "*<<Tokens:{}↑{}↓{}>>*",
                         usage.total_tokens, usage.input_tokens, usage.output_tokens
                     );
-                    buff.clear();
+                    
                     if session_id.settings().show_token_usage {
                         format!(
                             r#"
@@ -170,6 +171,7 @@ impl DingtalkChannel {
                         )
                     }
                 };
+                buff.clear();
                 if let Ok(Some(robot_message)) = create_robot_messages_for_agent(
                     agent,
                     session_id,

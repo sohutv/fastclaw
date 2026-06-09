@@ -84,7 +84,7 @@ impl WechatChannel {
                         if session_id.settings().show_reasoning {
                             let content = {
                                 let content = buff.join("");
-                                buff.clear();
+
                                 format!(
                                     r#"
 ### 我的想法..
@@ -106,6 +106,7 @@ impl WechatChannel {
                                 let _ = robot_message.send(&wechat).await;
                             }
                         }
+                        buff.clear();
                     }
                     _ => {}
                 }
@@ -134,7 +135,6 @@ impl WechatChannel {
                         "*<<Tokens:{}↑{}↓{}>>*",
                         usage.total_tokens, usage.input_tokens, usage.output_tokens
                     );
-                    buff.clear();
                     if session_id.settings().show_token_usage {
                         format!(
                             r#"
@@ -151,6 +151,7 @@ impl WechatChannel {
                         )
                     }
                 };
+                buff.clear();
                 if let Some(robot_message) = create_robot_messages_for_agent(
                     agent,
                     session_id,
