@@ -35,17 +35,15 @@ where
                     }) = rx.recv().await
                     {
                         let id = req.id.clone();
-                        info!("[Pending] handle_request recv AgentRequestPkg {}", id);
                         let start = chrono::Local::now();
                         let _ = Arc::clone(&self_).handle_request_actual(req, ctx).await;
-                        let elapse = chrono::Local::now() - start;
                         if let Some(ack_sender) = ack_sender {
                             let _ = ack_sender.send(());
                         }
                         info!(
                             "[Pending] handle_request ack AgentRequestPkg {} ok /elapsed: {:?}ms",
                             id,
-                            elapse.num_milliseconds()
+                            (chrono::Local::now() - start).num_milliseconds()
                         );
                     }
                 });
@@ -61,8 +59,6 @@ where
                         create_time: _,
                     }) = rx.recv().await
                     {
-                        let id = req.id.clone();
-                        info!("[Latest] handle_request recv AgentRequestPkg {}", id);
                         let now = chrono::Local::now();
                         let before =
                             watch_tx.send_replace(Arc::new(Mutex::new(Some((req, ctx, now)))));
@@ -75,7 +71,6 @@ where
                         if let Some(ack_sender) = ack_sender {
                             let _ = ack_sender.send(());
                         }
-                        info!("[Latest] handle_request ack AgentRequestPkg {} ok", id);
                     }
                 });
                 tokio::spawn(async move {
@@ -87,21 +82,13 @@ where
                         if let Some((req, ctx, received_time)) = dst {
                             let id = req.id.clone();
                             let start = chrono::Local::now();
-                            let gap = start - received_time;
-                            info!(
-                                "[Latest] handle_request changed AgentRequestPkg {}, /received_at: {}, gap: {}ms",
-                                id,
-                                received_time,
-                                gap.num_milliseconds(),
-                            );
                             let _ = Arc::clone(&self_).handle_request_actual(req, ctx).await;
-                            let elapse = chrono::Local::now() - start;
                             info!(
                                 "[Latest] handle_request changed AgentRequestPkg {} ok, /received_at: {}, gap: {}ms, elapsed: {}ms",
                                 id,
                                 received_time,
-                                gap.num_milliseconds(),
-                                elapse.num_milliseconds()
+                                (start - received_time).num_milliseconds(),
+                                (chrono::Local::now() - start).num_milliseconds()
                             );
                         }
                     }
@@ -120,7 +107,6 @@ where
             with_history,
         }: AgentRequestContext,
     ) {
-
         let _ = channel_message_sender
             .send(Ok(ChannelMessage {
                 session_id: agent_request.session_id.clone(),

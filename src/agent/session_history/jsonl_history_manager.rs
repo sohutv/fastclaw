@@ -5,8 +5,7 @@ use crate::config::Config;
 use anyhow::anyhow;
 use async_trait::async_trait;
 use rig::completion::Usage;
-use std::ops::{Deref, DerefMut};
-use std::path::PathBuf;
+use std::ops::DerefMut;
 use std::sync::Arc;
 use tokio::io::AsyncWriteExt;
 use tokio::sync::RwLock;
@@ -50,7 +49,7 @@ impl HistoryManager for JsonlHistoryManager {
 
         {
             // dump to file
-            let dir = self.history_dir(session_id, agent).await?;
+            let dir = self.workspace.agent_session_path(session_id, agent).await?;
             let usage_filepath = dir.join("usage.json");
             fs::write(
                 &usage_filepath,
@@ -124,7 +123,7 @@ impl HistoryManager for JsonlHistoryManager {
         {
             let mut histories = self.histories.write().await;
             *histories = {
-                let dir = self.history_dir(session_id, agent).await?;
+                let dir = self.workspace.agent_session_path(session_id, agent).await?;
                 let reader = {
                     let filepath = dir.join("history.jsonl");
                     if !filepath.exists() {
@@ -163,7 +162,7 @@ impl HistoryManager for JsonlHistoryManager {
     }
 
     async fn usage(&self, session_id: &SessionId, agent: &AgentId) -> crate::Result<Usage> {
-        let dir = self.history_dir(session_id, agent).await?;
+        let dir = self.workspace.agent_session_path(session_id, agent).await?;
         let usage_filepath = dir.join("usage.json");
         if !usage_filepath.exists() {
             return Ok(Default::default());
@@ -174,17 +173,6 @@ impl HistoryManager for JsonlHistoryManager {
 }
 
 impl JsonlHistoryManager {
-    async fn history_dir(&self, session_id: &SessionId, agent: &AgentId) -> crate::Result<PathBuf> {
-        let dir = self.workspace.session_path(session_id).join(agent.deref());
-        if !dir.exists() {
-            fs::create_dir_all(&dir).await?;
-        }
-        if !dir.is_dir() {
-            return Err(anyhow::anyhow!("{} is not a directory", dir.display()));
-        }
-        Ok(dir)
-    }
-
     async fn write_actual(file: fs::File, messages: &[HistoryMessage]) -> crate::Result<()> {
         let mut writer = tokio::io::BufWriter::new(file);
         for message in messages {

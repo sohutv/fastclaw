@@ -21,7 +21,7 @@ mod session_history;
 use crate::ModelName;
 use crate::config::{Config, Workspace};
 use crate::memory::MemoryManager;
-use crate::model_provider::{ModelProviderName, ModelProviders, ModelSettings};
+use crate::model_provider::ModelSettings;
 pub use session_history::{HistoryManager, JsonlHistoryManager};
 
 use crate::tools::mcp_tool::McpRegistry;
@@ -90,39 +90,38 @@ pub trait Agent: SessionCompactSupport + AgentClone + Send + Sync {
     async fn fork_child(
         &self,
         id: &AgentId,
-        group: &AgentGroup,
-        model_provider: &ModelProviderName,
-        model_name: &ModelName,
+        agent_group: &AgentGroup,
         system_prompt: Option<SystemPrompt>,
-        agent_settings: AgentSettings,
     ) -> crate::Result<Arc<dyn Agent>> {
+        if self.id().eq(id) || self.agent_group().eq(agent_group) {
+            return Err(anyhow!(
+                "fork child failed, required id: {id}, agent_group: {agent_group}"
+            ));
+        }
         let context = self.agent_context();
         let mut children = context.children.write().await;
         if let Some(agent) = children.get(&id) {
-            Ok(Arc::clone(agent))
-        } else {
-            let agent = match context.config.model_provider(model_provider)? {
-                ModelProviders::OpenaiCompatible(model_provider) => {
-                    model_provider
-                        .create_agent(
-                            id,
-                            group,
-                            context.config,
-                            model_name.clone(),
-                            Arc::clone(&context.history_manager),
-                            Arc::clone(&context.memory_manager),
-                            context.workspace,
-                            system_prompt,
-                            context.mcp_registry,
-                            agent_settings,
-                        )
-                        .await?
-                }
-            };
-            let agent = (Arc::new(agent) as Arc<dyn Agent>).start().await?;
-            children.insert(agent.id().clone(), Arc::clone(&agent));
-            Ok(agent)
+            return Ok(Arc::clone(agent));
         }
+        let agent = spawn_agent(
+            id,
+            agent_group,
+            context.config,
+            &context.history_manager,
+            &context.memory_manager,
+            context.workspace,
+            context.mcp_registry,
+            |predefined| async move {
+                match (predefined, system_prompt) {
+                    (Some(l), Some(r)) => Ok(Some(l + r)),
+                    (sp @ Some(_), _) | (_, sp @ Some(_)) => Ok(sp),
+                    _ => Ok(None),
+                }
+            },
+        )
+        .await?;
+        children.insert(agent.id().clone(), Arc::clone(&agent));
+        Ok(agent)
     }
 
     async fn drop_child(&self, id: &AgentId) -> crate::Result<Arc<dyn Agent>> {
@@ -309,12 +308,20 @@ impl Display for HistoryCompactVal {
 #[derive(
     Debug, Clone, Deref, Eq, PartialEq, Ord, PartialOrd, Display, Serialize, Deserialize, Hash,
 )]
+#[serde(default)]
 pub struct AgentGroup(String);
 impl From<AgentId> for AgentGroup {
     fn from(value: AgentId) -> Self {
         Self(value.0)
     }
 }
+
+impl Default for AgentGroup {
+    fn default() -> Self {
+        Self("main".to_string())
+    }
+}
+
 impl<S: Into<String>> From<S> for AgentGroup {
     fn from(value: S) -> Self {
         Self(value.into())
@@ -384,3 +391,6 @@ impl Default for AgentSettings {
         }
     }
 }
+
+mod agent_factory;
+pub use agent_factory::*;

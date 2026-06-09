@@ -182,8 +182,12 @@ impl Channel for CliChannel {
 
 impl CliChannel {
     async fn handle_agent_message(
-        ctx: &ChannelContext,
-        agent_response: &AgentResponse,
+        _: &ChannelContext,
+        ChannelMessage {
+            session_id,
+            message: agent_response,
+            ..
+        }: &ChannelMessage,
         curr_state: AgentRespState,
     ) -> crate::Result<AgentRespState> {
         match agent_response {
@@ -212,7 +216,7 @@ impl CliChannel {
                 match curr_state {
                     AgentRespState::Start => {
                         cli_line_clear();
-                        if ctx.config.default_show_reasoning {
+                        if session_id.settings().show_reasoning {
                             println!(
                                 r#"
 Reasoning >> ////////
@@ -237,7 +241,7 @@ Reasoning >> ////////
                         cli_line_clear();
                     }
                     AgentRespState::Reasoning => {
-                        if ctx.config.default_show_reasoning {
+                        if session_id.settings().show_reasoning {
                             println!(
                                 r#"
 //////// << Reasoning

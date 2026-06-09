@@ -1,6 +1,6 @@
 use derive_more::{Deref, Display, From, FromStr, Into};
 use serde::{Deserialize, Serialize};
-use std::ops::Deref;
+use std::ops::Add;
 
 #[derive(
     Debug,
@@ -33,6 +33,19 @@ impl From<super::Text> for Prompt {
     }
 }
 
+impl<P: Into<Self>> Add<P> for Prompt {
+    type Output = Self;
+
+    fn add(self, rhs: P) -> Self::Output {
+        let p = format!(
+            r#"{}
+        {}"#,
+            self,
+            rhs.into()
+        );
+        p.into()
+    }
+}
 impl Prompt {
     pub fn append_line<P: Into<Prompt>>(&self, prompt: P) -> Prompt {
         let p = format!(
@@ -64,9 +77,11 @@ impl Prompt {
 )]
 pub struct SystemPrompt(Prompt);
 
-impl SystemPrompt {
-    pub fn append_line<P: Into<SystemPrompt>>(&self, prompt: P) -> SystemPrompt {
-        self.deref().append_line(prompt.into().0).into()
+impl Add<Self> for SystemPrompt {
+    type Output = Self;
+
+    fn add(self, rhs: Self) -> Self::Output {
+        (self.0 + rhs.0).into()
     }
 }
 

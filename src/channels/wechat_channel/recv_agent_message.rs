@@ -65,7 +65,7 @@ impl WechatChannel {
             }
             AgentResponse::ReasoningStream(reasoning) => {
                 match curr_state {
-                    AgentRespState::Start => if self.ctx.config.default_show_reasoning {},
+                    AgentRespState::Start => if session_id.settings().show_reasoning {},
                     _ => {}
                 }
                 for content in reasoning.content.iter() {
@@ -81,7 +81,7 @@ impl WechatChannel {
                 match curr_state {
                     AgentRespState::Start => {}
                     AgentRespState::Reasoning => {
-                        if self.ctx.config.default_show_reasoning {
+                        if session_id.settings().show_reasoning {
                             let content = {
                                 let content = buff.join("");
                                 buff.clear();

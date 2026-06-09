@@ -4,12 +4,11 @@ use crate::channels::http_channel::{CameraFrame, Client, HttpChannel};
 use crate::channels::http_channel::{HttpReqMessage, Payload};
 use crate::channels::{Channel, SessionId};
 use base64::Engine;
-use log::{info, warn};
+use log::warn;
 use rig::OneOrMany;
 use rig::message::{DocumentSourceKind, Image, ImageDetail, ImageMediaType, UserContent};
 use std::ops::Deref;
 use std::sync::Arc;
-use zerocopy::IntoBytes;
 
 impl HttpChannel {
     /// ### handle_input_message
@@ -51,6 +50,7 @@ impl HttpChannel {
                         }
                     },
                     Payload::Image(image) => {
+                        /*
                         let extension = match image.extension() {
                             Ok(val) => val,
                             Err(err) => {
@@ -58,6 +58,7 @@ impl HttpChannel {
                                 continue;
                             }
                         };
+
                         let filepath = &self.ctx.workspace.downloads_path().join(format!(
                             "{}.{}",
                             uuid::Uuid::new_v4(),
@@ -71,6 +72,7 @@ impl HttpChannel {
                             }
                         }
                         img_idx += 1;
+                         */
                         user_contents.push(UserContent::Image(Image {
                             data: DocumentSourceKind::Base64(
                                 base64::engine::general_purpose::STANDARD.encode(&image.content),
@@ -79,6 +81,7 @@ impl HttpChannel {
                             detail: Some(ImageDetail::Auto),
                             additional_params: None,
                         }));
+                        /*
                         user_contents.push(UserContent::Text(
                             format!(
                                 "- **filepath of the {}-th input image**: {}",
@@ -86,7 +89,8 @@ impl HttpChannel {
                                 filepath.display()
                             )
                             .into(),
-                        ))
+                        ));
+                         */
                     }
                     Payload::CameraFrame(CameraFrame { meta, image }) => {
                         img_idx += 1;
@@ -127,7 +131,12 @@ impl HttpChannel {
                     let client = Arc::clone(&client);
                     let _ = tokio::spawn(async move {
                         let _ = self_
-                            .handle_agent_message(client, Arc::clone(&agent), Some(data), &mut receiver)
+                            .handle_agent_message(
+                                client,
+                                Arc::clone(&agent),
+                                Some(data),
+                                &mut receiver,
+                            )
                             .await;
                     });
                     return Ok(());
@@ -148,7 +157,6 @@ impl HttpChannel {
             return Ok(());
         };
         let msg_id = message_id.clone();
-        info!("Submit task to agent, msg_id: {}", msg_id);
         match Arc::clone(&self)
             .append_agent_task(
                 Arc::clone(&client),
@@ -163,10 +171,7 @@ impl HttpChannel {
             )
             .await
         {
-            Ok(_) => {
-                info!("Submit agent task ok, msg_id: {msg_id}");
-                Ok(())
-            }
+            Ok(_) => Ok(()),
             Err(err) => {
                 warn!("Agent run failed, msg_id: {msg_id}, error: {err}");
                 Ok(())

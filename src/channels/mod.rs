@@ -4,7 +4,7 @@ use crate::agent::{
 use crate::config::{Config, Workspace};
 use async_trait::async_trait;
 use derive_more::Deref;
-use log::{error, info};
+use log::error;
 use std::sync::Arc;
 use strum::Display;
 use tokio::sync::mpsc::Receiver;
@@ -73,13 +73,10 @@ where
             req: AgentRequest,
             ctx: AgentRequestContext,
         ) -> crate::Result<()> {
-            let id = req.id.clone();
-            info!("spawn_agent_task_inner send {}", id);
             let sender = agent.get_channel_sender().await?;
             let (pkg, ack) = AgentRequestPkg::new_with_ack(req, ctx);
             let _ = sender.send(pkg).await?;
             let _ = ack.await?;
-            info!("spawn_agent_task_inner send {} ok", id);
             Ok(())
         }
         let task_id = req.id.clone();
@@ -95,9 +92,7 @@ where
         )
         .await
         {
-            Ok(_) => {
-                info!("agent task submit ok, task_id: {}", task_id);
-            }
+            Ok(_) => {}
             Err(err) => {
                 error!(
                     "agent task submit  failed, task_id: {}, error: {}",

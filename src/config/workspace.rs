@@ -1,3 +1,4 @@
+use crate::agent::{AgentGroup, AgentId};
 use crate::channels::SessionId;
 use crate::memory::MemoryManager;
 use crate::tools::TaskTools;
@@ -19,7 +20,7 @@ pub struct Workspace {
     pub downloads_path: PathBuf,
     pub sql_pools: Arc<RwLock<HashMap<SessionId, Arc<SqlitePool>>>>,
     pub memory_conns: Arc<RwLock<HashMap<SessionId, Arc<Mutex<Connection>>>>>,
-    pub agent_groups_path: PathBuf,
+    agent_groups_path: PathBuf,
 }
 
 impl Workspace {
@@ -79,7 +80,11 @@ impl Workspace {
         let sql_pool = {
             let mut sql_pools = self.sql_pools.write().await;
             let sqlite_path = {
-                let sqlite_path = self.session_path(session_id).join("db").join("db.sqlite");
+                let sqlite_path = self
+                    .session_path(session_id)
+                    .await?
+                    .join("db")
+                    .join("db.sqlite");
                 if let Some(parent) = sqlite_path.parent() {
                     if !parent.exists() {
                         let _ = tokio::fs::create_dir_all(parent).await?;
@@ -131,9 +136,43 @@ impl Workspace {
         Ok(conn)
     }
 
-    #[inline(always)]
-    pub fn session_path(&self, session_id: &SessionId) -> PathBuf {
-        self.sessions_path.join(session_id.deref())
+    pub async fn session_path(&self, session_id: &SessionId) -> crate::Result<PathBuf> {
+        let path = self.sessions_path.join(session_id.deref());
+        if !path.exists() {
+            let _ = tokio::fs::create_dir_all(&path).await?;
+        }
+        Ok(path)
+    }
+
+    pub async fn agent_session_path(
+        &self,
+        session_id: &SessionId,
+        agent_id: &AgentId,
+    ) -> crate::Result<PathBuf> {
+        let path = self
+            .sessions_path
+            .join(session_id.deref())
+            .join(agent_id.deref());
+        if !path.exists() {
+            let _ = tokio::fs::create_dir_all(&path).await?;
+        }
+        Ok(path)
+    }
+
+    pub async fn agent_group_path(&self, agent_group: &AgentGroup) -> crate::Result<PathBuf> {
+        let path = self.agent_groups_path.join(agent_group.deref());
+        if !path.exists() {
+            let _ = tokio::fs::create_dir_all(&path).await?;
+        }
+        Ok(path)
+    }
+
+    pub async fn agent_group_agent_path(&self, agent_group: &AgentGroup, agent_id: &AgentId) -> crate::Result<PathBuf>{
+        let path = self.agent_groups_path.join(agent_group.deref()).join(agent_id.deref());
+        if !path.exists() {
+            let _ = tokio::fs::create_dir_all(&path).await?;
+        }
+        Ok(path)
     }
 }
 

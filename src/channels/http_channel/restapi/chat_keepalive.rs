@@ -16,7 +16,8 @@ pub struct Params {
     user_id: UserId,
     #[serde(default)]
     agent_id: AgentId,
-    agent_group: Option<AgentGroup>,
+    #[serde(default)]
+    agent_group: AgentGroup,
 }
 
 pub async fn handle(
@@ -32,11 +33,11 @@ pub async fn handle(
             warn!("{err}");
             StatusCode::FORBIDDEN
         })?;
-    let agent = super::get_or_create_if_not_present(
+    let agent = super::get_or_create(
         &app_state,
         &user_id,
-        Some(&agent_id),
-        agent_group.as_ref(),
+        &agent_id,
+        &agent_group,
     )
     .await?;
     let agent_id = agent.id();

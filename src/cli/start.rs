@@ -1,20 +1,17 @@
-use std::ops::Deref;
-use crate::agent::{
-    Agent, AgentClone, AgentId, HistoryManager, JsonlHistoryManager, LlmAgentSupplier,
-};
-use crate::channels;
+use crate::agent::{Agent, AgentId, HistoryManager, JsonlHistoryManager};
 use crate::channels::Channel;
 use crate::cli::CmdRunner;
 use crate::config::{Config, Workspace};
 use crate::heartbeat::Heartbeat;
 use crate::memory::MemoryManager;
-use crate::model_provider::ModelProviders;
 use crate::tools::mcp_tool::McpRegistry;
+use crate::{agent, channels};
 use anyhow::anyhow;
 use clap::Args;
 use derive_more::FromStr;
 use itertools::Itertools;
 use log::info;
+use std::ops::Deref;
 use std::path::PathBuf;
 use std::sync::Arc;
 
@@ -67,31 +64,20 @@ impl CmdRunner for Start {
             Arc::new(JsonlHistoryManager::new(config, workspace).await?);
         let memory_manager = Arc::new(MemoryManager::new(config, workspace).await?);
         let (main_agent, heartbeat_agent) = {
-            let main_agent = match config.default_model_provider()? {
-                ModelProviders::OpenaiCompatible(model_provider) => {
-                    let agent_id = AgentId::from("main");
-                    let group = agent_id.deref().into();
-                    model_provider
-                        .create_agent(
-                            &agent_id,
-                            &group,
-                            config,
-                            config.default_model().clone(),
-                            Arc::clone(&history_manager),
-                            Arc::clone(&memory_manager),
-                            workspace,
-                            None,
-                            mcp_registry,
-                            config
-                                .agent_settings(&group)
-                                .map(|it| it.clone())
-                                .unwrap_or_default(),
-                        )
-                        .await?
-                }
-            };
+            let agent_id = AgentId::from("main");
+            let main_agent = agent::spawn_agent(
+                &agent_id,
+                &agent_id.deref().into(),
+                config,
+                &history_manager,
+                &memory_manager,
+                workspace,
+                mcp_registry,
+                |sp| async { Ok(sp) },
+            )
+            .await?;
             let heartbeat_agent = main_agent.clone_with("heartbeat".into(), None).await?;
-            (Arc::new(main_agent) as Arc<dyn Agent>, heartbeat_agent)
+            (main_agent, heartbeat_agent)
         };
 
         enum JoinHandle {

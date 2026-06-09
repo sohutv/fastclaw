@@ -29,7 +29,9 @@ impl CmdRunner for Command {
     async fn run(&self) -> crate::Result<()> {
         match self {
             Self::Start(start) => start.run().await,
-            Self::Onboard(onboard) => onboard.run().await,
+            Self::Onboard(_onboard) => {
+                unimplemented!()
+            },
         }
     }
 }
