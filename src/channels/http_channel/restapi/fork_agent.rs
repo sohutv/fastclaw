@@ -23,6 +23,7 @@ pub struct Body {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Resp {
+    agent_group: AgentGroup,
     agent_id: AgentId,
 }
 
@@ -54,6 +55,7 @@ pub async fn handle(
     let agent_id = agent.id();
     info!("fork {agent_group} child agent for {user_id} ok, agent_id: {agent_id}");
     Ok(Json(Resp {
+        agent_group,
         agent_id: agent_id.clone(),
     }))
 }
