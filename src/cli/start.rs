@@ -1,6 +1,7 @@
 use crate::agent::{Agent, AgentId, HistoryManager, JsonlHistoryManager};
 use crate::channels::Channel;
 use crate::cli::CmdRunner;
+use crate::config::logger::{Level, Logger};
 use crate::config::{Config, Workspace};
 use crate::heartbeat::Heartbeat;
 use crate::memory::MemoryManager;
@@ -21,6 +22,10 @@ pub struct Start {
     workdir: Option<PathBuf>,
     #[arg(long, value_delimiter = ',')]
     channel: Vec<ChannelType>,
+    #[arg(long, default_value = "false")]
+    std_log: bool,
+    #[arg(long, default_value = "false")]
+    verbose: bool,
 }
 
 #[derive(Debug, Clone, FromStr, Eq, PartialEq, Ord, PartialOrd, Hash)]
@@ -44,6 +49,8 @@ impl CmdRunner for Start {
         let Self {
             workdir,
             channel: channels,
+            std_log,
+            verbose,
         } = self;
         let workdir = workdir
             .as_deref()
@@ -57,7 +64,18 @@ impl CmdRunner for Start {
             let config = Box::leak(Box::new(toml::from_str::<Config>(&config_toml)?));
             config
         };
-        let _ = config.init_logger(&workdir)?;
+
+        {
+            let mut log_config = config.log_config.clone();
+            if *std_log {
+                log_config = log_config.update_logger(Logger::Stdout);
+            }
+            if *verbose  {
+                log_config = log_config.update_level(Level::Debug);
+            }
+            log_config.init(&workdir)?;
+        }
+
         let mcp_registry = Box::leak(Box::new(McpRegistry::new(config)?.init().await?));
         let workspace = { Box::leak(Box::new(Workspace::init(workdir).await?)) };
         let history_manager: Arc<dyn HistoryManager> =

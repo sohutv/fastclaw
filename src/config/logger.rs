@@ -12,11 +12,23 @@ pub struct LogConfig {
     level: Level,
 }
 
+impl LogConfig {
+    pub fn update_logger(mut self, logger: Logger) -> Self {
+        self.logger = logger;
+        self
+    }
+
+    pub fn update_level(mut self, level: Level) -> Self {
+        self.level = level;
+        self
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, Display)]
 pub enum Logger {
-    #[serde(rename="stdout")]
+    #[serde(rename = "stdout")]
     Stdout,
-    #[serde(rename="file")]
+    #[serde(rename = "file")]
     File { logs_dir: PathBuf },
 }
 impl Default for Logger {

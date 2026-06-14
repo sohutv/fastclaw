@@ -1,7 +1,7 @@
 use crate::config::Config;
 use crate::model_provider::{ModelProviderName, ModelProviders};
 use anyhow::anyhow;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 impl Config {
     pub fn model_provider(&self, name: &ModelProviderName) -> crate::Result<ModelProviders> {
@@ -10,11 +10,6 @@ impl Config {
         } else {
             Err(anyhow!("Model provider not found for name: {}", name))
         }
-    }
-
-    pub fn init_logger<P: AsRef<Path>>(&mut self, workdir: P) -> crate::Result<&mut Self> {
-        self.log_config.init(workdir)?;
-        Ok(self)
     }
 }
 

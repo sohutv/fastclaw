@@ -145,7 +145,7 @@ where
             ctx: self.ctx.clone(),
             channel_sender: Default::default(),
         };
-        Ok(Arc::new(agent))
+        Arc::new(agent).start().await
     }
 }
 
