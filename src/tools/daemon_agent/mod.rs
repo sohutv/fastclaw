@@ -8,7 +8,7 @@ pub mod drop_child_agent;
 
 pub mod list_child_agents;
 
-pub mod get_child_session_history;
+pub mod get_child_session_path;
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 #[serde(default)]
