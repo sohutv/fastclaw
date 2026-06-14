@@ -174,10 +174,10 @@ where
                 messages
                     .into_iter()
                     .flatten()
-                    // todo .chain(vec![UserContent::text(format!(
-                    //     "- **Current DateTime**: {}",
-                    //     chrono::Local::now().to_rfc3339()
-                    // ))])
+                    .chain(vec![UserContent::text(format!(
+                        "- **Current DateTime**: {}",
+                        chrono::Local::now().to_rfc3339()
+                    ))])
                     .collect_vec(),
             ) {
                 Ok(content) => Message::User { content },
