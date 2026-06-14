@@ -9,6 +9,7 @@ use rig::OneOrMany;
 use rig::message::{DocumentSourceKind, Image, ImageDetail, ImageMediaType, UserContent};
 use std::ops::Deref;
 use std::sync::Arc;
+use image::EncodableLayout;
 
 impl HttpChannel {
     /// ### handle_input_message
@@ -50,7 +51,6 @@ impl HttpChannel {
                         }
                     },
                     Payload::Image(image) => {
-                        /*
                         let extension = match image.extension() {
                             Ok(val) => val,
                             Err(err) => {
@@ -72,7 +72,6 @@ impl HttpChannel {
                             }
                         }
                         img_idx += 1;
-                         */
                         user_contents.push(UserContent::Image(Image {
                             data: DocumentSourceKind::Base64(
                                 base64::engine::general_purpose::STANDARD.encode(&image.content),
@@ -81,7 +80,6 @@ impl HttpChannel {
                             detail: Some(ImageDetail::Auto),
                             additional_params: None,
                         }));
-                        /*
                         user_contents.push(UserContent::Text(
                             format!(
                                 "- **filepath of the {}-th input image**: {}",
@@ -90,7 +88,7 @@ impl HttpChannel {
                             )
                             .into(),
                         ));
-                         */
+                        break
                     }
                     Payload::CameraFrame(CameraFrame { meta, image }) => {
                         img_idx += 1;
