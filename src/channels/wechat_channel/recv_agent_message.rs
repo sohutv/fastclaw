@@ -50,7 +50,14 @@ impl WechatChannel {
                 (formated_message, AgentRespState::Messaging)
             }
             AgentResponse::Final(usage) => (
-                Some(format_message(session_id, usage, buff)),
+                Some(format_message(
+                    session_id,
+                    agent.agent_settings().output_schema.is_some(),
+                    usage,
+                    buff,
+                ).map(|(msg, rt)| (
+                    msg.to_string(),rt
+                ))?),
                 AgentRespState::Final,
             ),
             AgentResponse::Error(error) => (

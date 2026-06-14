@@ -117,7 +117,6 @@ where
         let agent = match self
             .create_agent(
                 agent_request.session_id.clone(),
-                &self.agent_settings.reasoning_effort,
                 addi_system_prompt.as_deref(),
                 channel_message_sender.clone(),
                 tool_filter,

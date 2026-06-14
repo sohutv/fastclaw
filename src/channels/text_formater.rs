@@ -1,11 +1,14 @@
 use crate::agent::HistoryCompactResult;
 use crate::channels::{AgentRespType, SessionId};
+use derive_more::From;
 use itertools::Itertools;
 use rig::completion::{AssistantContent, Usage};
 use rig::message::{
     Message, MimeType, Reasoning, ReasoningContent, ToolCall, ToolFunction, ToolResult,
     ToolResultContent, UserContent,
 };
+use serde::ser::Error;
+use std::fmt::{Display, Formatter};
 use std::mem;
 
 pub(super) fn format_tool_call(
@@ -81,25 +84,55 @@ pub(super) fn format_reasoning(_: &SessionId, buff: &mut Vec<String>) -> (String
     (text, AgentRespType::Reasoning)
 }
 
+#[derive(Debug, Clone, From)]
+pub enum FormatedMessage {
+    Markdown(String),
+    Json(serde_json::Value),
+}
+
+impl Display for FormatedMessage {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        match self {
+            FormatedMessage::Markdown(text) => write!(f, "{}", text),
+            FormatedMessage::Json(json) => {
+                let text = serde_json::to_string_pretty(json)
+                    .map_err(|err| Error::custom(format!("{err}")))?;
+                write!(f, "{}", text)
+            }
+        }
+    }
+}
+
 pub(super) fn format_message(
     session_id: &SessionId,
+    output_schema: bool,
     usage: &Usage,
     buff: &mut Vec<String>,
-) -> (String, AgentRespType) {
+) -> crate::Result<(FormatedMessage, AgentRespType)> {
     let text = mem::replace(buff, vec![]).join("");
-    let text = if session_id.settings().show_token_usage {
-        format!(
-            r#"
+    let formated = if output_schema {
+        let json_value = serde_json::from_str::<serde_json::Value>(&text)?;
+        let json = serde_json::json!({
+            "data": json_value,
+            "token_usage": usage,
+        });
+        FormatedMessage::Json(json)
+    } else {
+        let text = if session_id.settings().show_token_usage {
+            format!(
+                r#"
 {}
 
 *<<Tokens:{}↑{}↓{}>>*
 "#,
-            text, usage.total_tokens, usage.input_tokens, usage.output_tokens
-        )
-    } else {
-        text
+                text, usage.total_tokens, usage.input_tokens, usage.output_tokens
+            )
+        } else {
+            text
+        };
+        FormatedMessage::Markdown(text)
     };
-    (text, AgentRespType::Content)
+    Ok((formated, AgentRespType::Content))
 }
 
 pub(super) fn format_history_compact(

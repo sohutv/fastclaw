@@ -11,7 +11,6 @@ use rig::client::CompletionClient;
 use rig::completion::{AssistantContent, Message, Usage};
 use rig::streaming::StreamingChat;
 use std::sync::Arc;
-use rig::providers::openai::responses_api::ReasoningEffort;
 use tokio::sync::mpsc::Sender;
 use tokio_stream::StreamExt;
 
@@ -51,7 +50,6 @@ where
         let agent = match Arc::clone(&self)
             .create_agent(
                 session_id.clone(),
-                &ReasoningEffort::None,
                 None,
                 channel_message_sender,
                 |_| None,

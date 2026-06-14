@@ -73,7 +73,14 @@ impl DingtalkChannel {
                 (formated_message, AgentRespState::Messaging)
             }
             AgentResponse::Final(usage) => {
-                let (text, rt) = format_message(session_id, usage, buff);
+                let (text, rt) = format_message(
+                    session_id,
+                    agent.agent_settings().output_schema.is_some(),
+                    usage,
+                    buff,
+                ).map(|(msg, rt)| (
+                    msg.to_string(),rt
+                ))?;
                 (
                     Some((MessageContentMarkdown::from(("回复中...", text)).into(), rt)),
                     AgentRespState::Final,

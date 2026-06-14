@@ -15,7 +15,7 @@ pub struct HttpReqMessage {
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize, From)]
-pub struct HttpRespMessage{
+pub struct HttpRespMessage {
     pub output: Payload,
     pub input: Option<HttpReqMessage>,
 }
@@ -48,7 +48,7 @@ impl From<&SessionId> for UserId {
     }
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize)]
+#[derive(Debug, Clone, Deserialize, Serialize, From)]
 pub enum Payload {
     #[serde(rename = "text")]
     Text(Text),
@@ -62,9 +62,9 @@ pub enum Payload {
 #[derive(Debug, Clone, Deserialize, Serialize, Display, From, FromStr, Deref, Into)]
 pub struct Text(String);
 
-impl<T: Into<Text>> From<T> for Payload {
-    fn from(value: T) -> Self {
-        Self::Text(value.into())
+impl From<String> for Payload {
+    fn from(value: String) -> Self {
+        Text::from(value).into()
     }
 }
 

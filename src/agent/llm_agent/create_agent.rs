@@ -7,7 +7,7 @@ use itertools::Itertools;
 use rig::agent::Agent as RigAgent;
 use rig::client::CompletionClient;
 use rig::providers::openai::responses_api::ReasoningEffort;
-use serde_json::json;
+use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use tokio::sync::mpsc::Sender;
 
@@ -19,7 +19,6 @@ where
     pub(super) async fn create_agent<TF>(
         self: &Arc<Self>,
         session_id: SessionId,
-        reasoning_effort: &ReasoningEffort,
         addi_system_prompt: Option<&str>,
         channel_message_sender: Sender<crate::Result<ChannelMessage>>,
         tool_filter: TF,
@@ -76,24 +75,40 @@ where
                     .max_tokens
                     .unwrap_or(self.model_settings.max_tokens),
             )
-            .additional_params({
-                if self.model_settings.reasoning {
-                    json!( {
-                        // 此参数的设置需要配置成json
-                        "reasoning_effort": reasoning_effort,
-                        // "reasoning_effort": "low",
-                        // "reasoning": {
-                        //     "effort": reasoning_effort,
-                        // }
-                    })
-                } else {
-                    json!({})
-                }
-            });
-            if let Some (s) =&self.agent_settings.output_schema{
-                builder = builder.output_schema_raw(s.clone());
-            }
-            let agent = builder.build();
+            .additional_params(AdditionalParams::from( &**self).jsonify()?);
+        if let Some(s) = &self.agent_settings.output_schema {
+            builder = builder.output_schema_raw(s.clone());
+        }
+        let agent = builder.build();
         Ok(agent)
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct AdditionalParams {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    reasoning_effort: Option<ReasoningEffort>,
+}
+
+impl AdditionalParams {
+    fn jsonify(self) -> crate::Result<serde_json::Value> {
+        Ok(serde_json::to_value(self)?)
+    }
+}
+impl<C, P> From<&LlmAgent<C, P>> for AdditionalParams
+where
+    C: CompletionClient + 'static + Send + Sync,
+    P: ModelProvider<Client = C> + 'static + Send + Sync,
+{
+    fn from(agent: &LlmAgent<C, P>) -> Self {
+        Self {
+            reasoning_effort: {
+                if agent.model_settings.reasoning {
+                    Some(agent.agent_settings.reasoning_effort.clone())
+                } else {
+                    None
+                }
+            },
+        }
     }
 }

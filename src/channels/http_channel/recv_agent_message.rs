@@ -3,8 +3,8 @@ use crate::channels::http_channel::type_::HttpReqMessage;
 use crate::channels::http_channel::{Client, HttpChannel, Payload};
 use crate::channels::http_channel::{HttpRespMessage, UserId};
 use crate::channels::text_formater::{
-    extract_message, extract_reasoning, format_history_compact, format_message, format_reasoning,
-    format_tool_call,
+    FormatedMessage, extract_message, extract_reasoning, format_history_compact, format_message,
+    format_reasoning, format_tool_call,
 };
 use crate::channels::{
     AgentRespState, AgentRespType, ChannelContext, ChannelMessage, SessionId,
@@ -34,16 +34,17 @@ impl HttpChannel {
                 buff.clear();
                 (None, AgentRespState::Start)
             }
-            AgentResponse::ToolCall(toolcall) => {
-                (format_tool_call(session_id, toolcall), curr_state)
-            }
+            AgentResponse::ToolCall(toolcall) => (
+                format_tool_call(session_id, toolcall).map(|(text, rt)| (text.into(), rt)),
+                curr_state,
+            ),
             AgentResponse::ReasoningStream(reasoning) => {
                 buff.extend(extract_reasoning(session_id, reasoning));
                 (None, AgentRespState::Reasoning)
             }
             AgentResponse::MessageStream(message) => {
                 let formated_message = if let AgentRespState::Reasoning = curr_state {
-                    Some(format_reasoning(session_id, buff))
+                    Some(format_reasoning(session_id, buff)).map(|(text, rt)| (text.into(), rt))
                 } else {
                     None
                 };
@@ -51,11 +52,19 @@ impl HttpChannel {
                 (formated_message, AgentRespState::Messaging)
             }
             AgentResponse::Final(usage) => (
-                Some(format_message(session_id, usage, buff)),
+                Some(format_message(
+                    session_id,
+                    agent.agent_settings().output_schema.is_some(),
+                    usage,
+                    buff,
+                )?),
                 AgentRespState::Final,
             ),
             AgentResponse::Error(error) => (
-                Some((format!("Agent error: {}", error), AgentRespType::Error)),
+                Some((
+                    format!("Agent error: {}", error).into(),
+                    AgentRespType::Error,
+                )),
                 AgentRespState::Final,
             ),
             AgentResponse::Notify(notify) => (
@@ -63,14 +72,17 @@ impl HttpChannel {
                     match notify {
                         Notify::Text(text) => text.to_string(),
                         Notify::Markdown { content, .. } => format!("{content}",),
-                    },
+                    }
+                    .into(),
                     AgentRespType::Notify,
                 )),
                 curr_state,
             ),
-            AgentResponse::HistoryCompact(result) => {
-                (Some(format_history_compact(session_id, result)), curr_state)
-            }
+            AgentResponse::HistoryCompact(result) => (
+                Some(format_history_compact(session_id, result))
+                    .map(|(text, rt)| (text.into(), rt)),
+                curr_state,
+            ),
         };
         if let Some((text, resp_type)) = formated_message {
             if let Some(robot_message) = create_robot_messages_for_agent(
@@ -92,30 +104,32 @@ impl HttpChannel {
 }
 
 impl HttpChannel {
-    fn create_resp_messages<Content: Into<String>>(
-        agent: &dyn Agent,
+    fn create_resp_messages(
+        _: &dyn Agent,
         session_id: &SessionId,
         _: &ChannelContext,
         input: Option<&HttpReqMessage>,
-        content: Content,
+        content: FormatedMessage,
     ) -> crate::Result<HttpRespMessage> {
-        let content = content.into();
-        let output = if let Some(_) = &agent.agent_settings().output_schema {
-            let json = serde_json::from_str(&content)?;
-            Payload::Json(json)
-        } else {
-            Payload::Text(content.into())
-        };
-        let message = match &session_id {
-            SessionId::Master { .. } | SessionId::Anonymous { .. } => HttpRespMessage {
+        let output = content.into();
+        match &session_id {
+            SessionId::Master { .. } | SessionId::Anonymous { .. } => Ok(HttpRespMessage {
                 output,
                 input: input.map(|it| it.clone()),
-            },
-            SessionId::Group { .. } => {
-                unreachable!("send robot message to group is not supported by http")
-            }
-        };
-        Ok(message)
+            }),
+            SessionId::Group { .. } => Err(anyhow!(
+                "send robot message to group is not supported by http"
+            )),
+        }
+    }
+}
+
+impl From<FormatedMessage> for Payload {
+    fn from(value: FormatedMessage) -> Self {
+        match value {
+            FormatedMessage::Markdown(text) => text.into(),
+            FormatedMessage::Json(json) => json.into(),
+        }
     }
 }
 
