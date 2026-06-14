@@ -62,12 +62,6 @@ channel_http_channel = ["dep:axum"]
 cloud_storage_tool = []
 volcengine = ["ve-tos-rust-sdk"]
 
-lumen_fox = [
-    "model_provider_openai_compatible",
-    "channel_http_channel",
-    "volcengine",
-]
-
 default = [
     "model_provider_openai_compatible",
     "channel_cli_channel",

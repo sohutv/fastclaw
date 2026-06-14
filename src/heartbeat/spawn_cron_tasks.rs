@@ -2,11 +2,12 @@ use crate::agent::AgentRequest;
 use crate::channels::{Anonymous, Channel, SessionId};
 use crate::tools::{TaskSchedule, TaskTools};
 use chrono::Duration;
+use derive_more::Display;
 use log::{error, info, warn};
+use rig::OneOrMany;
+use rig::message::UserContent;
 use std::str::FromStr;
 use std::sync::Arc;
-use rig::message::UserContent;
-use rig::OneOrMany;
 
 impl<C, Client> super::Heartbeat<C, Client>
 where
@@ -28,6 +29,7 @@ where
         let tasks = TaskTools::fetch_ready_tasks(&self.workspace, session_id).await?;
         let now = chrono::Local::now();
         let (down, up) = (now - Duration::hours(1), now);
+        #[derive(Debug, Copy, Clone, Display)]
         enum TaskScheduleResult {
             Exec,
             Next,
@@ -41,11 +43,16 @@ where
                     Ok(schedule) => {
                         let last_exe_at = task.last_exe_at.as_ref().unwrap_or(&task.created_at);
                         if let Some(next) = schedule.after(last_exe_at).next() {
-                            match (down < next, next < up) {
+                            let time_to_exec = match (down < next, next < up) {
                                 (true, true) => TaskScheduleResult::Exec,
-                                (_, false) => TaskScheduleResult::Next,
                                 (false, _) => TaskScheduleResult::Delayed,
-                            }
+                                (_, false) => TaskScheduleResult::Next,
+                            };
+                            info!(
+                                "Checking cron task '{}' (id: {}): last_exe_at: {}, next: {}, next_down: {}, next_up: {}, time_to_exec: {}",
+                                task.name, task.id, last_exe_at, next, down, up, time_to_exec,
+                            );
+                            time_to_exec
                         } else {
                             TaskScheduleResult::Finished
                         }
@@ -63,10 +70,14 @@ where
                         dt.and_local_timezone(now.timezone()).single(),
                         &task.last_exe_at,
                     ) {
+                        info!(
+                            "Checking datetime task '{}' (id: {}): down={}, up={}, dt={}",
+                            task.name, task.id, down, up, dt
+                        );
                         match (down < dt, dt < up) {
                             (true, true) => TaskScheduleResult::Exec,
-                            (_, false) => TaskScheduleResult::Next,
                             (false, _) => TaskScheduleResult::Delayed,
+                            (_, false) => TaskScheduleResult::Next,
                         }
                     } else {
                         TaskScheduleResult::Finished
