@@ -14,6 +14,7 @@ pub struct ForkChildAgentTool {
 #[derive(Debug, Clone, serde::Deserialize)]
 #[allow(unused)]
 pub struct Args {
+    agent_id: Option<AgentId>,
     agent_group: AgentGroup,
     system_prompt: SystemPrompt,
 }
@@ -33,6 +34,10 @@ impl Tool for ForkChildAgentTool {
             parameters: json!({
                 "type": "object",
                 "properties": {
+                    "agent_id":{
+                        "type": "string",
+                        "description": "Agent ID. Required to resume an existing agent; optional for new agents (auto-generated as UUID if omitted)."
+                    },
                     "agent_group":{
                         "type": "string",
                         "enum":  self.ctx.config.agent_groups,
@@ -51,6 +56,7 @@ impl Tool for ForkChildAgentTool {
     async fn call(
         &self,
         Self::Args {
+            agent_id,
             agent_group,
             system_prompt,
         }: Self::Args,
@@ -59,7 +65,7 @@ impl Tool for ForkChildAgentTool {
             "Forking daemon agent, agent_group: {:?}, system_prompt: {:?}",
             system_prompt, system_prompt
         );
-        let agent_id: AgentId = uuid::Uuid::new_v4().into();
+        let agent_id: AgentId = agent_id.unwrap_or_else(|| uuid::Uuid::new_v4().into());
 
         match self
             .ctx

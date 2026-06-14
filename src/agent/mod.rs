@@ -89,22 +89,22 @@ pub trait Agent: SessionCompactSupport + AgentClone + Send + Sync {
 
     async fn fork_child(
         &self,
-        id: &AgentId,
+        agent_id: &AgentId,
         agent_group: &AgentGroup,
         system_prompt: Option<SystemPrompt>,
     ) -> crate::Result<Arc<dyn Agent>> {
-        if self.id().eq(id) || self.agent_group().eq(agent_group) {
+        if self.id().eq(agent_id) || self.agent_group().eq(agent_group) {
             return Err(anyhow!(
-                "fork child failed, required id: {id}, agent_group: {agent_group}"
+                "fork child failed, required id: {agent_id}, agent_group: {agent_group}"
             ));
         }
         let context = self.agent_context();
         let mut children = context.children.write().await;
-        if let Some(agent) = children.get(&id) {
+        if let Some(agent) = children.get(&agent_id) {
             return Ok(Arc::clone(agent));
         }
         let agent = spawn_agent(
-            id,
+            agent_id,
             agent_group,
             context.config,
             &context.history_manager,
