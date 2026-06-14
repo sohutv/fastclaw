@@ -29,16 +29,10 @@ where
         TF: Into<ToolFilter>,
     {
         let model_client = &self.model_provider.completion_client()?;
-        let preamble = if let Some(dst) = &self.ctx.system_prompt {
-            &*dst
-        } else {
-            &*super::super::prompt::PromptSection::Identity
-                .build(&self.ctx)
-                .await?
-        };
+        let preamble= self.ctx.system_prompt.apply().await?;
         let mut builder = model_client
             .agent(&*self.model_name)
-            .preamble(preamble)
+            .preamble(&*preamble)
             .append_preamble(&format!(
                 r#"
 # MetaData

@@ -3,25 +3,25 @@ use anyhow::anyhow;
 use async_trait::async_trait;
 use chrono::Local;
 use derive_more::{Deref, Display, From, FromStr, Into};
-use rig::OneOrMany;
 use rig::completion::Usage;
 use rig::message::{Message, Reasoning, ToolCall, UserContent};
 use rig::providers::openai::responses_api::ReasoningEffort;
+use rig::OneOrMany;
 use rmcp::schemars;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fmt::Display;
 use std::sync::Arc;
-use tokio::sync::RwLock;
 use tokio::sync::mpsc::Sender;
+use tokio::sync::RwLock;
 
 mod llm_agent;
 mod prompt;
 mod session_history;
-use crate::ModelName;
 use crate::config::{Config, Workspace};
 use crate::memory::MemoryManager;
 use crate::model_provider::ModelSettings;
+use crate::ModelName;
 pub use session_history::{HistoryManager, JsonlHistoryManager};
 
 use crate::tools::mcp_tool::McpRegistry;
@@ -91,7 +91,8 @@ pub trait Agent: SessionCompactSupport + AgentClone + Send + Sync {
         &self,
         agent_id: &AgentId,
         agent_group: &AgentGroup,
-        system_prompt: Option<SystemPrompt>,
+        addi_system_prompt: Option<SystemPrompt>,
+        desc: Option<String>,
     ) -> crate::Result<Arc<dyn Agent>> {
         if self.id().eq(agent_id) || self.agent_group().eq(agent_group) {
             return Err(anyhow!(
@@ -103,23 +104,31 @@ pub trait Agent: SessionCompactSupport + AgentClone + Send + Sync {
         if let Some(agent) = children.get(&agent_id) {
             return Ok(Arc::clone(agent));
         }
-        let agent = spawn_agent(
-            agent_id,
-            agent_group,
+        let agent = if let Ok(agent) = reload_agent(
             context.config,
             &context.history_manager,
             &context.memory_manager,
             context.workspace,
             context.mcp_registry,
-            |predefined| async move {
-                match (predefined, system_prompt) {
-                    (Some(l), Some(r)) => Ok(Some(l + r)),
-                    (sp @ Some(_), _) | (_, sp @ Some(_)) => Ok(sp),
-                    _ => Ok(None),
-                }
-            },
+            agent_id,
         )
-        .await?;
+        .await
+        {
+            agent
+        } else {
+            spawn_agent(
+                context.config,
+                &context.history_manager,
+                &context.memory_manager,
+                context.workspace,
+                context.mcp_registry,
+                agent_id,
+                agent_group,
+                addi_system_prompt,
+                desc,
+            )
+            .await?
+        };
         children.insert(agent.id().clone(), Arc::clone(&agent));
         Ok(agent)
     }
@@ -139,6 +148,8 @@ pub trait Agent: SessionCompactSupport + AgentClone + Send + Sync {
 
     #[allow(unused)]
     fn agent_group(&self) -> &AgentGroup;
+
+    fn description(&self) -> &str;
 }
 
 #[async_trait]
@@ -158,8 +169,13 @@ pub struct AgentContext {
     pub history_manager: Arc<dyn HistoryManager>,
     pub memory_manager: Arc<MemoryManager>,
     pub children: Arc<RwLock<HashMap<AgentId, Arc<dyn Agent>>>>,
-    pub system_prompt: Option<SystemPrompt>,
+    pub system_prompt: Arc<dyn SystemPromptProvider>,
     pub mcp_registry: &'static McpRegistry,
+}
+
+#[async_trait]
+pub trait SystemPromptProvider: Send + Sync {
+    async fn apply(&self) -> crate::Result<SystemPrompt>;
 }
 
 #[derive(
@@ -168,15 +184,45 @@ pub struct AgentContext {
 #[serde(default)]
 pub struct AgentId(String);
 
-impl Default for AgentId {
-    fn default() -> Self {
-        Self("main".to_string())
+#[derive(
+    Debug, Clone, Deref, Eq, PartialEq, Ord, PartialOrd, Display, Serialize, Deserialize, Hash,
+)]
+pub struct AgentGroup(String);
+
+const AGENT_MAIN: &str = "main";
+impl AgentId {
+    pub fn main() -> (Self, AgentGroup) {
+        (AGENT_MAIN.into(), AgentGroup::main())
     }
 }
 
 impl<S: Into<String>> From<S> for AgentId {
     fn from(value: S) -> Self {
         Self(value.into())
+    }
+}
+
+impl Default for AgentId {
+    fn default() -> Self {
+        Self::main().0
+    }
+}
+
+impl AgentGroup {
+    pub fn main() -> Self {
+        AGENT_MAIN.into()
+    }
+}
+
+impl<S: Into<String>> From<S> for AgentGroup {
+    fn from(value: S) -> Self {
+        Self(value.into())
+    }
+}
+
+impl Default for AgentGroup {
+    fn default() -> Self {
+        Self::main()
     }
 }
 
@@ -192,9 +238,10 @@ pub trait LlmAgentSupplier {
         history_manager: Arc<dyn HistoryManager>,
         memory_manager: Arc<MemoryManager>,
         workspace: &'static Workspace,
-        system_prompt: Option<SystemPrompt>,
+        system_prompt: Arc<dyn SystemPromptProvider>,
         mcp_registry: &'static McpRegistry,
         agent_settings: AgentSettings,
+        description: Option<String>,
     ) -> crate::Result<Self::A>;
 }
 
@@ -302,29 +349,6 @@ impl Display for HistoryCompactVal {
             "total usage {} -> {}, compression ratio: {:.2}%",
             self.before.total_tokens, self.current.total_tokens, self.compact_ratio
         )
-    }
-}
-
-#[derive(
-    Debug, Clone, Deref, Eq, PartialEq, Ord, PartialOrd, Display, Serialize, Deserialize, Hash,
-)]
-#[serde(default)]
-pub struct AgentGroup(String);
-impl From<AgentId> for AgentGroup {
-    fn from(value: AgentId) -> Self {
-        Self(value.0)
-    }
-}
-
-impl Default for AgentGroup {
-    fn default() -> Self {
-        Self("main".to_string())
-    }
-}
-
-impl<S: Into<String>> From<S> for AgentGroup {
-    fn from(value: S) -> Self {
-        Self(value.into())
     }
 }
 

@@ -14,9 +14,9 @@ pub struct ForkChildAgentTool {
 #[derive(Debug, Clone, serde::Deserialize)]
 #[allow(unused)]
 pub struct Args {
-    agent_id: Option<AgentId>,
     agent_group: AgentGroup,
     system_prompt: SystemPrompt,
+    description: String,
 }
 
 #[allow(async_fn_in_trait)]
@@ -34,10 +34,6 @@ impl Tool for ForkChildAgentTool {
             parameters: json!({
                 "type": "object",
                 "properties": {
-                    "agent_id":{
-                        "type": "string",
-                        "description": "Agent ID. Required to resume an existing agent; optional for new agents (auto-generated as UUID if omitted)."
-                    },
                     "agent_group":{
                         "type": "string",
                         "enum":  self.ctx.config.agent_groups,
@@ -47,8 +43,12 @@ impl Tool for ForkChildAgentTool {
                         "type": "string",
                         "description": "The system prompt that defines the behavior, personality, and instructions for the newly forked daemon agent. This will guide how the agent responds and what tasks it can perform",
                     },
+                    "description":{
+                         "type": "string",
+                        "description": "A human-readable description of the purpose or role of this daemon agent. This helps identify what the agent is responsible for when listing or managing multiple agents"
+                    }
                 },
-                "required": ["system_prompt", "agent_group"],
+                "required": ["system_prompt", "agent_group","description"],
             }),
         }
     }
@@ -56,21 +56,23 @@ impl Tool for ForkChildAgentTool {
     async fn call(
         &self,
         Self::Args {
-            agent_id,
             agent_group,
             system_prompt,
+            description,
         }: Self::Args,
     ) -> Result<Self::Output, Self::Error> {
-        info!(
-            "Forking daemon agent, agent_group: {:?}, system_prompt: {:?}",
-            system_prompt, system_prompt
-        );
-        let agent_id: AgentId = agent_id.unwrap_or_else(|| uuid::Uuid::new_v4().into());
+        info!("Forking daemon agent, agent_group: {agent_group}, system_prompt: {system_prompt}",);
+        let agent_id: AgentId = uuid::Uuid::new_v4().into();
 
         match self
             .ctx
             .parent_agent
-            .fork_child(&agent_id, &agent_group, Some(system_prompt))
+            .fork_child(
+                &agent_id,
+                &agent_group,
+                Some(system_prompt),
+                Some(description),
+            )
             .await
         {
             Ok(_) => Ok(ToolCallRsult {

@@ -1,13 +1,12 @@
 use crate::ModelName;
 use crate::agent::{
     Agent, AgentClone, AgentContext, AgentGroup, AgentId, AgentRequestPkg, AgentSettings,
-    HistoryManager, LlmAgentSupplier, Workspace,
+    HistoryManager, LlmAgentSupplier, SystemPromptProvider, Workspace,
 };
 use crate::config::Config;
 use crate::memory::MemoryManager;
 use crate::model_provider::{ModelProvider, ModelSettings};
 use crate::tools::mcp_tool::McpRegistry;
-use crate::type_::SystemPrompt;
 use anyhow::anyhow;
 use async_trait::async_trait;
 use rig::client::CompletionClient;
@@ -34,6 +33,8 @@ where
     pub model_settings: ModelSettings,
     agent_settings: AgentSettings,
     channel_sender: Arc<RwLock<Option<Sender<AgentRequestPkg>>>>,
+    /// Agent description
+    description: String,
 }
 
 #[async_trait]
@@ -53,9 +54,10 @@ where
         history_manager: Arc<dyn HistoryManager>,
         memory_manager: Arc<MemoryManager>,
         workspace: &'static Workspace,
-        system_prompt: Option<SystemPrompt>,
+        system_prompt: Arc<dyn SystemPromptProvider>,
         mcp_registry: &'static McpRegistry,
         agent_settings: AgentSettings,
+        description: Option<String>,
     ) -> crate::Result<Self::A> {
         Ok(LlmAgent::new(
             agent_id,
@@ -69,6 +71,7 @@ where
             system_prompt,
             mcp_registry,
             agent_settings,
+            description.unwrap_or_default(),
         )
         .await?)
     }
@@ -88,9 +91,10 @@ where
         history_manager: Arc<dyn HistoryManager>,
         memory_manager: Arc<MemoryManager>,
         workspace: &'static Workspace,
-        system_prompt: Option<SystemPrompt>,
+        system_prompt: Arc<dyn SystemPromptProvider>,
         mcp_registry: &'static McpRegistry,
         agent_settings: AgentSettings,
+        description: String,
     ) -> crate::Result<Self> {
         let ctx = Arc::new(AgentContext {
             config,
@@ -113,6 +117,7 @@ where
             group: group.clone(),
             ctx,
             channel_sender: Default::default(),
+            description,
         })
     }
 }
@@ -144,6 +149,7 @@ where
             model_provider: self.model_provider.clone(),
             ctx: self.ctx.clone(),
             channel_sender: Default::default(),
+            description: self.description.clone(),
         };
         Arc::new(agent).start().await
     }
@@ -201,5 +207,9 @@ where
 
     fn agent_group(&self) -> &AgentGroup {
         &self.group
+    }
+
+    fn description(&self) -> &str {
+        &self.description
     }
 }

@@ -12,7 +12,6 @@ use clap::Args;
 use derive_more::FromStr;
 use itertools::Itertools;
 use log::info;
-use std::ops::Deref;
 use std::path::PathBuf;
 use std::sync::Arc;
 
@@ -70,7 +69,7 @@ impl CmdRunner for Start {
             if *std_log {
                 log_config = log_config.update_logger(Logger::Stdout);
             }
-            if *verbose  {
+            if *verbose {
                 log_config = log_config.update_level(Level::Debug);
             }
             log_config.init(&workdir)?;
@@ -82,16 +81,17 @@ impl CmdRunner for Start {
             Arc::new(JsonlHistoryManager::new(config, workspace).await?);
         let memory_manager = Arc::new(MemoryManager::new(config, workspace).await?);
         let (main_agent, heartbeat_agent) = {
-            let agent_id = AgentId::from("main");
+            let (agent_id, agent_group) = AgentId::main();
             let main_agent = agent::spawn_agent(
-                &agent_id,
-                &agent_id.deref().into(),
                 config,
                 &history_manager,
                 &memory_manager,
                 workspace,
                 mcp_registry,
-                |sp| async { Ok(sp) },
+                &agent_id,
+                &agent_group,
+                None,
+                None,
             )
             .await?;
             let heartbeat_agent = main_agent.clone_with("heartbeat".into(), None).await?;

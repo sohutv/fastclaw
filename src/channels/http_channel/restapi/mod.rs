@@ -20,7 +20,7 @@ pub async fn get_or_create(
         return Ok(Arc::clone(&main));
     }
     let agent = main
-        .fork_child(agent_id, agent_group, None)
+        .fork_child(agent_id, agent_group, None, None)
         .await
         .map_err(|err| {
             error!("fork {agent_group} child agent failed, err: {err}");

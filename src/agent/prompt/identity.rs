@@ -1,4 +1,4 @@
-use crate::agent::AgentContext;
+use crate::config::Workspace;
 use crate::type_::SystemPrompt;
 use itertools::Itertools;
 use log::error;
@@ -31,10 +31,7 @@ const IDENTITY_MD_FILES: &[(&str, &str)] = &[
 ];
 
 impl IdentityPrompt {
-    pub async fn build(
-        &self,
-        AgentContext { workspace, .. }: &AgentContext,
-    ) -> crate::Result<SystemPrompt> {
+    pub(super) async fn build(&self, workspace: &Workspace) -> crate::Result<SystemPrompt> {
         let prompt = self.build_actual(&workspace.path).await?;
         Ok(prompt.into())
     }

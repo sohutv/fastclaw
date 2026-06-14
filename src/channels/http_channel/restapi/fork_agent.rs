@@ -46,6 +46,7 @@ pub async fn handle(
             &(uuid::Uuid::new_v4().into()),
             &agent_group,
             Some(system_prompt),
+            None,
         )
         .await
         .map_err(|err| {

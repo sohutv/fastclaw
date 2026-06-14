@@ -6,6 +6,10 @@ pub mod fork_child_agent;
 
 pub mod drop_child_agent;
 
+pub mod list_child_agents;
+
+pub mod get_child_session_history;
+
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 #[serde(default)]
 pub struct DaemonAgentToolsConfig {
@@ -26,6 +30,9 @@ impl DaemonAgentTools {
                 ctx: ctx.clone(),
             }));
             arr.push(Box::new(drop_child_agent::DropChildAgentTool {
+                ctx: ctx.clone(),
+            }));
+            arr.push(Box::new(list_child_agents::ListChildAgentsTool {
                 ctx: ctx.clone(),
             }));
         }
