@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::mpsc::Receiver;
-use wechat_sdk::client::message::{MessageItems, WechatMessage};
+use wechat_sdk::client::message::WechatMessage;
 use wechat_sdk::client::{WechatClient, WechatConfig as WechatInnerConfig};
 
 mod config;
@@ -159,36 +159,5 @@ impl Channel for WechatChannel {
 
     fn allow_session_ids(&self) -> crate::Result<Vec<&SessionId>> {
         Ok(vec![&self.wechat_config.session_id])
-    }
-}
-
-impl WechatChannel {
-    fn create_robot_messages<Content: Into<MessageItems>>(
-        _: &dyn Agent,
-        session_id: &SessionId,
-        _: &ChannelContext,
-        _: Option<&WechatMessage>,
-        content: Content,
-    ) -> crate::Result<WechatRobotMessage> {
-        let message = match &session_id {
-            SessionId::Master { .. } | SessionId::Anonymous { .. } => WechatRobotMessage {
-                content: content.into(),
-            },
-            SessionId::Group { .. } => {
-                unreachable!("send robot message to group is not supported by wechat")
-            }
-        };
-        Ok(message)
-    }
-}
-
-struct WechatRobotMessage {
-    content: MessageItems,
-}
-
-impl WechatRobotMessage {
-    async fn send(self, wechat: &WechatClient) -> crate::Result<()> {
-        let _ = wechat.send_message(self.content).await?;
-        Ok(())
     }
 }

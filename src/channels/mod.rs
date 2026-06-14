@@ -135,6 +135,7 @@ pub struct ChannelMessage {
 pub enum AgentRespType {
     Start,
     ToolCall,
+    ToolResult,
     Reasoning,
     Content,
     Notify,
@@ -189,7 +190,7 @@ where
                 return Ok(None);
             };
         }
-        AgentRespType::ToolCall => {
+        AgentRespType::ToolCall | AgentRespType::ToolResult => {
             let true = show_toolcall else {
                 return Ok(None);
             };
@@ -229,3 +230,5 @@ where
     let msg = outbound_msg_creator(agent, &session_id, ctx, inbound_msg, content)?;
     Ok(Some(msg))
 }
+
+mod text_formater;

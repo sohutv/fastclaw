@@ -136,6 +136,7 @@ impl Channel for DingtalkChannel {
     }
 }
 
+
 impl DingtalkChannel {
     fn create_robot_messages<Content: Into<MessageContent>>(
         _: &dyn Agent,
@@ -159,12 +160,12 @@ impl DingtalkChannel {
                 user_ids: vec![DingTalkUserId::from(session_id.deref())],
                 content: content.clone(),
             }
-            .into(),
+                .into(),
             SessionId::Group { val: group, .. } => RobotGroupMessage {
                 group_id: DingTalkGroupConversationId::from(&group.id),
                 content: content.clone(),
             }
-            .into(),
+                .into(),
         };
         Ok(message)
     }

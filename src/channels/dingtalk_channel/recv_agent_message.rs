@@ -1,13 +1,17 @@
 use super::super::{AgentRespState, AgentRespType};
-use crate::agent::{Agent, AgentResponse, HistoryCompactResult, Notify};
+use crate::agent::{Agent, AgentResponse, Notify};
 use crate::channels::dingtalk_channel::DingtalkChannel;
+use crate::channels::text_formater::{
+    extract_message, extract_reasoning, format_history_compact, format_message, format_reasoning,
+    format_tool_call,
+};
 use crate::channels::{ChannelContext, ChannelMessage, SessionId};
 use anyhow::anyhow;
 use dingtalk_stream::DingTalkStream;
 use dingtalk_stream::frames::down_message::callback_message::MessageData;
-use dingtalk_stream::frames::up_message::{MessageContentMarkdown, MessageContentText};
-use rig::completion::{AssistantContent, Message};
-use rig::message::{ReasoningContent, ToolCall, ToolFunction};
+use dingtalk_stream::frames::up_message::{
+    MessageContent, MessageContentMarkdown, MessageContentText,
+};
 use std::ops::Deref;
 
 impl DingtalkChannel {
@@ -24,293 +28,103 @@ impl DingtalkChannel {
         curr_state: AgentRespState,
         buff: &mut Vec<String>,
     ) -> crate::Result<AgentRespState> {
-        match message {
+        let (formated_message, next_state): (Option<(MessageContent, _)>, _) = match message {
             AgentResponse::Start => {
-                if let AgentRespState::Wait = curr_state {
-                    buff.clear();
-                    if let Ok(Some(robot_message)) = create_robot_messages_for_agent(
-                        agent,
-                        session_id,
-                        &self.ctx,
-                        AgentRespType::Start,
-                        inbound_message,
-                        MessageContentText::from("正在思考..."),
-                        DingtalkChannel::create_robot_messages,
-                    )
-                    .await
-                    {
-                        let _ = dingtalk.send_message(robot_message).await;
-                    }
-                    Ok(AgentRespState::Start)
-                } else {
-                    Err(anyhow!("AgentRespState must be Init when starting"))
-                }
-            }
-            AgentResponse::ToolCall(ToolCall {
-                function: ToolFunction { name, arguments },
-                ..
-            }) => {
-                if let Ok(Some(robot_message)) = create_robot_messages_for_agent(
-                    agent,
-                    session_id,
-                    &self.ctx,
-                    AgentRespType::ToolCall,
-                    inbound_message,
-                    MessageContentMarkdown::from((
-                        format!("工具调用: {name}..."),
-                        format!(
-                            r#"
-### 工具调用: {name}...
-```
-{}
-```json
-                                            "#,
-                            serde_json::to_string_pretty(arguments).unwrap_or_else(|err| format!(
-                                "Error serializing arguments: {}",
-                                err
-                            ))
-                        ),
-                    )),
-                    DingtalkChannel::create_robot_messages,
-                )
-                .await
-                {
-                    let _ = dingtalk.send_message(robot_message).await;
-                }
-                Ok(curr_state)
-            }
-            AgentResponse::ReasoningStream(reasoning) => {
-                match curr_state {
-                    AgentRespState::Start => if session_id.settings().show_reasoning {},
-                    _ => {}
-                }
-                for content in reasoning.content.iter() {
-                    if let ReasoningContent::Text { text, .. } = content {
-                        if !text.is_empty() {
-                            buff.push(text.clone());
-                        }
-                    }
-                }
-                Ok(AgentRespState::Reasoning)
-            }
-            AgentResponse::MessageStream(message) => {
-                match curr_state {
-                    AgentRespState::Start => {}
-                    AgentRespState::Reasoning => {
-                        if session_id.settings().show_reasoning {
-                            let content = {
-                                let content = buff.join("");
-                                
-                                MessageContentMarkdown::from((
-                                    "正在思考...",
-                                    format!(
-                                        r#"
-### 我的想法..
-{content}
-                                    "#
-                                    ),
-                                ))
-                            };
-                            if let Ok(Some(robot_message)) = create_robot_messages_for_agent(
-                                agent,
-                                session_id,
-                                &self.ctx,
-                                AgentRespType::Reasoning,
-                                inbound_message,
-                                content,
-                                DingtalkChannel::create_robot_messages,
-                            )
-                            .await
-                            {
-                                let _ = dingtalk.send_message(robot_message).await;
-                            }
-                        }
-                        buff.clear();
-                    }
-                    _ => {}
-                }
-                match message {
-                    Message::Assistant { content, .. } => {
-                        for content in content.iter() {
-                            match content {
-                                AssistantContent::Text(text) => {
-                                    let text_str = text.to_string();
-                                    if !text_str.is_empty() {
-                                        buff.push(text_str);
-                                    }
-                                }
-                                _ => {}
-                            }
-                        }
-                    }
-                    _ => {}
-                }
-                Ok(AgentRespState::Messaging)
-            }
-            AgentResponse::Final(usage) => {
-                let content = {
-                    let text = buff.join("");
-                    let token_usage = format!(
-                        "*<<Tokens:{}↑{}↓{}>>*",
-                        usage.total_tokens, usage.input_tokens, usage.output_tokens
-                    );
-                    
-                    if session_id.settings().show_token_usage {
-                        format!(
-                            r#"
-{text}
-
-{token_usage}
-"#,
-                        )
-                    } else {
-                        format!(
-                            r#"
-{text}
-"#
-                        )
-                    }
+                let AgentRespState::Wait = curr_state else {
+                    return Err(anyhow!("AgentRespState must be Init when starting"));
                 };
                 buff.clear();
-                if let Ok(Some(robot_message)) = create_robot_messages_for_agent(
-                    agent,
-                    session_id,
-                    &self.ctx,
-                    AgentRespType::Content,
-                    inbound_message,
-                    content,
-                    DingtalkChannel::create_robot_messages,
+                (
+                    Some((
+                        MessageContentText::from("正在思考...").into(),
+                        AgentRespType::Start,
+                    )),
+                    AgentRespState::Start,
                 )
-                .await
-                {
-                    let _ = dingtalk.send_message(robot_message).await;
-                }
-                Ok(AgentRespState::Final)
             }
-            AgentResponse::Error(error) => {
-                if let Ok(Some(robot_message)) = create_robot_messages_for_agent(
-                    agent,
-                    session_id,
-                    &self.ctx,
+            AgentResponse::ToolCall(toolcall) => (
+                format_tool_call(session_id, toolcall).map(|(text, rt)| {
+                    (
+                        MessageContentMarkdown::from((
+                            format!("工具调用: {}...", toolcall.function.name),
+                            text,
+                        ))
+                        .into(),
+                        rt,
+                    )
+                }),
+                curr_state,
+            ),
+            AgentResponse::ReasoningStream(reasoning) => {
+                buff.extend(extract_reasoning(session_id, reasoning));
+                (None, AgentRespState::Reasoning)
+            }
+            AgentResponse::MessageStream(message) => {
+                let formated_message = if let AgentRespState::Reasoning = curr_state {
+                    let (text, rt) = format_reasoning(session_id, buff);
+                    Some((
+                        MessageContentMarkdown::from(("正在思考...", text)).into(),
+                        rt,
+                    ))
+                } else {
+                    None
+                };
+                buff.extend(extract_message(session_id, message));
+                (formated_message, AgentRespState::Messaging)
+            }
+            AgentResponse::Final(usage) => {
+                let (text, rt) = format_message(session_id, usage, buff);
+                (
+                    Some((MessageContentMarkdown::from(("回复中...", text)).into(), rt)),
+                    AgentRespState::Final,
+                )
+            }
+            AgentResponse::Error(error) => (
+                Some((
+                    format!("Agent error: {}", error).into(),
                     AgentRespType::Error,
-                    inbound_message,
-                    MessageContentText::from(format!("Agent error: {}", error)),
-                    DingtalkChannel::create_robot_messages,
-                )
-                .await
-                {
-                    let _ = dingtalk.send_message(robot_message).await;
-                }
-                Ok(AgentRespState::Final)
-            }
-            AgentResponse::Notify(notify) => {
-                match notify {
-                    Notify::Text(text) => {
-                        if let Ok(Some(robot_message)) = create_robot_messages_for_agent(
-                            agent,
-                            session_id,
-                            &self.ctx,
-                            AgentRespType::Notify,
-                            inbound_message,
-                            MessageContentText::from(text),
-                            DingtalkChannel::create_robot_messages,
-                        )
-                        .await
-                        {
-                            let _ = dingtalk.send_message(robot_message).await;
+                )),
+                AgentRespState::Final,
+            ),
+            AgentResponse::Notify(notify) => (
+                Some((
+                    match notify {
+                        Notify::Text(text) => text.into(),
+                        Notify::Markdown { title, content, .. } => {
+                            MessageContentMarkdown::from((title, &format!("{content}",))).into()
                         }
-                    }
-                    Notify::Markdown { title, content } => {
-                        if let Ok(Some(robot_message)) = create_robot_messages_for_agent(
-                            agent,
-                            session_id,
-                            &self.ctx,
-                            AgentRespType::Notify,
-                            inbound_message,
-                            MessageContentMarkdown::from((title, &format!("{content}",))),
-                            DingtalkChannel::create_robot_messages,
-                        )
-                        .await
-                        {
-                            let _ = dingtalk.send_message(robot_message).await;
-                        }
-                    }
-                }
-                Ok(curr_state)
-            }
+                    },
+                    AgentRespType::Notify,
+                )),
+                curr_state,
+            ),
             AgentResponse::HistoryCompact(result) => {
-                match result {
-                    HistoryCompactResult::Ok(val) => {
-                        if let Ok(Some(robot_message)) = create_robot_messages_for_agent(
-                            agent,
-                            session_id,
-                            &self.ctx,
-                            AgentRespType::HistoryCompactOk,
-                            inbound_message,
-                            MessageContentMarkdown::from((
-                                "压缩上下文完成",
-                                &format!(
-                                    r#"
-### 压缩上下文完成
-- 压缩前 **{}** Tokens
-- 压缩后 **{}** Tokens
-- 压缩率 **{:.2}%**
-                    "#,
-                                    val.before().total_tokens,
-                                    val.current().total_tokens,
-                                    val.compact_ratio(),
-                                ),
-                            )),
-                            DingtalkChannel::create_robot_messages,
-                        )
-                        .await
-                        {
-                            let _ = dingtalk.send_message(robot_message).await;
-                        }
-                    }
-                    HistoryCompactResult::Err(err_msg) => {
-                        if let Ok(Some(robot_message)) = create_robot_messages_for_agent(
-                            agent,
-                            session_id,
-                            &self.ctx,
-                            AgentRespType::HistoryCompactErr,
-                            inbound_message,
-                            MessageContentText::from(err_msg),
-                            DingtalkChannel::create_robot_messages,
-                        )
-                        .await
-                        {
-                            let _ = dingtalk.send_message(robot_message).await;
-                        }
-                    }
-                    HistoryCompactResult::Ignore(msg) => {
-                        if let Ok(Some(robot_message)) = create_robot_messages_for_agent(
-                            agent,
-                            session_id,
-                            &self.ctx,
-                            AgentRespType::HistoryCompactIgnore,
-                            inbound_message,
-                            MessageContentMarkdown::from((
-                                "压缩请求被忽略",
-                                format!(
-                                    r#"
-### 压缩请求被忽略
-{msg}
-                            "#
-                                ),
-                            )),
-                            DingtalkChannel::create_robot_messages,
-                        )
-                        .await
-                        {
-                            let _ = dingtalk.send_message(robot_message).await;
-                        }
-                    }
-                }
-
-                Ok(curr_state)
+                let (text, rt) = format_history_compact(session_id, result);
+                (
+                    Some((
+                        MessageContentMarkdown::from(("压缩上下文", text)).into(),
+                        rt,
+                    )),
+                    curr_state,
+                )
+            }
+        };
+        if let Some((message_content, resp_type)) = formated_message {
+            if let Ok(Some(robot_message)) = create_robot_messages_for_agent(
+                agent,
+                session_id,
+                &self.ctx,
+                resp_type,
+                inbound_message,
+                message_content,
+                DingtalkChannel::create_robot_messages,
+            )
+            .await
+            {
+                let _ = dingtalk.send_message(robot_message).await;
             }
         }
+        Ok(next_state)
     }
 }
 
