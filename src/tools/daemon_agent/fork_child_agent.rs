@@ -6,7 +6,6 @@ use log::{info, warn};
 use rig::completion::ToolDefinition;
 use rig::tool::Tool;
 use serde_json::json;
-use tokio::io::AsyncWriteExt;
 
 #[derive(Clone)]
 pub struct ForkChildAgentTool {

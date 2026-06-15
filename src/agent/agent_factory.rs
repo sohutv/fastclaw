@@ -93,7 +93,7 @@ pub async fn spawn_agent(
     .await
 }
 
-const SPAWN_MAIN_AGENT_LOCK: AtomicBool = AtomicBool::new(false);
+static SPAWN_MAIN_AGENT_LOCK: AtomicBool = AtomicBool::new(false);
 
 async fn spawn_agent_actual(
     config: &'static Config,
