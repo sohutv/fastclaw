@@ -136,36 +136,39 @@ where
             message,
             ..
         } = agent_request;
-        let history: Vec<Message> = if with_history
-            && let Some(chat_history_limit @ 1..) = self.agent_settings.chat_history_limit
-        {
-            let (history, _) = self
-                .ctx
-                .history_manager
-                .load(session_id, &self.id)
-                .await
-                .unwrap_or_default();
-            let history = history.into_iter().map(|it| it.into()).collect_vec();
-            if chat_history_limit < history.len() {
-                let mut array = Vec::with_capacity(history.len());
-                let mut cnt = 0;
-                for message in history.into_iter().rev() {
-                    if let Message::User { .. } = &message {
-                        array.push(message);
-                        cnt += 1;
-                    } else {
-                        array.push(message);
+
+        let history: Vec<Message> = match (
+            with_history,
+            self.agent_settings.chat_history_limit.unwrap_or(usize::MAX),
+        ) {
+            (true, limit @ 1..) => {
+                let (history, _) = self
+                    .ctx
+                    .history_manager
+                    .load(session_id, &self.id)
+                    .await
+                    .unwrap_or_default();
+                let history = history.into_iter().map(|it| it.into()).collect_vec();
+                if limit < history.len() {
+                    let mut array = Vec::with_capacity(history.len());
+                    let mut cnt = 0;
+                    for message in history.into_iter().rev() {
+                        if let Message::User { .. } = &message {
+                            array.push(message);
+                            cnt += 1;
+                        } else {
+                            array.push(message);
+                        }
+                        if cnt >= limit {
+                            break;
+                        }
                     }
-                    if cnt >= chat_history_limit {
-                        break;
-                    }
+                    array
+                } else {
+                    history
                 }
-                array
-            } else {
-                history
             }
-        } else {
-            vec![]
+            _ => vec![],
         };
         #[inline(always)]
         fn merge_user_message(messages: Vec<OneOrMany<UserContent>>) -> Message {
