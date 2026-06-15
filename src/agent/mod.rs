@@ -3,25 +3,26 @@ use anyhow::anyhow;
 use async_trait::async_trait;
 use chrono::Local;
 use derive_more::{Deref, Display, From, FromStr, Into};
+use rig::OneOrMany;
 use rig::completion::Usage;
 use rig::message::{Message, Reasoning, ToolCall, UserContent};
 use rig::providers::openai::responses_api::ReasoningEffort;
-use rig::OneOrMany;
 use rmcp::schemars;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fmt::Display;
+use std::ops::Deref;
 use std::sync::Arc;
-use tokio::sync::mpsc::Sender;
 use tokio::sync::RwLock;
+use tokio::sync::mpsc::Sender;
 
 mod llm_agent;
 mod prompt;
 mod session_history;
+use crate::ModelName;
 use crate::config::{Config, Workspace};
 use crate::memory::MemoryManager;
 use crate::model_provider::ModelSettings;
-use crate::ModelName;
 pub use session_history::{HistoryManager, JsonlHistoryManager};
 
 use crate::tools::mcp_tool::McpRegistry;
@@ -96,7 +97,7 @@ pub trait Agent: SessionCompactSupport + AgentClone + Send + Sync {
     ) -> crate::Result<Arc<dyn Agent>> {
         if self.id().eq(agent_id) || self.agent_group().eq(agent_group) {
             return Err(anyhow!(
-                "fork child failed, required id: {agent_id}, agent_group: {agent_group}"
+                "fork child with agent_group: {agent_group} is forbidden"
             ));
         }
         let context = self.agent_context();
@@ -194,6 +195,10 @@ impl AgentId {
     pub fn main() -> (Self, AgentGroup) {
         (AGENT_MAIN.into(), AgentGroup::main())
     }
+
+    pub fn is_main(&self) -> bool {
+        self.deref().eq(AGENT_MAIN)
+    }
 }
 
 impl<S: Into<String>> From<S> for AgentId {
@@ -211,6 +216,14 @@ impl Default for AgentId {
 impl AgentGroup {
     pub fn main() -> Self {
         AGENT_MAIN.into()
+    }
+
+    pub fn is_main(&self) -> bool {
+        self.deref().eq(AGENT_MAIN)
+    }
+
+    pub fn ignore_store(&self) -> bool {
+        self.is_main()
     }
 }
 
@@ -362,7 +375,6 @@ pub struct AgentSettings {
     pub compact_threshold: f32,
     pub task_queue_size: TaskQueueSize,
     pub task_backpressure: TaskBackpressure,
-    pub task_agg_window: TaskAggWindow,
     pub chat_history_limit: Option<usize>,
     pub history_compact_enable: bool,
     pub tool_filter: Option<ToolNameFilter>,
@@ -385,18 +397,6 @@ pub enum TaskBackpressure {
     Latest,
 }
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
-pub enum TaskAggWindow {
-    SlidingWindow(usize),
-    TumblingWindow(usize),
-}
-
-impl Default for TaskAggWindow {
-    fn default() -> Self {
-        Self::TumblingWindow(1)
-    }
-}
-
 impl Default for AgentSettings {
     fn default() -> Self {
         Self {
@@ -407,7 +407,6 @@ impl Default for AgentSettings {
             reasoning_effort: Default::default(),
             task_queue_size: Default::default(),
             task_backpressure: Default::default(),
-            task_agg_window: Default::default(),
             chat_history_limit: None,
             history_compact_enable: true,
             tool_filter: None,

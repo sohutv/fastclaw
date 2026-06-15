@@ -42,18 +42,33 @@ impl Tool for DropChildAgentTool {
 
     async fn call(&self, args: Self::Args) -> Result<Self::Output, Self::Error> {
         info!("Dropping agent with ID: {:?}", args.agent_id);
+        let agent_lock_path = self
+            .ctx
+            .agent_context()
+            .workspace
+            .agent_group_agent_lock_path(&args.agent_id)
+            .await;
         match self.ctx.parent_agent.drop_child(&args.agent_id).await {
-            Ok(_) => Ok(ToolCallRsult {
-                success: true,
-                output: format!("Successfully dropped agent with ID: {}", args.agent_id),
-                error: None,
-            }),
-            Err(e) => Ok(ToolCallRsult {
-                success: false,
-                output: format!("Failed to drop agent with ID: {}", args.agent_id),
-                error: Some(format!("Error: {}", e)),
-            }),
+            Ok(_) => {
+                if let Ok(path) = agent_lock_path {
+                    let _ = tokio::fs::remove_file(&path).await;
+                }
+                Ok(ToolCallRsult {
+                    success: true,
+                    output: format!("Successfully dropped agent with ID: {}", args.agent_id),
+                    error: None,
+                })
+            }
+            Err(e) => {
+                if let Ok(path) = agent_lock_path {
+                    let _ = tokio::fs::remove_file(&path).await;
+                }
+                Ok(ToolCallRsult {
+                    success: false,
+                    output: format!("Failed to drop agent with ID: {}", args.agent_id),
+                    error: Some(format!("Error: {}", e)),
+                })
+            }
         }
     }
 }
-

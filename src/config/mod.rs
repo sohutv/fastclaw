@@ -16,7 +16,7 @@ pub mod logger;
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 #[serde(default)]
 pub struct Config {
-    pub agent_groups: Vec<AgentGroup>,
+    pub agent_groups: BTreeMap<AgentGroup, String>,
     pub model_providers: BTreeMap<ModelProviderName, ModelProviders>,
     pub log_config: LogConfig,
     #[cfg(feature = "channel_dingtalk_channel")]

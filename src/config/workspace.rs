@@ -166,12 +166,26 @@ impl Workspace {
         }
         Ok(path)
     }
-
-    pub async fn agent_group_agent_path(&self,  agent_id: &AgentId) -> crate::Result<PathBuf>{
-        let path = self.agent_groups_path.join("agents").join(agent_id.deref());
+    pub async fn agent_group_agents_path(&self) -> crate::Result<PathBuf> {
+        let path = self.agent_groups_path.join("agents");
         if !path.exists() {
             let _ = tokio::fs::create_dir_all(&path).await?;
         }
+        Ok(path)
+    }
+    pub async fn agent_group_agent_path(&self, agent_id: &AgentId) -> crate::Result<PathBuf> {
+        let path = self.agent_group_agents_path().await?.join(agent_id.deref());
+        if !path.exists() {
+            let _ = tokio::fs::create_dir_all(&path).await?;
+        }
+        Ok(path)
+    }
+
+    pub async fn agent_group_agent_lock_path(&self, agent_id: &AgentId) -> crate::Result<PathBuf> {
+        let path = self
+            .agent_group_agent_path(&agent_id)
+            .await?
+            .join("agent.lock");
         Ok(path)
     }
 }
