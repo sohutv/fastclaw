@@ -1,6 +1,4 @@
-use crate::agent::{
-    Agent, AgentRequest, AgentRequestContext, AgentRequestPkg, AgentResponse, Notify,
-};
+use crate::agent::{Agent, AgentRequest, AgentRequestContext, AgentRequestPkg, AgentResponse, DelegatedAgent, MainAgent, Notify};
 use crate::channels::console_cmd::Console;
 use crate::channels::{Channel, ChannelContext, ChannelMessage, SessionId, SessionSettings};
 use crate::config::{Config, Workspace};
@@ -22,14 +20,14 @@ pub struct CliChannel {
     ctx: Arc<ChannelContext>,
     session_id: SessionId,
     session_settings: SessionSettings,
-    agent: Arc<dyn Agent>,
+    agent: Arc<MainAgent>,
 }
 
 impl CliChannel {
     pub async fn new(
         config: &'static Config,
         workspace: &'static Workspace,
-        agent: &Arc<dyn Agent>,
+        agent: &Arc<MainAgent>,
     ) -> crate::Result<Self> {
         let session_id = SessionId::Master("cli-session-channel".into());
         let session_settings = SessionSettings::default_from(&session_id);
@@ -70,7 +68,7 @@ impl Channel for CliChannel {
                                         match Console::handle_console_cmd(
                                             &self_.ctx,
                                             &line,
-                                            &self_.agent,
+                                            self_.agent.delegated(),
                                             &self_.session_id,
                                         )
                                         .await
@@ -128,7 +126,7 @@ impl Channel for CliChannel {
     }
 
     fn agent(&self) -> &Arc<dyn Agent> {
-        &self.agent
+        self.agent.delegated()
     }
 
     async fn handle_agent_message(

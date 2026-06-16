@@ -1,4 +1,4 @@
-use crate::agent::AgentRequest;
+use crate::agent::{AgentRequest, DelegatedAgent};
 use crate::channels::Channel;
 use crate::channels::console_cmd::Console;
 use crate::channels::wechat_channel::WechatChannel;
@@ -171,7 +171,7 @@ impl WechatChannel {
             match Console::handle_console_cmd(
                 &self.ctx,
                 &cmd_val,
-                &self.agent,
+                self.agent.delegated(),
                 &self.wechat_config.session_id(),
             )
             .await

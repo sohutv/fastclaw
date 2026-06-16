@@ -1,4 +1,4 @@
-use crate::agent::AgentRequest;
+use crate::agent::{AgentRequest, DelegatedAgent};
 use crate::channels::console_cmd::Console;
 use crate::channels::dingtalk_channel::DingtalkChannel;
 use crate::channels::{Channel, GroupUserId, SessionId, session_id};
@@ -216,7 +216,7 @@ impl dingtalk_stream::handlers::CallbackHandler for DingTalkCallbackHandler {
             match Console::handle_console_cmd(
                 &self.channel.ctx,
                 &cmd_val,
-                &self.channel.agent,
+                self.channel.agent.delegated(),
                 &session_id,
             )
             .await

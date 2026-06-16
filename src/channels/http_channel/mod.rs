@@ -1,4 +1,4 @@
-use crate::agent::{Agent, AgentId};
+use crate::agent::{Agent, AgentId, DelegatedAgent, MainAgent};
 use crate::channels::{AgentRespState, Channel, ChannelContext, ChannelMessage, SessionId};
 use crate::config::{Config, Workspace};
 use anyhow::anyhow;
@@ -30,14 +30,14 @@ pub struct HttpChannel {
     #[allow(dead_code)]
     pub ctx: Arc<ChannelContext>,
     pub http_config: HttpChannelConfig,
-    pub agent: Arc<dyn Agent>,
+    pub agent: Arc<MainAgent>,
 }
 
 impl HttpChannel {
     pub async fn new(
         config: &'static Config,
         workspace: &'static Workspace,
-        agent: &Arc<dyn Agent>,
+        agent: &Arc<MainAgent>,
     ) -> crate::Result<Self> {
         Ok(Self {
             ctx: Arc::new(ChannelContext { config, workspace }),
@@ -82,7 +82,7 @@ pub struct Client(RwLock<HashMap<UserId, Arc<RwLock<HashMap<AgentId, Vec<Transpo
 #[derive(Clone)]
 struct AppState {
     channel: Arc<HttpChannel>,
-    agent: Arc<dyn Agent>,
+    agent: Arc<MainAgent>,
     client: Arc<Client>,
 }
 
@@ -126,7 +126,7 @@ impl Channel for HttpChannel {
     }
 
     fn agent(&self) -> &Arc<dyn Agent> {
-        &self.agent
+        self.agent.delegated()
     }
 
     async fn handle_agent_message(

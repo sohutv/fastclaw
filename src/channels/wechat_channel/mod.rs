@@ -1,4 +1,4 @@
-use crate::agent::Agent;
+use crate::agent::{Agent, DelegatedAgent, MainAgent};
 use crate::channels::{AgentRespState, Channel, ChannelContext, ChannelMessage, SessionId};
 use crate::config::{Config, Workspace};
 use anyhow::anyhow;
@@ -18,14 +18,14 @@ mod recv_agent_message;
 pub struct WechatChannel {
     pub ctx: Arc<ChannelContext>,
     pub wechat_config: WechatConfig,
-    pub agent: Arc<dyn Agent>,
+    pub agent: Arc<MainAgent>,
 }
 
 impl WechatChannel {
     pub async fn new(
         config: &'static Config,
         workspace: &'static Workspace,
-        agent: &Arc<dyn Agent>,
+        agent: &Arc<MainAgent>,
     ) -> crate::Result<Self> {
         Ok(Self {
             ctx: Arc::new(ChannelContext { config, workspace }),
@@ -100,7 +100,7 @@ impl Channel for WechatChannel {
     }
 
     fn agent(&self) -> &Arc<dyn Agent> {
-        &self.agent
+        self.agent.delegated()
     }
 
     async fn handle_agent_message(

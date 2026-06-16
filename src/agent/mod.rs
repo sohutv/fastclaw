@@ -430,7 +430,7 @@ pub use agent_factory::*;
 
 pub mod a2a_channel;
 
-trait DelegatedAgent {
+pub trait DelegatedAgent {
     fn delegated(&self) -> &Arc<dyn Agent>;
 }
 

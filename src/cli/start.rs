@@ -104,7 +104,7 @@ impl CmdRunner for Start {
                     .await?
                     .init_children()
                     .await?,
-                ) as Arc<dyn Agent>
+                )
             };
             let heartbeat_agent = {
                 let (agent_id, agent_group) = ("heartbeat".into(), AgentGroup::main());

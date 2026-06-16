@@ -17,7 +17,7 @@ pub async fn get_or_create(
     agent_group: &AgentGroup,
 ) -> Result<Arc<dyn Agent>, StatusCode> {
     if agent_id.eq(main.id()) || agent_group.eq(main.agent_group()) {
-        return Ok(Arc::clone(&main));
+        return Ok(Arc::clone(&main) as Arc<dyn Agent>);
     }
     let agent = main
         .fork_child(

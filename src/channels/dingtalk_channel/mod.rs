@@ -1,4 +1,4 @@
-use crate::agent::Agent;
+use crate::agent::{Agent, DelegatedAgent, MainAgent};
 use crate::channels::{AgentRespState, Channel, ChannelContext, ChannelMessage, SessionId};
 use crate::config::{Config, Workspace};
 use anyhow::anyhow;
@@ -30,14 +30,14 @@ mod recv_agent_message;
 pub struct DingtalkChannel {
     pub ctx: Arc<ChannelContext>,
     pub dingtalk_config: DingTalkConfig,
-    pub agent: Arc<dyn Agent>,
+    pub agent: Arc<MainAgent>,
 }
 
 impl DingtalkChannel {
     pub async fn new(
         config: &'static Config,
         workspace: &'static Workspace,
-        agent: &Arc<dyn Agent>,
+        agent: &Arc<MainAgent>,
     ) -> crate::Result<Self> {
         Ok(Self {
             ctx: Arc::new(ChannelContext { config, workspace }),
@@ -56,9 +56,7 @@ impl Channel for DingtalkChannel {
     type InboundMessage = MessageData;
     type JoinHandle = JoinHandle<crate::Result<()>>;
 
-    async fn start(
-        self,
-    ) -> crate::Result<(Arc<Self>, Arc<Self::Client>, Self::JoinHandle)> {
+    async fn start(self) -> crate::Result<(Arc<Self>, Arc<Self::Client>, Self::JoinHandle)> {
         let self_ = Arc::new(self);
         let cb_handler = Arc::new(handle_input_message::DingTalkCallbackHandler {
             channel: Arc::clone(&self_),
@@ -77,7 +75,7 @@ impl Channel for DingtalkChannel {
     }
 
     fn agent(&self) -> &Arc<dyn Agent> {
-        &self.agent
+        self.agent.delegated()
     }
 
     async fn handle_agent_message(
