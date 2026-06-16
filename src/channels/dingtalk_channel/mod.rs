@@ -61,7 +61,6 @@ impl Channel for DingtalkChannel {
         agent: Arc<dyn Agent>,
     ) -> crate::Result<(Arc<Self>, Arc<Self::Client>, Self::JoinHandle)> {
         let self_ = Arc::new(self);
-        let _ = Agent::start(Arc::clone(&agent)).await?;
         let cb_handler = Arc::new(handle_input_message::DingTalkCallbackHandler {
             channel: Arc::clone(&self_),
             dingtalk_bot_topic: MessageTopic::Callback(dingtalk_stream::TOPIC_ROBOT.to_string()),

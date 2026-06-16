@@ -153,37 +153,7 @@ async fn spawn_agent_actual(
                 .await?
         }
     };
-    let agent = (Arc::new(agent) as Arc<dyn Agent>).start().await?;
-    if agent_id.is_main() {
-        if let Ok(path) = workspace.agent_group_agents_path().await {
-            if let Ok(mut dir) = tokio::fs::read_dir(&path).await {
-                while let Ok(Some(dir_entry)) = dir.next_entry().await {
-                    if let Ok(agent_id_str) = dir_entry.file_name().into_string() {
-                        let agent_id = AgentId::from(agent_id_str);
-                        if let Ok(agent_lock_path) =
-                            workspace.agent_group_agent_lock_path(&agent_id).await
-                        {
-                            if agent_lock_path.exists() {
-                                Box::pin(async {
-                                    let _ = reload_agent(
-                                        config,
-                                        history_manager,
-                                        memory_manager,
-                                        workspace,
-                                        mcp_registry,
-                                        &agent_id,
-                                    )
-                                    .await;
-                                })
-                                .await;
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    }
-    Ok(agent)
+    Ok(Arc::new(agent).start().await?)
 }
 
 async fn agent_group_agent_config_path(

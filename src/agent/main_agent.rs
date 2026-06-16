@@ -1,6 +1,6 @@
 use crate::agent::{
     Agent, AgentClone, AgentContext, AgentGroup, AgentId, AgentRequestPkg, AgentSettings,
-    HistoryCompactResult, OwnerSession, SessionCompactSupport,
+    HistoryCompactResult, OwnerSession, SessionCompactSupport, reload_agent,
 };
 use crate::channels::{ChannelMessage, SessionId};
 use crate::model_provider::ModelSettings;
@@ -103,7 +103,31 @@ impl Agent for MainAgent {
 
 impl MainAgent {
     pub async fn init_children(self) -> crate::Result<Self> {
-        //todo
+        let workspace = self.context().workspace;
+        if let Ok(path) = workspace.agent_group_agents_path().await {
+            if let Ok(mut dir) = tokio::fs::read_dir(&path).await {
+                while let Ok(Some(dir_entry)) = dir.next_entry().await {
+                    if let Ok(agent_id_str) = dir_entry.file_name().into_string() {
+                        let agent_id = AgentId::from(agent_id_str);
+                        if let Ok(agent_lock_path) =
+                            workspace.agent_group_agent_lock_path(&agent_id).await
+                        {
+                            if agent_lock_path.exists() {
+                                let _ = reload_agent(
+                                    self.context().config,
+                                    &self.context().history_manager,
+                                    &self.context().memory_manager,
+                                    workspace,
+                                    self.context().mcp_registry,
+                                    &agent_id,
+                                )
+                                .await;
+                            }
+                        }
+                    }
+                }
+            }
+        }
         Ok(self)
     }
 }

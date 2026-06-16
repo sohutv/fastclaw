@@ -71,7 +71,6 @@ impl Channel for WechatChannel {
                 .await?,
         );
         let self_ = Arc::new(self);
-        let _ = Agent::start(Arc::clone(&agent)).await?;
         let join_handle = {
             let self_ = Arc::clone(&self_);
             let wechat_client = Arc::clone(&wechat_client);

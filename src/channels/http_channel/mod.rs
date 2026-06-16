@@ -97,7 +97,6 @@ impl Channel for HttpChannel {
         agent: Arc<dyn Agent>,
     ) -> crate::Result<(Arc<Self>, Arc<Self::Client>, Self::JoinHandle)> {
         let self_ = Arc::new(self);
-        let agent = Agent::start(Arc::clone(&agent)).await?;
         let client = Default::default();
         let app = {
             Router::new()

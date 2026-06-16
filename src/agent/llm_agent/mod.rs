@@ -118,7 +118,7 @@ where
             description: self.description.clone(),
             owner_session: self.owner_session.clone(),
         };
-        Arc::new(agent).start().await
+        Ok(Arc::new(agent))
     }
 }
 

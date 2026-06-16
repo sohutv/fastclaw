@@ -53,7 +53,6 @@ impl Channel for CliChannel {
         agent: Arc<dyn Agent>,
     ) -> crate::Result<(Arc<Self>, Arc<Self::Client>, Self::JoinHandle)> {
         let self_ = Arc::new(self);
-        let _ = Agent::start(Arc::clone(&agent)).await?;
         let (message_sender, mut message_receiver) = tokio::sync::mpsc::channel(32);
         let join_handle = {
             let self_ = Arc::clone(&self_);

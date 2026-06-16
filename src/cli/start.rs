@@ -1,4 +1,6 @@
-use crate::agent::{Agent, AgentId, HistoryManager, JsonlHistoryManager, MainAgent, OwnerSession};
+use crate::agent::{
+    Agent, AgentGroup, AgentId, HistoryManager, JsonlHistoryManager, MainAgent, OwnerSession,
+};
 use crate::channels::Channel;
 use crate::cli::CmdRunner;
 use crate::config::logger::{Level, Logger};
@@ -81,23 +83,45 @@ impl CmdRunner for Start {
             Arc::new(JsonlHistoryManager::new(config, workspace).await?);
         let memory_manager = Arc::new(MemoryManager::new(config, workspace).await?);
         let (main_agent, heartbeat_agent) = {
-            let (agent_id, agent_group) = AgentId::main();
-            let main_agent = agent::spawn_agent(
-                config,
-                &history_manager,
-                &memory_manager,
-                workspace,
-                mcp_registry,
-                &agent_id,
-                &agent_group,
-                None,
-                None,
-                &OwnerSession::GlobalShare,
-            )
-            .await?;
-            let main_agent = Arc::new(MainAgent::try_from(main_agent)?.init_children().await?);
-            let heartbeat_agent = main_agent.clone_with("heartbeat".into(), None).await?;
-            (main_agent as Arc<dyn Agent>, heartbeat_agent)
+            let main_agent = {
+                let (agent_id, agent_group) = AgentId::main();
+                Arc::new(
+                    MainAgent::try_from(
+                        agent::spawn_agent(
+                            config,
+                            &history_manager,
+                            &memory_manager,
+                            workspace,
+                            mcp_registry,
+                            &agent_id,
+                            &agent_group,
+                            None,
+                            None,
+                            &OwnerSession::GlobalShare,
+                        )
+                        .await?,
+                    )?
+                    .init_children()
+                    .await?,
+                ) as Arc<dyn Agent>
+            };
+            let heartbeat_agent = {
+                let (agent_id, agent_group) = ("heartbeat".into(), AgentGroup::main());
+                agent::spawn_agent(
+                    config,
+                    &history_manager,
+                    &memory_manager,
+                    workspace,
+                    mcp_registry,
+                    &agent_id,
+                    &agent_group,
+                    None,
+                    None,
+                    &OwnerSession::GlobalShare,
+                )
+                .await?
+            };
+            (main_agent, heartbeat_agent)
         };
 
         enum JoinHandle {
