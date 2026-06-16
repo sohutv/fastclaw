@@ -5,9 +5,18 @@ use std::ops::Deref;
 
 #[derive(Debug, Clone, Serialize, Deserialize, Eq, PartialEq, Hash, Display, From)]
 pub enum SessionId {
+    #[serde(rename = "master", alias = "Master")]
     Master(Master),
+    #[serde(rename = "anonymous", alias = "Anonymous")]
     Anonymous(Anonymous),
+    #[serde(rename = "group", alias = "Group")]
     Group(Group),
+}
+
+impl AsRef<SessionId> for SessionId {
+    fn as_ref(&self) -> &SessionId {
+        self
+    }
 }
 
 impl Deref for SessionId {
@@ -24,8 +33,8 @@ impl Deref for SessionId {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(default)]
 pub struct SessionSettings {
+    pub session_id: SessionId,
     pub show_connected: bool,
     pub show_start: bool,
     pub show_toolcall: bool,
@@ -40,9 +49,10 @@ pub struct SessionSettings {
     pub show_token_usage: bool,
 }
 
-impl Default for SessionSettings {
-    fn default() -> Self {
+impl SessionSettings {
+    pub fn default_from<S: AsRef<SessionId>>(session_id: S) -> Self {
         Self {
+            session_id: session_id.as_ref().clone(),
             show_connected: false,
             show_start: true,
             show_toolcall: false,
@@ -103,16 +113,16 @@ where
 #[derive(Debug, Clone, Serialize, Deserialize, Display, Deref)]
 #[display("{name:?}[{id}]:{user_id}")]
 pub struct Group {
-    pub id: String,
     #[deref]
+    pub id: String,
     pub user_id: GroupUserId,
     pub name: Option<String>,
 }
-#[derive(
-    Debug, Clone, Eq, PartialEq, Hash, Ord, PartialOrd, Serialize, Deserialize, Display, Deref,
-)]
+#[derive(Debug, Clone, Eq, PartialEq, Hash, Ord, PartialOrd, Serialize, Deserialize, Display)]
 pub enum GroupUserId {
-    Master(Anonymous),
+    #[serde(rename = "master", alias = "Master")]
+    Master(Master),
+    #[serde(rename = "anonymous", alias = "Anonymous")]
     Anonymous(Anonymous),
 }
 

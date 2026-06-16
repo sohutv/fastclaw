@@ -173,7 +173,7 @@ impl WechatChannel {
                 &self.ctx,
                 &cmd_val,
                 &agent,
-                &self.wechat_config.session_id,
+                &self.wechat_config.session_id(),
             )
             .await
             {
@@ -212,7 +212,7 @@ impl WechatChannel {
                 Some(data),
                 AgentRequest {
                     id: msg_id.to_string().into(),
-                    session_id: self.wechat_config.session_id.clone(),
+                    session_id: self.wechat_config.session_id().clone(),
                     message: vec![user_content],
                 },
             )

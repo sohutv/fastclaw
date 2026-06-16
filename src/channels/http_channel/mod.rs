@@ -170,7 +170,12 @@ impl Channel for HttpChannel {
     }
 
     fn allow_session_ids(&self) -> crate::Result<Vec<&SessionId>> {
-        let arr = self.http_config.allow_session_ids.keys().collect_vec();
+        let arr = self
+            .http_config
+            .allow_session_ids
+            .iter()
+            .map(|it| &it.session_id)
+            .collect_vec();
         Ok(arr)
     }
 }

@@ -1,20 +1,20 @@
-use std::collections::HashMap;
 use crate::channels::{SessionId, SessionSettings, SessionSettingsProvider};
 use anyhow::anyhow;
 use itertools::Itertools;
-use std::ops::Deref;
 use serde::{Deserialize, Serialize};
+use std::ops::Deref;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DingTalkConfig {
     pub credential: dingtalk_stream::Credential,
-    pub allow_session_ids: HashMap<SessionId, SessionSettings>,
+    pub allow_session_ids: Vec<SessionSettings>,
 }
 
 impl DingTalkConfig {
     pub(super) fn master_session_ids(&self) -> Vec<&SessionId> {
         self.allow_session_ids
-            .keys()
+            .iter()
+            .map(|it| &it.session_id)
             .flat_map(|it| {
                 if let SessionId::Master { .. } = it {
                     Some(it)
@@ -30,7 +30,8 @@ impl SessionSettingsProvider for DingTalkConfig {
     fn session_settings(&self, session_id: &SessionId) -> crate::Result<&SessionSettings> {
         let dst = self
             .allow_session_ids
-            .get(session_id)
+            .iter()
+            .find(|it| it.session_id.eq(session_id))
             .ok_or(anyhow!("session_id {session_id} is forbidden",))?;
         Ok(dst)
     }
@@ -43,7 +44,8 @@ impl<S: AsRef<str>> TryFrom<(S, &DingTalkConfig)> for SessionId {
         let raw_session_id = raw_session_id.as_ref();
         let dst = config
             .allow_session_ids
-            .keys()
+            .iter()
+            .map(|it| &it.session_id)
             .find(|&it| it.deref().eq(raw_session_id))
             .ok_or(anyhow!("session_id {raw_session_id} is forbidden",))?;
         Ok(dst.clone())

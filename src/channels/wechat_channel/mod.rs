@@ -56,7 +56,7 @@ impl Channel for WechatChannel {
                 .parent()
                 .expect("unexpected workspace path parent")
                 .join("wechat"),
-            account_id: self.wechat_config.session_id.to_string().into(),
+            account_id: self.wechat_config.session_id().to_string().into(),
             http_timeout: Default::default(),
             qr_login_timeout: Default::default(),
             http_api_get_updates_timeout: Default::default(),
@@ -153,6 +153,6 @@ impl Channel for WechatChannel {
     }
 
     fn allow_session_ids(&self) -> crate::Result<Vec<&SessionId>> {
-        Ok(vec![&self.wechat_config.session_id])
+        Ok(vec![&self.wechat_config.session_id()])
     }
 }

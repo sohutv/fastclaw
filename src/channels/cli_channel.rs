@@ -29,13 +29,15 @@ impl CliChannel {
         config: &'static Config,
         workspace: &'static Workspace,
     ) -> crate::Result<Self> {
+        let session_id = SessionId::Master("cli-session-channel".into());
+        let session_settings = SessionSettings::default_from(&session_id);
         Ok(CliChannel {
             ctx: Arc::new(ChannelContext {
                 config: config.clone(),
                 workspace,
             }),
-            session_id: SessionId::Master("cli-session-channel".into()),
-            session_settings: Default::default(),
+            session_id,
+            session_settings,
         })
     }
 }
