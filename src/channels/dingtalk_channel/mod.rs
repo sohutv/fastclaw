@@ -30,22 +30,22 @@ mod recv_agent_message;
 pub struct DingtalkChannel {
     pub ctx: Arc<ChannelContext>,
     pub dingtalk_config: DingTalkConfig,
+    pub agent: Arc<dyn Agent>,
 }
 
 impl DingtalkChannel {
     pub async fn new(
         config: &'static Config,
         workspace: &'static Workspace,
+        agent: &Arc<dyn Agent>,
     ) -> crate::Result<Self> {
         Ok(Self {
-            ctx: Arc::new(ChannelContext {
-                config: config.clone(),
-                workspace,
-            }),
+            ctx: Arc::new(ChannelContext { config, workspace }),
             dingtalk_config: config
                 .dingtalk_config
                 .clone()
                 .ok_or(anyhow!("dingtalk config not found"))?,
+            agent: Arc::clone(agent),
         })
     }
 }
@@ -58,13 +58,11 @@ impl Channel for DingtalkChannel {
 
     async fn start(
         self,
-        agent: Arc<dyn Agent>,
     ) -> crate::Result<(Arc<Self>, Arc<Self::Client>, Self::JoinHandle)> {
         let self_ = Arc::new(self);
         let cb_handler = Arc::new(handle_input_message::DingTalkCallbackHandler {
             channel: Arc::clone(&self_),
             dingtalk_bot_topic: MessageTopic::Callback(dingtalk_stream::TOPIC_ROBOT.to_string()),
-            agent: Arc::clone(&agent),
         });
         let (dingtalk, dingtalk_stream_handle) = Arc::new(
             DingTalkStream::new(self_.dingtalk_config.credential.clone())
@@ -78,10 +76,13 @@ impl Channel for DingtalkChannel {
         Ok((self_, dingtalk, dingtalk_stream_handle))
     }
 
+    fn agent(&self) -> &Arc<dyn Agent> {
+        &self.agent
+    }
+
     async fn handle_agent_message(
         &self,
         dingtalk: Arc<DingTalkStream>,
-        agent: Arc<dyn Agent>,
         inbound_message: Option<Self::InboundMessage>,
         receiver: &mut Receiver<crate::Result<ChannelMessage>>,
     ) -> crate::Result<()> {
@@ -93,7 +94,6 @@ impl Channel for DingtalkChannel {
                     match self
                         .handle_agent_message_actual(
                             &dingtalk,
-                            &*agent,
                             inbound_message.as_ref(),
                             &message,
                             state,

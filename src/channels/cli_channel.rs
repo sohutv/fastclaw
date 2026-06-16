@@ -22,22 +22,22 @@ pub struct CliChannel {
     ctx: Arc<ChannelContext>,
     session_id: SessionId,
     session_settings: SessionSettings,
+    agent: Arc<dyn Agent>,
 }
 
 impl CliChannel {
     pub async fn new(
         config: &'static Config,
         workspace: &'static Workspace,
+        agent: &Arc<dyn Agent>,
     ) -> crate::Result<Self> {
         let session_id = SessionId::Master("cli-session-channel".into());
         let session_settings = SessionSettings::default_from(&session_id);
         Ok(CliChannel {
-            ctx: Arc::new(ChannelContext {
-                config: config.clone(),
-                workspace,
-            }),
+            ctx: Arc::new(ChannelContext { config, workspace }),
             session_id,
             session_settings,
+            agent: Arc::clone(agent),
         })
     }
 }
@@ -48,10 +48,7 @@ impl Channel for CliChannel {
     type InboundMessage = String;
     type JoinHandle = JoinHandle<()>;
 
-    async fn start(
-        self,
-        agent: Arc<dyn Agent>,
-    ) -> crate::Result<(Arc<Self>, Arc<Self::Client>, Self::JoinHandle)> {
+    async fn start(self) -> crate::Result<(Arc<Self>, Arc<Self::Client>, Self::JoinHandle)> {
         let self_ = Arc::new(self);
         let (message_sender, mut message_receiver) = tokio::sync::mpsc::channel(32);
         let join_handle = {
@@ -73,7 +70,7 @@ impl Channel for CliChannel {
                                         match Console::handle_console_cmd(
                                             &self_.ctx,
                                             &line,
-                                            &agent,
+                                            &self_.agent,
                                             &self_.session_id,
                                         )
                                         .await
@@ -84,7 +81,8 @@ impl Channel for CliChannel {
                                             Err(_) => {}
                                         }
                                     }
-                                    let _ = agent
+                                    let _ = self_
+                                        .agent
                                         .get_channel_sender()
                                         .await
                                         .unwrap()
@@ -107,7 +105,6 @@ impl Channel for CliChannel {
                                     let _ = self_
                                         .handle_agent_message(
                                             Arc::new(()),
-                                            Arc::clone(&agent),
                                             Some(line.to_string()),
                                             &mut message_receiver,
                                         )
@@ -130,10 +127,13 @@ impl Channel for CliChannel {
         Ok((self_, Default::default(), join_handle))
     }
 
+    fn agent(&self) -> &Arc<dyn Agent> {
+        &self.agent
+    }
+
     async fn handle_agent_message(
         &self,
         _: Arc<Self::Client>,
-        _: Arc<dyn Agent>,
         _: Option<Self::InboundMessage>,
         receiver: &mut Receiver<crate::Result<ChannelMessage>>,
     ) -> crate::Result<()> {

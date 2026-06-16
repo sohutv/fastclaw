@@ -16,7 +16,6 @@ impl HttpChannel {
     pub(super) async fn handle_agent_message_actual(
         &self,
         client: &Client,
-        agent: &dyn Agent,
         inbound_message: Option<&HttpReqMessage>,
         ChannelMessage {
             session_id,
@@ -56,7 +55,7 @@ impl HttpChannel {
                 Some(format_message(
                     session_id,
                     &self.http_config,
-                    agent.agent_settings().output_schema.is_some(),
+                    self.agent.agent_settings().output_schema.is_some(),
                     usage,
                     buff,
                 )?),
@@ -92,7 +91,7 @@ impl HttpChannel {
         };
         if let Some((text, resp_type)) = formated_message {
             if let Some(robot_message) = create_robot_messages_for_agent(
-                agent,
+                &*self.agent,
                 session_id,
                 &self.http_config,
                 &self.ctx,

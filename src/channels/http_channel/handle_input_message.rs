@@ -131,7 +131,6 @@ impl HttpChannel {
                         let _ = self_
                             .handle_agent_message(
                                 client,
-                                Arc::clone(&agent),
                                 Some(data),
                                 &mut receiver,
                             )
@@ -158,7 +157,6 @@ impl HttpChannel {
         match Arc::clone(&self)
             .append_agent_task(
                 Arc::clone(&client),
-                Arc::clone(&agent),
                 None,
                 Some(data),
                 AgentRequest {

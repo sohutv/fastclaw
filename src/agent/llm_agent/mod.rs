@@ -1,7 +1,7 @@
 use crate::ModelName;
 use crate::agent::{
     Agent, AgentClone, AgentContext, AgentGroup, AgentId, AgentRequestPkg, AgentSettings,
-    HistoryManager, LlmAgentSupplier, OwnerSession, SystemPromptProvider, Workspace,
+    AgentVisitor, HistoryManager, LlmAgentSupplier, OwnerSession, SystemPromptProvider, Workspace,
 };
 use crate::config::Config;
 use crate::memory::MemoryManager;
@@ -118,7 +118,52 @@ where
             description: self.description.clone(),
             owner_session: self.owner_session.clone(),
         };
-        Ok(Arc::new(agent))
+        Ok(Arc::new(agent) as Arc<dyn Agent>)
+    }
+}
+
+#[async_trait]
+impl<C, P> AgentVisitor for LlmAgent<C, P>
+where
+    C: 'static + CompletionClient + Send + Sync,
+    P: 'static + ModelProvider<Client = C> + Send + Sync,
+{
+    async fn get_channel_sender(&self) -> crate::Result<Sender<AgentRequestPkg>> {
+        let sender = self.channel_sender.read().await;
+        if let Some(sender) = &*sender {
+            Ok(sender.clone())
+        } else {
+            Err(anyhow!(
+                "Agent channel not initialized. Call start() first."
+            ))
+        }
+    }
+
+    fn model_settings(&self) -> &ModelSettings {
+        &self.model_settings
+    }
+
+    fn agent_settings(&self) -> &AgentSettings {
+        &self.agent_settings
+    }
+
+    fn id(&self) -> &AgentId {
+        &self.id
+    }
+    fn context(&self) -> Arc<AgentContext> {
+        Arc::clone(&self.ctx)
+    }
+
+    fn agent_group(&self) -> &AgentGroup {
+        &self.group
+    }
+
+    fn description(&self) -> &str {
+        &self.description
+    }
+
+    fn owner_session(&self) -> &OwnerSession {
+        &self.owner_session
     }
 }
 
@@ -140,47 +185,5 @@ where
             *sender = Some(tx);
         }
         Ok(self)
-    }
-
-    async fn get_channel_sender(&self) -> crate::Result<Sender<AgentRequestPkg>> {
-        let sender = self.channel_sender.read().await;
-        if let Some(sender) = &*sender {
-            Ok(sender.clone())
-        } else {
-            Err(anyhow!(
-                "Agent channel not initialized. Call start() first."
-            ))
-        }
-    }
-
-    fn context(&self) -> &AgentContext {
-        &self.ctx
-    }
-
-    fn model_settings(&self) -> &ModelSettings {
-        &self.model_settings
-    }
-
-    fn agent_settings(&self) -> &AgentSettings {
-        &self.agent_settings
-    }
-
-    fn id(&self) -> &AgentId {
-        &self.id
-    }
-    fn agent_context(&self) -> Arc<AgentContext> {
-        Arc::clone(&self.ctx)
-    }
-
-    fn agent_group(&self) -> &AgentGroup {
-        &self.group
-    }
-
-    fn description(&self) -> &str {
-        &self.description
-    }
-
-    fn owner_session(&self) -> &OwnerSession {
-        &self.owner_session
     }
 }

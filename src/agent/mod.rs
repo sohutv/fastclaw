@@ -30,16 +30,6 @@ pub use crate::tools::tool_filter::ToolFilter;
 use crate::tools::tool_filter::ToolNameFilter;
 use crate::type_::SystemPrompt;
 
-#[async_trait]
-pub trait SessionCompactSupport: Send + Sync {
-    async fn session_compact(
-        self: Arc<Self>,
-        channel_message_sender: Sender<crate::Result<ChannelMessage>>,
-        session_id: &SessionId,
-        compact_ratio: f32,
-    ) -> HistoryCompactResult;
-}
-
 pub struct AgentRequestPkg {
     req: AgentRequest,
     ctx: AgentRequestContext,
@@ -76,17 +66,35 @@ impl AgentRequestPkg {
 }
 
 #[async_trait]
-pub trait Agent: SessionCompactSupport + AgentClone + Send + Sync {
-    async fn start(self: Arc<Self>) -> crate::Result<Arc<dyn Agent>>;
+pub trait SessionCompactSupport: Send + Sync {
+    async fn session_compact(
+        self: Arc<Self>,
+        channel_message_sender: Sender<crate::Result<ChannelMessage>>,
+        session_id: &SessionId,
+        compact_ratio: f32,
+    ) -> HistoryCompactResult;
+}
 
-    async fn get_channel_sender(&self) -> crate::Result<Sender<AgentRequestPkg>>;
+#[async_trait]
+pub trait AgentVisitor {
+    fn id(&self) -> &AgentId;
+    fn context(&self) -> Arc<AgentContext>;
 
-    fn context(&self) -> &AgentContext;
+    fn agent_group(&self) -> &AgentGroup;
+
+    fn description(&self) -> &str;
+
+    fn owner_session(&self) -> &OwnerSession;
 
     #[allow(unused)]
     fn model_settings(&self) -> &ModelSettings;
 
     fn agent_settings(&self) -> &AgentSettings;
+    async fn get_channel_sender(&self) -> crate::Result<Sender<AgentRequestPkg>>;
+}
+#[async_trait]
+pub trait Agent: SessionCompactSupport + AgentClone + AgentVisitor + Send + Sync {
+    async fn start(self: Arc<Self>) -> crate::Result<Arc<dyn Agent>>;
 
     async fn fork_child(
         &self,
@@ -95,13 +103,13 @@ pub trait Agent: SessionCompactSupport + AgentClone + Send + Sync {
         addi_system_prompt: Option<SystemPrompt>,
         desc: Option<String>,
         owner_session: &OwnerSession,
-    ) -> crate::Result<Arc<dyn Agent>> {
+    ) -> crate::Result<Arc<ChildAgent>> {
         if self.id().eq(agent_id) || self.agent_group().eq(agent_group) {
             return Err(anyhow!(
                 "fork child with agent_group: {agent_group} is forbidden"
             ));
         }
-        let context = self.agent_context();
+        let context = self.context();
         let mut children = context.children.write().await;
         if let Some(agent) = children.get(&agent_id) {
             return Ok(Arc::clone(agent));
@@ -132,12 +140,13 @@ pub trait Agent: SessionCompactSupport + AgentClone + Send + Sync {
             )
             .await?
         };
-        children.insert(agent.id().clone(), Arc::clone(&agent));
-        Ok(agent)
+        let child = Arc::new(ChildAgent::new(agent).await?);
+        children.insert(child.id().clone(), Arc::clone(&child));
+        Ok(child)
     }
 
-    async fn drop_child(&self, id: &AgentId) -> crate::Result<Arc<dyn Agent>> {
-        let context = self.agent_context();
+    async fn drop_child(&self, id: &AgentId) -> crate::Result<Arc<ChildAgent>> {
+        let context = self.context();
         let child = {
             let mut children = context.children.write().await;
             children.remove(id)
@@ -145,15 +154,6 @@ pub trait Agent: SessionCompactSupport + AgentClone + Send + Sync {
         .ok_or(anyhow!("child {} agent not exist", id))?;
         Ok(child)
     }
-
-    fn id(&self) -> &AgentId;
-    fn agent_context(&self) -> Arc<AgentContext>;
-
-    fn agent_group(&self) -> &AgentGroup;
-
-    fn description(&self) -> &str;
-
-    fn owner_session(&self) -> &OwnerSession;
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, From, Serialize, Deserialize)]
@@ -178,7 +178,7 @@ pub struct AgentContext {
     pub workspace: &'static Workspace,
     pub history_manager: Arc<dyn HistoryManager>,
     pub memory_manager: Arc<MemoryManager>,
-    pub children: Arc<RwLock<HashMap<AgentId, Arc<dyn Agent>>>>,
+    pub children: Arc<RwLock<HashMap<AgentId, Arc<ChildAgent>>>>,
     pub system_prompt: Arc<dyn SystemPromptProvider>,
     pub mcp_registry: &'static McpRegistry,
 }
@@ -428,5 +428,95 @@ impl Default for AgentSettings {
 mod agent_factory;
 pub use agent_factory::*;
 
+pub mod a2a_channel;
+
+trait DelegatedAgent {
+    fn delegated(&self) -> &Arc<dyn Agent>;
+}
+
 mod main_agent;
 pub use main_agent::MainAgent;
+mod child_agent;
+pub use child_agent::ChildAgent;
+
+#[async_trait]
+impl<A> SessionCompactSupport for A
+where
+    A: DelegatedAgent + Send + Sync,
+{
+    async fn session_compact(
+        self: Arc<Self>,
+        channel_message_sender: Sender<crate::Result<ChannelMessage>>,
+        session_id: &SessionId,
+        compact_ratio: f32,
+    ) -> HistoryCompactResult {
+        Arc::clone(&self.delegated())
+            .session_compact(channel_message_sender, session_id, compact_ratio)
+            .await
+    }
+}
+
+#[async_trait]
+impl<A> AgentClone for A
+where
+    A: DelegatedAgent + Send + Sync,
+{
+    async fn clone_with(
+        &self,
+        id: AgentId,
+        agent_settings: Option<AgentSettings>,
+    ) -> crate::Result<Arc<dyn Agent>> {
+        Arc::clone(&self.delegated())
+            .clone_with(id, agent_settings)
+            .await
+    }
+}
+
+#[async_trait]
+impl<A> AgentVisitor for A
+where
+    A: DelegatedAgent + Send + Sync,
+{
+    async fn get_channel_sender(&self) -> crate::Result<Sender<AgentRequestPkg>> {
+        self.delegated().get_channel_sender().await
+    }
+
+    fn model_settings(&self) -> &ModelSettings {
+        self.delegated().model_settings()
+    }
+
+    fn agent_settings(&self) -> &AgentSettings {
+        self.delegated().agent_settings()
+    }
+
+    fn id(&self) -> &AgentId {
+        self.delegated().id()
+    }
+
+    fn context(&self) -> Arc<AgentContext> {
+        self.delegated().context()
+    }
+
+    fn agent_group(&self) -> &AgentGroup {
+        self.delegated().agent_group()
+    }
+
+    fn description(&self) -> &str {
+        self.delegated().description()
+    }
+
+    fn owner_session(&self) -> &OwnerSession {
+        self.delegated().owner_session()
+    }
+}
+
+#[async_trait]
+impl<A> Agent for A
+where
+    A: DelegatedAgent + Send + Sync + 'static,
+{
+    async fn start(self: Arc<Self>) -> crate::Result<Arc<dyn Agent>> {
+        let _ = self.delegated().clone().start().await?;
+        Ok(self)
+    }
+}

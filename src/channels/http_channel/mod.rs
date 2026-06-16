@@ -30,22 +30,22 @@ pub struct HttpChannel {
     #[allow(dead_code)]
     pub ctx: Arc<ChannelContext>,
     pub http_config: HttpChannelConfig,
+    pub agent: Arc<dyn Agent>,
 }
 
 impl HttpChannel {
     pub async fn new(
         config: &'static Config,
         workspace: &'static Workspace,
+        agent: &Arc<dyn Agent>,
     ) -> crate::Result<Self> {
         Ok(Self {
-            ctx: Arc::new(ChannelContext {
-                config: config.clone(),
-                workspace,
-            }),
+            ctx: Arc::new(ChannelContext { config, workspace }),
             http_config: config
                 .http_config
                 .clone()
                 .ok_or_else(|| anyhow!("http_config not found"))?,
+            agent: Arc::clone(agent),
         })
     }
 }
@@ -92,10 +92,7 @@ impl Channel for HttpChannel {
     type InboundMessage = HttpReqMessage;
     type JoinHandle = tokio::task::JoinHandle<crate::Result<()>>;
 
-    async fn start(
-        self,
-        agent: Arc<dyn Agent>,
-    ) -> crate::Result<(Arc<Self>, Arc<Self::Client>, Self::JoinHandle)> {
+    async fn start(self) -> crate::Result<(Arc<Self>, Arc<Self::Client>, Self::JoinHandle)> {
         let self_ = Arc::new(self);
         let client = Default::default();
         let app = {
@@ -110,7 +107,7 @@ impl Channel for HttpChannel {
         }
         .with_state(AppState {
             channel: self_.clone(),
-            agent,
+            agent: Arc::clone(&self_.agent),
             client: Arc::clone(&client),
         });
         let addr: SocketAddr = self_.http_config.addr.parse()?;
@@ -128,10 +125,13 @@ impl Channel for HttpChannel {
         Ok((self_, client, join_handle))
     }
 
+    fn agent(&self) -> &Arc<dyn Agent> {
+        &self.agent
+    }
+
     async fn handle_agent_message(
         &self,
         client: Arc<Client>,
-        agent: Arc<dyn Agent>,
         inbound_message: Option<Self::InboundMessage>,
         receiver: &mut Receiver<crate::Result<ChannelMessage>>,
     ) -> crate::Result<()> {
@@ -143,7 +143,6 @@ impl Channel for HttpChannel {
                     match self
                         .handle_agent_message_actual(
                             &client,
-                            &*agent,
                             inbound_message.as_ref(),
                             &message,
                             state,

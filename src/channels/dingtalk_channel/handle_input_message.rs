@@ -1,4 +1,4 @@
-use crate::agent::{Agent, AgentRequest};
+use crate::agent::AgentRequest;
 use crate::channels::console_cmd::Console;
 use crate::channels::dingtalk_channel::DingtalkChannel;
 use crate::channels::{Channel, GroupUserId, SessionId, session_id};
@@ -35,7 +35,6 @@ use tokio::sync::mpsc::Sender;
 pub(super) struct DingTalkCallbackHandler {
     pub(super) channel: Arc<DingtalkChannel>,
     pub(super) dingtalk_bot_topic: MessageTopic,
-    pub(super) agent: Arc<dyn Agent>,
 }
 
 #[async_trait]
@@ -214,22 +213,21 @@ impl dingtalk_stream::handlers::CallbackHandler for DingTalkCallbackHandler {
             (cmd, user_contents)
         };
         if let Some(cmd_val) = &cmd {
-            match Console::handle_console_cmd(&self.channel.ctx, &cmd_val, &self.agent, &session_id)
-                .await
+            match Console::handle_console_cmd(
+                &self.channel.ctx,
+                &cmd_val,
+                &self.channel.agent,
+                &session_id,
+            )
+            .await
             {
                 Ok(mut receiver) => {
                     let channel = Arc::clone(&self.channel);
                     let client = Arc::clone(&dingtalk_client);
-                    let agent = Arc::clone(&self.agent);
                     let inbound_message = inbound_message.clone();
                     let _ = tokio::spawn(async move {
                         let _ = channel
-                            .handle_agent_message(
-                                client,
-                                agent,
-                                Some(inbound_message),
-                                &mut receiver,
-                            )
+                            .handle_agent_message(client, Some(inbound_message), &mut receiver)
                             .await;
                     });
                     return Ok(HandlerResp::Text("cmd submitted".to_string()));
@@ -278,7 +276,6 @@ impl dingtalk_stream::handlers::CallbackHandler for DingTalkCallbackHandler {
         match Arc::clone(&self.channel)
             .append_agent_task(
                 Arc::clone(&dingtalk_client),
-                Arc::clone(&self.agent),
                 Some(addi_system_prompt),
                 Some(inbound_message.clone()),
                 AgentRequest {

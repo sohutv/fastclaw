@@ -153,7 +153,7 @@ async fn spawn_agent_actual(
                 .await?
         }
     };
-    Ok(Arc::new(agent).start().await?)
+    Arc::new(agent).start().await
 }
 
 async fn agent_group_agent_config_path(

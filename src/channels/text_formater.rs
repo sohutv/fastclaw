@@ -11,7 +11,7 @@ use serde::ser::Error;
 use std::fmt::{Display, Formatter};
 use std::mem;
 
-pub(super) fn format_tool_call<P: SessionSettingsProvider>(
+pub fn format_tool_call<P: SessionSettingsProvider>(
     session_id: &SessionId,
     session_settings_provider: &P,
     ToolCall {
@@ -42,7 +42,7 @@ pub(super) fn format_tool_call<P: SessionSettingsProvider>(
     Some((text, AgentRespType::ToolCall))
 }
 
-pub(super) fn format_tool_result<P: SessionSettingsProvider>(
+pub fn format_tool_result<P: SessionSettingsProvider>(
     session_id: &SessionId,
     session_settings_provider: &P,
     ToolResult {
@@ -83,7 +83,7 @@ pub(super) fn format_tool_result<P: SessionSettingsProvider>(
     Some((text, AgentRespType::ToolResult))
 }
 
-pub(super) fn format_reasoning(_: &SessionId, buff: &mut Vec<String>) -> (String, AgentRespType) {
+pub fn format_reasoning(_: &SessionId, buff: &mut Vec<String>) -> (String, AgentRespType) {
     let content = mem::replace(buff, vec![]).join("");
     let text = format!(
         r#"
@@ -113,7 +113,7 @@ impl Display for FormatedMessage {
     }
 }
 
-pub(super) fn format_message<P: SessionSettingsProvider>(
+pub fn format_message<P: SessionSettingsProvider>(
     session_id: &SessionId,
     session_settings_provider: &P,
     output_schema: bool,
@@ -150,7 +150,7 @@ pub(super) fn format_message<P: SessionSettingsProvider>(
     Ok((formated, AgentRespType::Content))
 }
 
-pub(super) fn format_history_compact<P: SessionSettingsProvider>(
+pub fn format_history_compact<P: SessionSettingsProvider>(
     _: &SessionId,
     _: &P,
     result: &HistoryCompactResult,
@@ -192,7 +192,7 @@ pub(super) fn format_history_compact<P: SessionSettingsProvider>(
     }
 }
 
-pub(super) fn extract_reasoning<P: SessionSettingsProvider>(
+pub fn extract_reasoning<P: SessionSettingsProvider>(
     session_id: &SessionId,
     session_settings_provider: &P,
     reasoning: &Reasoning,
@@ -218,7 +218,7 @@ pub(super) fn extract_reasoning<P: SessionSettingsProvider>(
     }
 }
 
-pub(super) fn extract_message<P: SessionSettingsProvider>(
+pub fn extract_message<P: SessionSettingsProvider>(
     session_id: &SessionId,
     session_settings_provider: &P,
     message: &Message,

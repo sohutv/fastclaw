@@ -1,18 +1,14 @@
-use super::super::{AgentRespState, AgentRespType};
-use crate::agent::{Agent, AgentResponse, Notify};
+use crate::agent::a2a_channel::A2AChannel;
+use crate::agent::{Agent, AgentRequest, AgentRequestPkg, AgentResponse, Notify};
 use crate::channels::text_formater::*;
-use crate::channels::wechat_channel::WechatChannel;
+use crate::channels::{AgentRespState, AgentRespType};
 use crate::channels::{ChannelContext, ChannelMessage, SessionId, create_robot_messages_for_agent};
 use anyhow::anyhow;
-use wechat_sdk::client::WechatClient;
-use wechat_sdk::client::message::{MessageItems, TypingTicket, WechatMessage};
 
-impl WechatChannel {
+impl A2AChannel {
     pub(super) async fn handle_agent_message_actual(
         &self,
-        wechat: &WechatClient,
-        typing_ticket: Option<&TypingTicket>,
-        inbound_message: Option<&WechatMessage>,
+        inbound_message: Option<&AgentRequestPkg>,
         ChannelMessage {
             session_id,
             agent_id: _,
@@ -27,21 +23,14 @@ impl WechatChannel {
                     return Err(anyhow!("AgentRespState must be Init when starting"));
                 };
                 buff.clear();
-                if let Some(typing_ticket) = typing_ticket {
-                    let _ = wechat.send_typing(&typing_ticket).await;
-                }
                 (None, AgentRespState::Start)
             }
             AgentResponse::ToolCall(toolcall) => (
-                format_tool_call(session_id, &self.wechat_config, toolcall),
+                format_tool_call(session_id, &self.config, toolcall),
                 curr_state,
             ),
             AgentResponse::ReasoningStream(reasoning) => {
-                buff.extend(extract_reasoning(
-                    session_id,
-                    &self.wechat_config,
-                    reasoning,
-                ));
+                buff.extend(extract_reasoning(session_id, &self.config, reasoning));
                 (None, AgentRespState::Reasoning)
             }
             AgentResponse::MessageStream(message) => {
@@ -50,14 +39,14 @@ impl WechatChannel {
                 } else {
                     None
                 };
-                buff.extend(extract_message(session_id, &self.wechat_config, message));
+                buff.extend(extract_message(session_id, &self.config, message));
                 (formated_message, AgentRespState::Messaging)
             }
             AgentResponse::Final(usage) => (
                 Some(
                     format_message(
                         session_id,
-                        &self.wechat_config,
+                        &self.config,
                         self.agent.agent_settings().output_schema.is_some(),
                         usage,
                         buff,
@@ -81,11 +70,7 @@ impl WechatChannel {
                 curr_state,
             ),
             AgentResponse::HistoryCompact(result) => (
-                Some(format_history_compact(
-                    session_id,
-                    &self.wechat_config,
-                    result,
-                )),
+                Some(format_history_compact(session_id, &self.config, result)),
                 curr_state,
             ),
         };
@@ -93,49 +78,30 @@ impl WechatChannel {
             if let Some(robot_message) = create_robot_messages_for_agent(
                 &*self.agent,
                 session_id,
-                &self.wechat_config,
+                &self.config,
                 &self.ctx,
                 resp_type,
                 inbound_message,
                 text,
-                WechatChannel::create_robot_messages,
+                A2AChannel::create_robot_messages,
             )
             .await?
             {
-                let _ = robot_message.send(&wechat).await;
+                todo!()
             }
         }
         Ok(next_state)
     }
 }
 
-impl WechatChannel {
-    fn create_robot_messages<Content: Into<MessageItems>>(
+impl A2AChannel {
+    fn create_robot_messages(
         _: &dyn Agent,
         session_id: &SessionId,
         _: &ChannelContext,
-        _: Option<&WechatMessage>,
-        content: Content,
-    ) -> crate::Result<WechatRobotMessage> {
-        let message = match &session_id {
-            SessionId::Master { .. } | SessionId::Anonymous { .. } => WechatRobotMessage {
-                content: content.into(),
-            },
-            SessionId::Group { .. } => {
-                unreachable!("send robot message to group is not supported by wechat")
-            }
-        };
-        Ok(message)
-    }
-}
-
-struct WechatRobotMessage {
-    content: MessageItems,
-}
-
-impl WechatRobotMessage {
-    async fn send(self, wechat: &WechatClient) -> crate::Result<()> {
-        let _ = wechat.send_message(self.content).await?;
-        Ok(())
+        _: Option<&AgentRequestPkg>,
+        content: String,
+    ) -> crate::Result<AgentRequest> {
+        todo!()
     }
 }

@@ -1,10 +1,7 @@
-use crate::agent::{
-    Agent, AgentId, AgentRequest, AgentRequestContext, AgentRequestPkg, AgentResponse,
-};
+use crate::agent::{Agent, AgentId, AgentRequest, AgentResponse};
 use crate::config::{Config, Workspace};
 use async_trait::async_trait;
 use derive_more::Deref;
-use log::error;
 use std::sync::Arc;
 use strum::Display;
 use tokio::sync::mpsc::Receiver;
@@ -21,7 +18,6 @@ pub mod wechat_channel;
 #[cfg(feature = "channel_http_channel")]
 pub mod http_channel;
 
-pub mod a2a_channel;
 mod session_id;
 pub use session_id::*;
 
@@ -36,33 +32,49 @@ where
 
     type JoinHandle: Sync + Send;
 
-    async fn start(
-        self,
-        agent: Arc<dyn Agent>,
-    ) -> crate::Result<(Arc<Self>, Arc<Self::Client>, Self::JoinHandle)>;
+    async fn start(self) -> crate::Result<(Arc<Self>, Arc<Self::Client>, Self::JoinHandle)>;
+
+    fn agent(&self) -> &Arc<dyn Agent>;
 
     /// handle_agent_task
     /// spawn_agent_task -> spawn(handle_agent_message)
     async fn append_agent_task(
         self: Arc<Self>,
         client: Arc<Self::Client>,
-        agent: Arc<dyn Agent>,
         addi_system_prompt: Option<String>,
         inbound_message: Option<Self::InboundMessage>,
         req: AgentRequest,
     ) -> crate::Result<()> {
         let mut receiver =
-            Self::spawn_agent_task(Arc::clone(&agent), req.clone(), addi_system_prompt).await?;
+            spawn_agent_task::apply(Arc::clone(self.agent()), req.clone(), addi_system_prompt)
+                .await?;
         let self_ = Arc::clone(&self);
         let _ = tokio::spawn(async move {
             let _ = self_
-                .handle_agent_message(client, agent, inbound_message, &mut receiver)
+                .handle_agent_message(client, inbound_message, &mut receiver)
                 .await;
         });
         Ok(())
     }
 
-    async fn spawn_agent_task(
+    async fn handle_agent_message(
+        &self,
+        client: Arc<Self::Client>,
+        inbound_message: Option<Self::InboundMessage>,
+        receiver: &mut Receiver<crate::Result<ChannelMessage>>,
+    ) -> crate::Result<()>;
+
+    fn allow_session_ids(&self) -> crate::Result<Vec<&SessionId>>;
+}
+
+mod spawn_agent_task {
+    use crate::agent::{Agent, AgentRequest, AgentRequestContext, AgentRequestPkg};
+    use crate::channels::ChannelMessage;
+    use log::error;
+    use std::sync::Arc;
+    use tokio::sync::mpsc::Receiver;
+
+    pub(super) async fn apply(
         agent: Arc<dyn Agent>,
         req: AgentRequest,
         addi_system_prompt: Option<String>,
@@ -102,22 +114,12 @@ where
         }
         Ok(channel_message_receiver)
     }
-
-    async fn handle_agent_message(
-        &self,
-        client: Arc<Self::Client>,
-        agent: Arc<dyn Agent>,
-        inbound_message: Option<Self::InboundMessage>,
-        receiver: &mut Receiver<crate::Result<ChannelMessage>>,
-    ) -> crate::Result<()>;
-
-    fn allow_session_ids(&self) -> crate::Result<Vec<&SessionId>>;
 }
 
 #[allow(unused)]
 #[derive(Clone)]
 pub struct ChannelContext {
-    pub config: Config,
+    pub config: &'static Config,
     pub workspace: &'static Workspace,
 }
 
@@ -144,7 +146,7 @@ pub enum AgentRespType {
 }
 
 #[derive(Debug, Copy, Clone, Display)]
-enum AgentRespState {
+pub enum AgentRespState {
     Wait,
     Start,
     Reasoning,
@@ -152,7 +154,7 @@ enum AgentRespState {
     Final,
 }
 
-async fn create_robot_messages_for_agent<P, Content, F, InboundMsg, OutboundMsg>(
+pub async fn create_robot_messages_for_agent<P, Content, F, InboundMsg, OutboundMsg>(
     agent: &dyn Agent,
     session_id: &SessionId,
     session_settings_provider: &P,
@@ -231,4 +233,4 @@ where
     Ok(Some(msg))
 }
 
-mod text_formater;
+pub mod text_formater;

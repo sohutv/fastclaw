@@ -1,4 +1,4 @@
-use crate::agent::{Agent, AgentRequest};
+use crate::agent::AgentRequest;
 use crate::channels::Channel;
 use crate::channels::console_cmd::Console;
 use crate::channels::wechat_channel::WechatChannel;
@@ -17,7 +17,6 @@ impl WechatChannel {
     /// - wechat-bot 不支持群聊, 所以不会出现未授权的会话
     pub(super) async fn handle_input_message(
         self: Arc<Self>,
-        agent: Arc<dyn Agent>,
         wechat_client: Arc<WechatClient>,
         data: WechatMessage,
     ) -> crate::Result<()> {
@@ -172,7 +171,7 @@ impl WechatChannel {
             match Console::handle_console_cmd(
                 &self.ctx,
                 &cmd_val,
-                &agent,
+                &self.agent,
                 &self.wechat_config.session_id(),
             )
             .await
@@ -182,7 +181,7 @@ impl WechatChannel {
                     let client = Arc::clone(&wechat_client);
                     let _ = tokio::spawn(async move {
                         let _ = self_
-                            .handle_agent_message(client, Arc::clone(&agent), Some(data), &mut receiver)
+                            .handle_agent_message(client, Some(data), &mut receiver)
                             .await;
                     });
                     return Ok(());
@@ -207,7 +206,6 @@ impl WechatChannel {
         match Arc::clone(&self)
             .append_agent_task(
                 Arc::clone(&wechat_client),
-                Arc::clone(&agent),
                 None,
                 Some(data),
                 AgentRequest {

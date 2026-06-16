@@ -54,7 +54,7 @@ pub struct ToolContext {
 }
 
 impl ToolContext {
-    fn agent_context(&self) -> &AgentContext {
+    fn agent_context(&self) -> Arc<AgentContext> {
         self.parent_agent.context()
     }
 }

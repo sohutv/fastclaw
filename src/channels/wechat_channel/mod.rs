@@ -18,22 +18,22 @@ mod recv_agent_message;
 pub struct WechatChannel {
     pub ctx: Arc<ChannelContext>,
     pub wechat_config: WechatConfig,
+    pub agent: Arc<dyn Agent>,
 }
 
 impl WechatChannel {
     pub async fn new(
         config: &'static Config,
         workspace: &'static Workspace,
+        agent: &Arc<dyn Agent>,
     ) -> crate::Result<Self> {
         Ok(Self {
-            ctx: Arc::new(ChannelContext {
-                config: config.clone(),
-                workspace,
-            }),
+            ctx: Arc::new(ChannelContext { config, workspace }),
             wechat_config: config
                 .wechat_config
                 .clone()
                 .ok_or(anyhow!("dingtalk config not found"))?,
+            agent: Arc::clone(agent),
         })
     }
 }
@@ -44,10 +44,7 @@ impl Channel for WechatChannel {
     type InboundMessage = WechatMessage;
     type JoinHandle = tokio::task::JoinHandle<crate::Result<()>>;
 
-    async fn start(
-        self,
-        agent: Arc<dyn Agent>,
-    ) -> crate::Result<(Arc<Self>, Arc<Self::Client>, Self::JoinHandle)> {
+    async fn start(self) -> crate::Result<(Arc<Self>, Arc<Self::Client>, Self::JoinHandle)> {
         let wechat_config = WechatInnerConfig {
             state_path: self
                 .ctx
@@ -86,11 +83,7 @@ impl Channel for WechatChannel {
                                 l
                             }) {
                                 let _ = Arc::clone(&self_)
-                                    .handle_input_message(
-                                        Arc::clone(&agent),
-                                        Arc::clone(&wechat_client),
-                                        message,
-                                    )
+                                    .handle_input_message(Arc::clone(&wechat_client), message)
                                     .await;
                                 continue;
                             }
@@ -106,10 +99,13 @@ impl Channel for WechatChannel {
         Ok((self_, wechat_client, join_handle))
     }
 
+    fn agent(&self) -> &Arc<dyn Agent> {
+        &self.agent
+    }
+
     async fn handle_agent_message(
         &self,
         wechat: Arc<WechatClient>,
-        agent: Arc<dyn Agent>,
         inbound_message: Option<Self::InboundMessage>,
         receiver: &mut Receiver<crate::Result<ChannelMessage>>,
     ) -> crate::Result<()> {
@@ -122,7 +118,6 @@ impl Channel for WechatChannel {
                     match self
                         .handle_agent_message_actual(
                             &wechat,
-                            &*agent,
                             typing_ticket.as_ref(),
                             inbound_message.as_ref(),
                             &message,

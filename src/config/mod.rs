@@ -13,8 +13,7 @@ pub use r#type::*;
 mod config_;
 pub mod logger;
 
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
-#[serde(default)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Config {
     pub agent_groups: BTreeMap<AgentGroup, String>,
     pub model_providers: BTreeMap<ModelProviderName, ModelProviders>,
@@ -36,6 +35,7 @@ pub struct Config {
     #[serde(default)]
     pub mcp_tools: Option<McpToolSetConfigs>,
     pub daemon_agent_tools: Option<DaemonAgentToolsConfig>,
+    pub a2a_channel: A2AChannelConfig,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -51,6 +51,7 @@ impl Default for HeartbeatConfig {
 }
 
 mod workspace;
+use crate::agent::a2a_channel::A2AChannelConfig;
 use crate::tools::mcp_tool::McpToolSetConfigs;
 use crate::tools::{DaemonAgentToolsConfig, ImageUnderstandingConfig};
 pub use workspace::*;

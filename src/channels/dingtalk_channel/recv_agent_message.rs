@@ -1,5 +1,5 @@
 use super::super::{AgentRespState, AgentRespType};
-use crate::agent::{Agent, AgentResponse, Notify};
+use crate::agent::{AgentResponse, Notify};
 use crate::channels::ChannelMessage;
 use crate::channels::dingtalk_channel::DingtalkChannel;
 use crate::channels::text_formater::{
@@ -17,7 +17,6 @@ impl DingtalkChannel {
     pub(super) async fn handle_agent_message_actual(
         &self,
         dingtalk: &DingTalkStream,
-        agent: &dyn Agent,
         inbound_message: Option<&MessageData>,
         ChannelMessage {
             session_id,
@@ -79,7 +78,7 @@ impl DingtalkChannel {
                 let (text, rt) = format_message(
                     session_id,
                     &self.dingtalk_config,
-                    agent.agent_settings().output_schema.is_some(),
+                    self.agent.agent_settings().output_schema.is_some(),
                     usage,
                     buff,
                 )
@@ -121,7 +120,7 @@ impl DingtalkChannel {
         };
         if let Some((message_content, resp_type)) = formated_message {
             if let Ok(Some(robot_message)) = super::super::create_robot_messages_for_agent(
-                agent,
+                &*self.agent,
                 session_id,
                 &self.dingtalk_config,
                 &self.ctx,
@@ -138,35 +137,3 @@ impl DingtalkChannel {
         Ok(next_state)
     }
 }
-
-// async fn create_robot_messages_for_agent<Content, F, OutboundMsg>(
-//     agent: &dyn Agent,
-//     session_id: &SessionId,
-//     config: &DingTalkConfig,
-//     ctx: &ChannelContext,
-//     resp_type: AgentRespType,
-//     inbound_message: Option<&MessageData>,
-//     content: Content,
-//     outbound_msg_creator: F,
-// ) -> crate::Result<Option<OutboundMsg>>
-// where
-//     F: FnOnce(
-//         &dyn Agent,
-//         &SessionId,
-//         &ChannelContext,
-//         Option<&MessageData>,
-//         Content,
-//     ) -> crate::Result<OutboundMsg>,
-// {
-//     super::super::create_robot_messages_for_agent(
-//         agent,
-//         &session_id,
-//         config,
-//         ctx,
-//         resp_type,
-//         inbound_message,
-//         content,
-//         outbound_msg_creator,
-//     )
-//     .await
-// }

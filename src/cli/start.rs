@@ -86,7 +86,7 @@ impl CmdRunner for Start {
             let main_agent = {
                 let (agent_id, agent_group) = AgentId::main();
                 Arc::new(
-                    MainAgent::try_from(
+                    MainAgent::new(
                         agent::spawn_agent(
                             config,
                             &history_manager,
@@ -100,7 +100,8 @@ impl CmdRunner for Start {
                             &OwnerSession::GlobalShare,
                         )
                         .await?,
-                    )?
+                    )
+                    .await?
                     .init_children()
                     .await?,
                 ) as Arc<dyn Agent>
@@ -135,52 +136,48 @@ impl CmdRunner for Start {
                 #[cfg(feature = "channel_cli_channel")]
                 ChannelType::Cli => {
                     info!("Starting CLI channel");
-                    let channel = channels::cli_channel::CliChannel::new(config, workspace).await?;
-                    let (_, _, join_handle) = channel.start(Arc::clone(&main_agent)).await?;
+                    let channel =
+                        channels::cli_channel::CliChannel::new(config, workspace, &main_agent)
+                            .await?;
+                    let (_, _, join_handle) = channel.start().await?;
                     join_handles.push(JoinHandle::Std(join_handle));
                 }
                 #[cfg(feature = "channel_dingtalk_channel")]
                 ChannelType::Dingtalk => {
                     info!("Starting Dingtalk channel");
-                    let channel =
-                        channels::dingtalk_channel::DingtalkChannel::new(config, workspace).await?;
-                    let join_handle = start_channel(
+                    let channel = channels::dingtalk_channel::DingtalkChannel::new(
                         config,
                         workspace,
-                        channel,
-                        Arc::clone(&main_agent),
-                        Arc::clone(&heartbeat_agent),
+                        &main_agent,
                     )
                     .await?;
+                    let join_handle =
+                        start_channel(config, workspace, channel, Arc::clone(&heartbeat_agent))
+                            .await?;
                     join_handles.push(JoinHandle::Tokio(join_handle));
                 }
                 #[cfg(feature = "channel_wechat_channel")]
                 ChannelType::Wechat => {
-                    let channel =
-                        channels::wechat_channel::WechatChannel::new(config, workspace).await?;
-                    let join_handle = start_channel(
+                    let channel = channels::wechat_channel::WechatChannel::new(
                         config,
                         workspace,
-                        channel,
-                        Arc::clone(&main_agent),
-                        Arc::clone(&heartbeat_agent),
+                        &main_agent,
                     )
                     .await?;
+                    let join_handle =
+                        start_channel(config, workspace, channel, Arc::clone(&heartbeat_agent))
+                            .await?;
                     join_handles.push(JoinHandle::Tokio(join_handle));
                 }
                 #[cfg(feature = "channel_http_channel")]
                 ChannelType::Http => {
                     info!("Starting HttpStreamable channel");
                     let channel =
-                        channels::http_channel::HttpChannel::new(config, workspace).await?;
-                    let join_handle = start_channel(
-                        config,
-                        workspace,
-                        channel,
-                        Arc::clone(&main_agent),
-                        Arc::clone(&heartbeat_agent),
-                    )
-                    .await?;
+                        channels::http_channel::HttpChannel::new(config, workspace, &main_agent)
+                            .await?;
+                    let join_handle =
+                        start_channel(config, workspace, channel, Arc::clone(&heartbeat_agent))
+                            .await?;
                     join_handles.push(JoinHandle::Tokio(join_handle));
                 }
             }
@@ -203,14 +200,13 @@ async fn start_channel<C>(
     config: &'static Config,
     workspace: &'static Workspace,
     channel: C,
-    main_agent: Arc<dyn Agent>,
     heartbeat_agent: Arc<dyn Agent>,
 ) -> crate::Result<tokio::task::JoinHandle<()>>
 where
     C: Channel,
     <C as Channel>::JoinHandle: Future + Sync + Send,
 {
-    let (channel, client, chanel_join_handle) = channel.start(main_agent).await?;
+    let (channel, client, chanel_join_handle) = channel.start().await?;
     let (_, heartbeat_join_handle) = Heartbeat::new(
         config,
         workspace,

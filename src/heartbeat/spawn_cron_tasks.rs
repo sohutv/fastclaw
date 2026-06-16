@@ -108,7 +108,6 @@ where
                 match Arc::clone(&self.channel)
                     .append_agent_task(
                         Arc::clone(&self.client),
-                        Arc::clone(&self.agent),
                         None,
                         None,
                         AgentRequest {
