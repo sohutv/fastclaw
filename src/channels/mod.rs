@@ -111,9 +111,7 @@ where
         receiver: &mut Receiver<crate::Result<ChannelMessage>>,
     ) -> crate::Result<()>;
 
-    fn allow_session_ids(&self) -> crate::Result<Vec<&SessionId>> {
-        Ok(vec![])
-    }
+    fn allow_session_ids(&self) -> crate::Result<Vec<&SessionId>>;
 }
 
 #[allow(unused)]
@@ -154,9 +152,10 @@ enum AgentRespState {
     Final,
 }
 
-async fn create_robot_messages_for_agent<Content, F, InboundMsg, OutboundMsg>(
+async fn create_robot_messages_for_agent<P, Content, F, InboundMsg, OutboundMsg>(
     agent: &dyn Agent,
     session_id: &SessionId,
+    session_settings_provider: &P,
     ctx: &ChannelContext,
     resp_type: AgentRespType,
     inbound_msg: Option<&InboundMsg>,
@@ -164,6 +163,7 @@ async fn create_robot_messages_for_agent<Content, F, InboundMsg, OutboundMsg>(
     outbound_msg_creator: F,
 ) -> crate::Result<Option<OutboundMsg>>
 where
+    P: SessionSettingsProvider,
     F: FnOnce(
         &dyn Agent,
         &SessionId,
@@ -183,7 +183,7 @@ where
         show_compacting_ignore,
         show_error,
         ..
-    } = session_id.settings();
+    } = session_id.settings(session_settings_provider)?;
     match resp_type {
         AgentRespType::Start => {
             let true = show_start else {

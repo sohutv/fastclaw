@@ -1,4 +1,4 @@
-use crate::agent::{Agent, AgentId, HistoryManager, JsonlHistoryManager};
+use crate::agent::{Agent, AgentId, HistoryManager, JsonlHistoryManager, MainAgent, OwnerSession};
 use crate::channels::Channel;
 use crate::cli::CmdRunner;
 use crate::config::logger::{Level, Logger};
@@ -92,10 +92,12 @@ impl CmdRunner for Start {
                 &agent_group,
                 None,
                 None,
+                &OwnerSession::GlobalShare,
             )
             .await?;
+            let main_agent = Arc::new(MainAgent::try_from(main_agent)?.init_children().await?);
             let heartbeat_agent = main_agent.clone_with("heartbeat".into(), None).await?;
-            (main_agent, heartbeat_agent)
+            (main_agent as Arc<dyn Agent>, heartbeat_agent)
         };
 
         enum JoinHandle {

@@ -1,4 +1,4 @@
-use crate::agent::{AgentGroup, AgentId};
+use crate::agent::{AgentGroup, AgentId, OwnerSession};
 use crate::channels::SessionId;
 use crate::channels::http_channel::AppState;
 use crate::channels::http_channel::type_::UserId;
@@ -36,7 +36,7 @@ pub async fn handle(
         ..
     }): Json<Body>,
 ) -> Result<Json<Resp>, StatusCode> {
-    let _ = SessionId::try_from((user_id.deref(), &app_state.channel.config)).map_err(|err| {
+    let session_id = SessionId::try_from((user_id.deref(), &app_state.channel.http_config)).map_err(|err| {
         warn!("{err}");
         StatusCode::FORBIDDEN
     })?;
@@ -47,6 +47,7 @@ pub async fn handle(
             &agent_group,
             Some(system_prompt),
             None,
+            &OwnerSession::Private(session_id.clone())
         )
         .await
         .map_err(|err| {

@@ -35,11 +35,12 @@ impl HttpChannel {
                 (None, AgentRespState::Start)
             }
             AgentResponse::ToolCall(toolcall) => (
-                format_tool_call(session_id, toolcall).map(|(text, rt)| (text.into(), rt)),
+                format_tool_call(session_id, &self.http_config, toolcall)
+                    .map(|(text, rt)| (text.into(), rt)),
                 curr_state,
             ),
             AgentResponse::ReasoningStream(reasoning) => {
-                buff.extend(extract_reasoning(session_id, reasoning));
+                buff.extend(extract_reasoning(session_id, &self.http_config, reasoning));
                 (None, AgentRespState::Reasoning)
             }
             AgentResponse::MessageStream(message) => {
@@ -48,12 +49,13 @@ impl HttpChannel {
                 } else {
                     None
                 };
-                buff.extend(extract_message(session_id, message));
+                buff.extend(extract_message(session_id, &self.http_config, message));
                 (formated_message, AgentRespState::Messaging)
             }
             AgentResponse::Final(usage) => (
                 Some(format_message(
                     session_id,
+                    &self.http_config,
                     agent.agent_settings().output_schema.is_some(),
                     usage,
                     buff,
@@ -79,8 +81,12 @@ impl HttpChannel {
                 curr_state,
             ),
             AgentResponse::HistoryCompact(result) => (
-                Some(format_history_compact(session_id, result))
-                    .map(|(text, rt)| (text.into(), rt)),
+                Some(format_history_compact(
+                    session_id,
+                    &self.http_config,
+                    result,
+                ))
+                .map(|(text, rt)| (text.into(), rt)),
                 curr_state,
             ),
         };
@@ -88,6 +94,7 @@ impl HttpChannel {
             if let Some(robot_message) = create_robot_messages_for_agent(
                 agent,
                 session_id,
+                &self.http_config,
                 &self.ctx,
                 resp_type,
                 inbound_message,

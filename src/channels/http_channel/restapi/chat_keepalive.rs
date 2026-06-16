@@ -29,13 +29,13 @@ pub async fn handle(
     }): Query<Params>,
 ) -> Result<axum::response::Response, StatusCode> {
     let session_id =
-        SessionId::try_from((user_id.deref(), &app_state.channel.config)).map_err(|err| {
+        SessionId::try_from((user_id.deref(), &app_state.channel.http_config)).map_err(|err| {
             warn!("{err}");
             StatusCode::FORBIDDEN
         })?;
     let agent = super::get_or_create(
         &app_state,
-        &user_id,
+        &session_id,
         &agent_id,
         &agent_group,
     )

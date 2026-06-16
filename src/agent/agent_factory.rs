@@ -1,5 +1,5 @@
 use crate::agent::{
-    Agent, AgentGroup, AgentId, AgentSettings, HistoryManager, LlmAgentSupplier,
+    Agent, AgentGroup, AgentId, AgentSettings, HistoryManager, LlmAgentSupplier, OwnerSession,
     SystemPromptProvider,
 };
 use crate::config::{Config, Workspace};
@@ -65,6 +65,7 @@ pub async fn spawn_agent(
     agent_group: &AgentGroup,
     addi_system_prompt: Option<SystemPrompt>,
     desc: Option<String>,
+    owner_session: &OwnerSession,
 ) -> crate::Result<Arc<dyn Agent>> {
     let agent_config = if let Some(agent_config) = load_agent_config(workspace, agent_id).await.ok()
     {
@@ -78,6 +79,7 @@ pub async fn spawn_agent(
             agent_group_config: get_agent_group_config(workspace, &agent_group).await?,
             addi_system_prompt,
             desc,
+            owner_session: owner_session.clone(),
         };
         store_agent_config(workspace, agent_id, agent_group, config).await?
     };
@@ -125,6 +127,7 @@ async fn spawn_agent_actual(
                 ..
             },
         desc,
+        owner_session,
         ..
     } = &agent_config;
     let agent = match config.model_provider(model_provider)? {
@@ -145,6 +148,7 @@ async fn spawn_agent_actual(
                     mcp_registry,
                     agent_settings.clone(),
                     desc.clone(),
+                    owner_session,
                 )
                 .await?
         }
@@ -298,6 +302,7 @@ struct AgentConfig {
     agent_group_config: AgentGroupConfig,
     addi_system_prompt: Option<SystemPrompt>,
     desc: Option<String>,
+    owner_session: OwnerSession,
 }
 
 struct SystemPromptProvider_ {

@@ -1,4 +1,4 @@
-use crate::agent::{AgentGroup, AgentId};
+use crate::agent::{AgentGroup, AgentId, OwnerSession};
 use crate::tools::{ToolCallError, ToolCallRsult, ToolContext};
 use crate::type_::SystemPrompt;
 use itertools::Itertools;
@@ -83,6 +83,7 @@ The group to use for the new agent. This determines the agent's configuration pr
                 &agent_group,
                 Some(system_prompt),
                 Some(description),
+                &OwnerSession::Private(self.ctx.session_id.clone()),
             )
             .await
         {

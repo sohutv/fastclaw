@@ -4,7 +4,6 @@ use crate::config::{Config, Workspace};
 use anyhow::anyhow;
 use async_trait::async_trait;
 use log::warn;
-use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::mpsc::Receiver;
@@ -12,13 +11,9 @@ use wechat_sdk::client::message::WechatMessage;
 use wechat_sdk::client::{WechatClient, WechatConfig as WechatInnerConfig};
 
 mod config;
+pub use config::WechatConfig;
 mod handle_input_message;
 mod recv_agent_message;
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct WechatConfig {
-    pub session_id: SessionId,
-}
 
 pub struct WechatChannel {
     pub ctx: Arc<ChannelContext>,
@@ -81,7 +76,7 @@ impl Channel for WechatChannel {
             let self_ = Arc::clone(&self_);
             let wechat_client = Arc::clone(&wechat_client);
             tokio::spawn(async move {
-                if self_.wechat_config.session_id.settings().show_connected {
+                if self_.wechat_config.session_settings.show_connected {
                     let _ = wechat_client.send_message("robot connected").await;
                 }
                 loop {

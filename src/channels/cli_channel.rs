@@ -2,7 +2,7 @@ use crate::agent::{
     Agent, AgentRequest, AgentRequestContext, AgentRequestPkg, AgentResponse, Notify,
 };
 use crate::channels::console_cmd::Console;
-use crate::channels::{Channel, ChannelContext, ChannelMessage, SessionId};
+use crate::channels::{Channel, ChannelContext, ChannelMessage, SessionId, SessionSettings};
 use crate::config::{Config, Workspace};
 use anyhow::anyhow;
 use async_trait::async_trait;
@@ -21,6 +21,7 @@ use tokio::sync::mpsc::Receiver;
 pub struct CliChannel {
     ctx: Arc<ChannelContext>,
     session_id: SessionId,
+    session_settings: SessionSettings,
 }
 
 impl CliChannel {
@@ -33,10 +34,8 @@ impl CliChannel {
                 config: config.clone(),
                 workspace,
             }),
-            session_id: SessionId::Master {
-                val: "cli-session-channel".into(),
-                settings: Default::default(),
-            },
+            session_id: SessionId::Master("cli-session-channel".into()),
+            session_settings: Default::default(),
         })
     }
 }
@@ -145,7 +144,7 @@ impl Channel for CliChannel {
                     if let Some(message) = message {
                         match message{
                             Ok(message) =>{
-                                match  Self::handle_agent_message(&self.ctx, &message, state).await{
+                                match  self.handle_agent_message_actual(&message, state).await{
                                     Ok(AgentRespState::Final) | Err( _)=> {
                                         return Ok(());
                                     },
@@ -178,13 +177,16 @@ impl Channel for CliChannel {
             }
         }
     }
+
+    fn allow_session_ids(&self) -> crate::Result<Vec<&SessionId>> {
+        Ok(vec![&self.session_id])
+    }
 }
 
 impl CliChannel {
-    async fn handle_agent_message(
-        _: &ChannelContext,
+    async fn handle_agent_message_actual(
+        &self,
         ChannelMessage {
-            session_id,
             message: agent_response,
             ..
         }: &ChannelMessage,
@@ -216,7 +218,7 @@ impl CliChannel {
                 match curr_state {
                     AgentRespState::Start => {
                         cli_line_clear();
-                        if session_id.settings().show_reasoning {
+                        if self.session_settings.show_reasoning {
                             println!(
                                 r#"
 Reasoning >> ////////
@@ -241,7 +243,7 @@ Reasoning >> ////////
                         cli_line_clear();
                     }
                     AgentRespState::Reasoning => {
-                        if session_id.settings().show_reasoning {
+                        if self.session_settings.show_reasoning {
                             println!(
                                 r#"
 //////// << Reasoning

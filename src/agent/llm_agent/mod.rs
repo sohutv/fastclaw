@@ -1,7 +1,7 @@
 use crate::ModelName;
 use crate::agent::{
     Agent, AgentClone, AgentContext, AgentGroup, AgentId, AgentRequestPkg, AgentSettings,
-    HistoryManager, LlmAgentSupplier, SystemPromptProvider, Workspace,
+    HistoryManager, LlmAgentSupplier, OwnerSession, SystemPromptProvider, Workspace,
 };
 use crate::config::Config;
 use crate::memory::MemoryManager;
@@ -35,6 +35,7 @@ where
     channel_sender: Arc<RwLock<Option<Sender<AgentRequestPkg>>>>,
     /// Agent description
     description: String,
+    owner_session: OwnerSession,
 }
 
 #[async_trait]
@@ -58,44 +59,8 @@ where
         mcp_registry: &'static McpRegistry,
         agent_settings: AgentSettings,
         description: Option<String>,
+        owner_session: &OwnerSession,
     ) -> crate::Result<Self::A> {
-        Ok(LlmAgent::new(
-            agent_id,
-            group,
-            config,
-            self.clone(),
-            model,
-            history_manager,
-            memory_manager,
-            workspace,
-            system_prompt,
-            mcp_registry,
-            agent_settings,
-            description.unwrap_or_default(),
-        )
-        .await?)
-    }
-}
-
-impl<C, P> LlmAgent<C, P>
-where
-    C: CompletionClient + 'static + Send + Sync,
-    P: ModelProvider<Client = C> + 'static + Send + Sync,
-{
-    async fn new(
-        agent_id: &AgentId,
-        group: &AgentGroup,
-        config: &'static Config,
-        model_provider: P,
-        model_name: ModelName,
-        history_manager: Arc<dyn HistoryManager>,
-        memory_manager: Arc<MemoryManager>,
-        workspace: &'static Workspace,
-        system_prompt: Arc<dyn SystemPromptProvider>,
-        mcp_registry: &'static McpRegistry,
-        agent_settings: AgentSettings,
-        description: String,
-    ) -> crate::Result<Self> {
         let ctx = Arc::new(AgentContext {
             config,
             workspace,
@@ -105,19 +70,20 @@ where
             system_prompt,
             mcp_registry,
         });
-        Ok(Self {
-            model_settings: model_provider
-                .model_settings(&model_name)
+        Ok(LlmAgent {
+            model_settings: self
+                .model_settings(&model)
                 .map(|it| it.clone())
                 .ok_or(anyhow!("model settings not found for {}", agent_id))?,
             agent_settings,
-            model_name,
-            model_provider,
+            model_name: model,
+            model_provider: self.clone(),
             id: agent_id.clone(),
             group: group.clone(),
             ctx,
             channel_sender: Default::default(),
-            description,
+            description: description.unwrap_or_default(),
+            owner_session: owner_session.clone(),
         })
     }
 }
@@ -150,6 +116,7 @@ where
             ctx: self.ctx.clone(),
             channel_sender: Default::default(),
             description: self.description.clone(),
+            owner_session: self.owner_session.clone(),
         };
         Arc::new(agent).start().await
     }
@@ -211,5 +178,9 @@ where
 
     fn description(&self) -> &str {
         &self.description
+    }
+
+    fn owner_session(&self) -> &OwnerSession {
+        &self.owner_session
     }
 }

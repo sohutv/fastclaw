@@ -1,16 +1,20 @@
-use crate::channels::SessionId;
-use crate::channels::dingtalk_channel::DingTalkConfig;
+use std::collections::HashMap;
+use crate::channels::{SessionId, SessionSettings, SessionSettingsProvider};
 use anyhow::anyhow;
 use itertools::Itertools;
+use std::ops::Deref;
+use serde::{Deserialize, Serialize};
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DingTalkConfig {
+    pub credential: dingtalk_stream::Credential,
+    pub allow_session_ids: HashMap<SessionId, SessionSettings>,
+}
 
 impl DingTalkConfig {
-    fn allow_session_id<UserId: AsRef<str>>(&self, user_id: UserId) -> Option<&SessionId> {
-        self.allow_session_ids.get(user_id.as_ref())
-    }
-
     pub(super) fn master_session_ids(&self) -> Vec<&SessionId> {
         self.allow_session_ids
-            .values()
+            .keys()
             .flat_map(|it| {
                 if let SessionId::Master { .. } = it {
                     Some(it)
@@ -22,16 +26,26 @@ impl DingTalkConfig {
     }
 }
 
+impl SessionSettingsProvider for DingTalkConfig {
+    fn session_settings(&self, session_id: &SessionId) -> crate::Result<&SessionSettings> {
+        let dst = self
+            .allow_session_ids
+            .get(session_id)
+            .ok_or(anyhow!("session_id {session_id} is forbidden",))?;
+        Ok(dst)
+    }
+}
+
 impl<S: AsRef<str>> TryFrom<(S, &DingTalkConfig)> for SessionId {
     type Error = anyhow::Error;
 
-    fn try_from((session_id_key, config): (S, &DingTalkConfig)) -> Result<Self, Self::Error> {
-        match config.allow_session_id(session_id_key.as_ref()) {
-            Some(dst) => Ok(dst.clone()),
-            None => Err(anyhow!(
-                "session_id {} not allowed",
-                session_id_key.as_ref()
-            )),
-        }
+    fn try_from((raw_session_id, config): (S, &DingTalkConfig)) -> Result<Self, Self::Error> {
+        let raw_session_id = raw_session_id.as_ref();
+        let dst = config
+            .allow_session_ids
+            .keys()
+            .find(|&it| it.deref().eq(raw_session_id))
+            .ok_or(anyhow!("session_id {raw_session_id} is forbidden",))?;
+        Ok(dst.clone())
     }
 }

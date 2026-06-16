@@ -29,21 +29,7 @@ mod restapi;
 pub struct HttpChannel {
     #[allow(dead_code)]
     pub ctx: Arc<ChannelContext>,
-    pub config: HttpChannelConfig,
-}
-
-impl<S: AsRef<str>> TryFrom<(S, &HttpChannelConfig)> for SessionId {
-    type Error = anyhow::Error;
-
-    fn try_from((session_id_key, config): (S, &HttpChannelConfig)) -> Result<Self, Self::Error> {
-        match config.allow_session_id(session_id_key.as_ref()) {
-            Some(dst) => Ok(dst.clone()),
-            None => Err(anyhow!(
-                "session_id {} not allowed",
-                session_id_key.as_ref()
-            )),
-        }
-    }
+    pub http_config: HttpChannelConfig,
 }
 
 impl HttpChannel {
@@ -56,7 +42,7 @@ impl HttpChannel {
                 config: config.clone(),
                 workspace,
             }),
-            config: config
+            http_config: config
                 .http_config
                 .clone()
                 .ok_or_else(|| anyhow!("http_config not found"))?,
@@ -128,7 +114,7 @@ impl Channel for HttpChannel {
             agent,
             client: Arc::clone(&client),
         });
-        let addr: SocketAddr = self_.config.addr.parse()?;
+        let addr: SocketAddr = self_.http_config.addr.parse()?;
         let listener = tokio::net::TcpListener::bind(&addr).await?;
         info!("HttpCompletable HTTP channel listening on {}", addr);
 
@@ -184,7 +170,7 @@ impl Channel for HttpChannel {
     }
 
     fn allow_session_ids(&self) -> crate::Result<Vec<&SessionId>> {
-        let arr = self.config.allow_session_ids.values().collect_vec();
+        let arr = self.http_config.allow_session_ids.keys().collect_vec();
         Ok(arr)
     }
 }

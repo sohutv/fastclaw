@@ -1,57 +1,25 @@
-use derive_more::{Deref, Display};
+use derive_more::{Deref, Display, From};
 use serde::{Deserialize, Serialize};
-use std::fmt::{Display, Formatter};
 use std::hash::{Hash, Hasher};
 use std::ops::Deref;
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Eq, PartialEq, Hash, Display, From)]
 pub enum SessionId {
-    Master {
-        val: Master,
-        settings: SessionSettings,
-    },
-    Anonymous {
-        val: Anonymous,
-        settings: SessionSettings,
-    },
-    Group {
-        val: Group,
-        settings: SessionSettings,
-    },
+    Master(Master),
+    Anonymous(Anonymous),
+    Group(Group),
 }
 
-impl PartialEq<Self> for SessionId {
-    fn eq(&self, other: &Self) -> bool {
-        self.deref().eq(other.deref())
-    }
-}
+impl Deref for SessionId {
+    type Target = str;
 
-impl Eq for SessionId {}
-
-impl Hash for SessionId {
-    fn hash<H: Hasher>(&self, state: &mut H) {
-        self.deref().hash(state)
-    }
-}
-
-impl Display for SessionId {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        let str = match self {
-            SessionId::Master { val, .. } => val.as_str(),
-            SessionId::Anonymous { val, .. } => val.as_str(),
-            SessionId::Group { val, .. } => val.as_str(),
+    fn deref(&self) -> &Self::Target {
+        let val: &str = match self {
+            SessionId::Master(val) => val,
+            SessionId::Anonymous(val) => val,
+            SessionId::Group(val) => val,
         };
-        write!(f, "{}", str)
-    }
-}
-
-impl SessionId {
-    pub fn settings(&self) -> &SessionSettings {
-        match self {
-            SessionId::Master { settings, .. } => settings,
-            SessionId::Anonymous { settings, .. } => settings,
-            SessionId::Group { settings, .. } => settings,
-        }
+        val
     }
 }
 
@@ -91,24 +59,44 @@ impl Default for SessionSettings {
     }
 }
 
-#[derive(Debug, Clone, Eq, PartialEq, Hash, Serialize, Deserialize, Display, Deref)]
-pub struct Master(pub String);
-#[derive(Debug, Clone, Eq, PartialEq, Hash, Serialize, Deserialize, Display, Deref)]
-pub struct Anonymous(pub String);
-#[derive(Debug, Clone, Eq, PartialEq, Hash, Serialize, Deserialize, Display)]
-pub enum UserId {
-    Master(Master),
-    Anonymous(Anonymous),
+pub trait SessionSettingsProvider {
+    fn session_settings(&self, session_id: &SessionId) -> crate::Result<&SessionSettings>;
 }
 
-impl Deref for UserId {
-    type Target = str;
+impl SessionId {
+    pub fn settings<'a, P: SessionSettingsProvider>(
+        &self,
+        provider: &'a P,
+    ) -> crate::Result<&'a SessionSettings> {
+        provider.session_settings(self)
+    }
+}
 
-    fn deref(&self) -> &Self::Target {
-        match self {
-            UserId::Master(val) => val,
-            UserId::Anonymous(val) => val,
-        }
+#[derive(
+    Debug, Clone, Eq, PartialEq, Hash, Ord, PartialOrd, Serialize, Deserialize, Display, Deref,
+)]
+pub struct Master(pub String);
+
+impl<S> From<S> for Master
+where
+    S: AsRef<str>,
+{
+    fn from(val: S) -> Self {
+        Master(val.as_ref().to_string())
+    }
+}
+
+#[derive(
+    Debug, Clone, Eq, PartialEq, Hash, Ord, PartialOrd, Serialize, Deserialize, Display, Deref,
+)]
+pub struct Anonymous(pub String);
+
+impl<S> From<S> for Anonymous
+where
+    S: AsRef<str>,
+{
+    fn from(val: S) -> Self {
+        Anonymous(val.as_ref().to_string())
     }
 }
 
@@ -117,9 +105,15 @@ impl Deref for UserId {
 pub struct Group {
     pub id: String,
     #[deref]
-    pub session_id: String,
-    pub user_id: UserId,
+    pub user_id: GroupUserId,
     pub name: Option<String>,
+}
+#[derive(
+    Debug, Clone, Eq, PartialEq, Hash, Ord, PartialOrd, Serialize, Deserialize, Display, Deref,
+)]
+pub enum GroupUserId {
+    Master(Anonymous),
+    Anonymous(Anonymous),
 }
 
 impl Eq for Group {}
@@ -136,113 +130,11 @@ impl Hash for Group {
     }
 }
 
-impl Deref for SessionId {
-    type Target = str;
-
-    fn deref(&self) -> &Self::Target {
-        let val: &str = match self {
-            SessionId::Master { val, .. } => val,
-            SessionId::Anonymous { val, .. } => val,
-            SessionId::Group { val, .. } => val,
-        };
-        val
-    }
-}
-
-impl UserId {
-    pub fn master<S: AsRef<str>>(val: S) -> UserId {
-        UserId::Master(val.into())
-    }
-
-    pub fn anonymous<S: AsRef<str>>(val: S) -> UserId {
-        UserId::Anonymous(val.into())
-    }
-}
-
-impl<S> From<S> for Master
+impl<T> From<&T> for SessionId
 where
-    S: AsRef<str>,
+    T: Into<SessionId> + Clone,
 {
-    fn from(val: S) -> Self {
-        Master(val.as_ref().to_string())
-    }
-}
-
-impl<S> From<S> for Anonymous
-where
-    S: AsRef<str>,
-{
-    fn from(val: S) -> Self {
-        Anonymous(val.as_ref().to_string())
-    }
-}
-
-impl Into<UserId> for &SessionId {
-    fn into(self) -> UserId {
-        match self {
-            SessionId::Master { val, .. } => UserId::Master(val.clone()),
-            SessionId::Anonymous { val, .. } => UserId::Anonymous(val.clone()),
-            SessionId::Group { val, .. } => val.user_id.clone(),
-        }
-    }
-}
-
-impl From<Master> for UserId {
-    fn from(value: Master) -> Self {
-        UserId::Master(value)
-    }
-}
-
-impl From<&Master> for UserId {
-    fn from(value: &Master) -> Self {
-        UserId::Master(value.clone())
-    }
-}
-
-impl From<Anonymous> for UserId {
-    fn from(value: Anonymous) -> Self {
-        UserId::Anonymous(value)
-    }
-}
-
-impl From<&Anonymous> for UserId {
-    fn from(value: &Anonymous) -> Self {
-        UserId::Anonymous(value.clone())
-    }
-}
-
-impl From<Master> for SessionId {
-    fn from(value: Master) -> Self {
-        Self::Master {
-            val: value,
-            settings: Default::default(),
-        }
-    }
-}
-
-impl From<&Master> for SessionId {
-    fn from(value: &Master) -> Self {
-        Self::Master {
-            val: value.clone(),
-            settings: Default::default(),
-        }
-    }
-}
-
-impl From<Anonymous> for SessionId {
-    fn from(value: Anonymous) -> Self {
-        Self::Anonymous {
-            val: value,
-            settings: Default::default(),
-        }
-    }
-}
-
-impl From<&Anonymous> for SessionId {
-    fn from(value: &Anonymous) -> Self {
-        Self::Anonymous {
-            val: value.clone(),
-            settings: Default::default(),
-        }
+    fn from(value: &T) -> Self {
+        value.clone().into()
     }
 }

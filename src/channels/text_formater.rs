@@ -1,5 +1,5 @@
 use crate::agent::HistoryCompactResult;
-use crate::channels::{AgentRespType, SessionId};
+use crate::channels::{AgentRespType, SessionId, SessionSettingsProvider};
 use derive_more::From;
 use itertools::Itertools;
 use rig::completion::{AssistantContent, Usage};
@@ -11,15 +11,20 @@ use serde::ser::Error;
 use std::fmt::{Display, Formatter};
 use std::mem;
 
-pub(super) fn format_tool_call(
+pub(super) fn format_tool_call<P: SessionSettingsProvider>(
     session_id: &SessionId,
+    session_settings_provider: &P,
     ToolCall {
         call_id,
         function: ToolFunction { name, arguments },
         ..
     }: &ToolCall,
 ) -> Option<(String, AgentRespType)> {
-    let true = session_id.settings().show_toolcall else {
+    let true = session_id
+        .settings(session_settings_provider)
+        .map(|it| it.show_toolcall)
+        .unwrap_or(false)
+    else {
         return None;
     };
     let text = format!(
@@ -37,13 +42,18 @@ pub(super) fn format_tool_call(
     Some((text, AgentRespType::ToolCall))
 }
 
-pub(super) fn format_tool_result(
+pub(super) fn format_tool_result<P: SessionSettingsProvider>(
     session_id: &SessionId,
+    session_settings_provider: &P,
     ToolResult {
         call_id, content, ..
     }: &ToolResult,
 ) -> Option<(String, AgentRespType)> {
-    let true = session_id.settings().show_toolcall else {
+    let true = session_id
+        .settings(session_settings_provider)
+        .map(|it| it.show_toolcall)
+        .unwrap_or(false)
+    else {
         return None;
     };
     let text = content
@@ -103,8 +113,9 @@ impl Display for FormatedMessage {
     }
 }
 
-pub(super) fn format_message(
+pub(super) fn format_message<P: SessionSettingsProvider>(
     session_id: &SessionId,
+    session_settings_provider: &P,
     output_schema: bool,
     usage: &Usage,
     buff: &mut Vec<String>,
@@ -118,7 +129,11 @@ pub(super) fn format_message(
         });
         FormatedMessage::Json(json)
     } else {
-        let text = if session_id.settings().show_token_usage {
+        let text = if session_id
+            .settings(session_settings_provider)
+            .map(|it| it.show_token_usage)
+            .unwrap_or(false)
+        {
             format!(
                 r#"
 {}
@@ -135,8 +150,9 @@ pub(super) fn format_message(
     Ok((formated, AgentRespType::Content))
 }
 
-pub(super) fn format_history_compact(
+pub(super) fn format_history_compact<P: SessionSettingsProvider>(
     _: &SessionId,
+    _: &P,
     result: &HistoryCompactResult,
 ) -> (String, AgentRespType) {
     match result {
@@ -176,8 +192,16 @@ pub(super) fn format_history_compact(
     }
 }
 
-pub(super) fn extract_reasoning(session_id: &SessionId, reasoning: &Reasoning) -> Vec<String> {
-    if session_id.settings().show_reasoning {
+pub(super) fn extract_reasoning<P: SessionSettingsProvider>(
+    session_id: &SessionId,
+    session_settings_provider: &P,
+    reasoning: &Reasoning,
+) -> Vec<String> {
+    if session_id
+        .settings(session_settings_provider)
+        .map(|it| it.show_reasoning)
+        .unwrap_or(false)
+    {
         reasoning
             .content
             .iter()
@@ -194,16 +218,22 @@ pub(super) fn extract_reasoning(session_id: &SessionId, reasoning: &Reasoning) -
     }
 }
 
-pub(super) fn extract_message(session_id: &SessionId, message: &Message) -> Vec<String> {
+pub(super) fn extract_message<P: SessionSettingsProvider>(
+    session_id: &SessionId,
+    session_settings_provider: &P,
+    message: &Message,
+) -> Vec<String> {
     match message {
         Message::User { content } => content
             .iter()
             .flat_map(|content| match content {
                 UserContent::Text(text) => vec![text.to_string()],
-                UserContent::ToolResult(toolcall) => format_tool_result(session_id, toolcall)
-                    .into_iter()
-                    .map(|it| it.0)
-                    .collect_vec(),
+                UserContent::ToolResult(toolcall) => {
+                    format_tool_result(session_id, session_settings_provider, toolcall)
+                        .into_iter()
+                        .map(|it| it.0)
+                        .collect_vec()
+                }
                 UserContent::Image(image) => vec![
                     image
                         .clone()
@@ -239,11 +269,15 @@ pub(super) fn extract_message(session_id: &SessionId, message: &Message) -> Vec<
             .iter()
             .flat_map(|content| match content {
                 AssistantContent::Text(text) => vec![text.to_string()],
-                AssistantContent::ToolCall(toolcall) => format_tool_call(session_id, toolcall)
-                    .into_iter()
-                    .map(|it| it.0)
-                    .collect_vec(),
-                AssistantContent::Reasoning(reasoning) => extract_reasoning(session_id, reasoning),
+                AssistantContent::ToolCall(toolcall) => {
+                    format_tool_call(session_id, session_settings_provider, toolcall)
+                        .into_iter()
+                        .map(|it| it.0)
+                        .collect_vec()
+                }
+                AssistantContent::Reasoning(reasoning) => {
+                    extract_reasoning(session_id, session_settings_provider, reasoning)
+                }
                 AssistantContent::Image(image) => vec![
                     image
                         .clone()

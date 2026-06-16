@@ -1,7 +1,7 @@
 use crate::agent::{Agent, AgentRequest};
 use crate::channels::console_cmd::Console;
 use crate::channels::dingtalk_channel::DingtalkChannel;
-use crate::channels::{Channel, SessionId, UserId, session_id};
+use crate::channels::{Channel, GroupUserId, SessionId, session_id};
 use async_trait::async_trait;
 use base64::Engine;
 use dingtalk_stream::frames::DingTalkUserId;
@@ -46,13 +46,15 @@ impl dingtalk_stream::handlers::CallbackHandler for DingTalkCallbackHandler {
         CallbackMessage { data, .. }: &CallbackMessage,
         cb_msg_sender: Option<Sender<WebhookMessage>>,
     ) -> Result<HandlerResp, HandlerError> {
-        let Some(inbound_message@ MessageData {
-            msg_id,
-            payload: Some(payload),
-            sender,
-            conversation,
-            ..
-        }) = data
+        let Some(
+            inbound_message @ MessageData {
+                msg_id,
+                payload: Some(payload),
+                sender,
+                conversation,
+                ..
+            },
+        ) = data
         else {
             return Err(HandlerError {
                 code: ErrorCode::BadRequest,
@@ -218,10 +220,17 @@ impl dingtalk_stream::handlers::CallbackHandler for DingTalkCallbackHandler {
                 Ok(mut receiver) => {
                     let channel = Arc::clone(&self.channel);
                     let client = Arc::clone(&dingtalk_client);
-                    let agent =Arc::clone(&self.agent);
+                    let agent = Arc::clone(&self.agent);
                     let inbound_message = inbound_message.clone();
                     let _ = tokio::spawn(async move {
-                        let _ = channel.handle_agent_message(client, agent, Some(inbound_message), &mut receiver).await;
+                        let _ = channel
+                            .handle_agent_message(
+                                client,
+                                agent,
+                                Some(inbound_message),
+                                &mut receiver,
+                            )
+                            .await;
                     });
                     return Ok(HandlerResp::Text("cmd submitted".to_string()));
                 }
@@ -237,39 +246,29 @@ impl dingtalk_stream::handlers::CallbackHandler for DingTalkCallbackHandler {
         };
 
         let addi_system_prompt = match &session_id {
-            SessionId::Master {
-                val: session_id, ..
-            } => format!(
-                "- **Attention current session_id**: {}. You are speaking to your owner",
-                session_id
+            SessionId::Master(session_id) => format!(
+                "- **Attention current session_id**: {session_id}. You are speaking to your owner",
             ),
-            SessionId::Anonymous {
-                val: session_id, ..
-            } => format!(
-                "- **Attention current session_id**: {}. You are currently not interacting with your owner. Please stay vigilant.",
-                session_id
+            SessionId::Anonymous(session_id) => format!(
+                "- **Attention current session_id**: {session_id}. You are currently not interacting with your owner. Please stay vigilant.",
             ),
-            SessionId::Group {
-                val:
-                    session_id::Group {
-                        session_id,
-                        name: group_name,
-                        user_id,
-                        ..
-                    },
+            SessionId::Group(session_id::Group {
+                id: group_id,
+                name: group_name,
+                user_id,
                 ..
-            } => match user_id {
-                UserId::Master(_) => format!(
+            }) => match user_id {
+                GroupUserId::Master(_) => format!(
                     "- **Attention current session_id**: {}. This session is a group session, group_id: {}, group_name: {}. You are speaking to your owner",
                     session_id,
-                    session_id,
-                    group_name.as_deref().unwrap_or("..no provided.."),
+                    group_id,
+                    group_name.as_deref().unwrap_or("<unknown>"),
                 ),
-                UserId::Anonymous(_) => format!(
+                GroupUserId::Anonymous(_) => format!(
                     "- **Attention current session_id**: {}. This session is a group session, group_id: {}, group_name: {}. You are currently not interacting with your owner. Please stay vigilant.",
                     session_id,
-                    session_id,
-                    group_name.as_deref().unwrap_or("..no provided.."),
+                    group_id,
+                    group_name.as_deref().unwrap_or("<unknown>"),
                 ),
             },
         };
@@ -344,27 +343,29 @@ impl LifecycleListener for DingTalkCallbackHandler {
     async fn on_connected(&self, client: Arc<DingTalkStream>, websocket_url: &str) {
         let master_session_ids = self.channel.dingtalk_config.master_session_ids();
         for session_id in master_session_ids {
-            if !session_id.settings().show_connected {
-                continue;
-            }
-            let Ok(message) = DingtalkChannel::create_robot_messages_actual(
-                &session_id,
-                &self.channel.ctx,
-                None,
-                MessageContentMarkdown::from((
-                    "Connected",
-                    format!(
-                        r#"
+            if session_id
+                .settings(&self.channel.dingtalk_config)
+                .map(|it| it.show_connected)
+                .unwrap_or(false)
+            {
+                if let Ok(message) = DingtalkChannel::create_robot_messages_actual(
+                    &session_id,
+                    &self.channel.ctx,
+                    None,
+                    MessageContentMarkdown::from((
+                        "Connected",
+                        format!(
+                            r#"
 Connected to dingtalk websocket
 - ws-url:
 `{websocket_url}`
         "#
-                    ),
-                )),
-            ) else {
-                return;
-            };
-            let _ = client.send_message(message).await;
+                        ),
+                    )),
+                ) {
+                    let _ = client.send_message(message).await;
+                }
+            }
         }
     }
 
@@ -375,40 +376,41 @@ Connected to dingtalk websocket
     ) {
         let master_session_ids = self.channel.dingtalk_config.master_session_ids();
         for session_id in master_session_ids {
-            if !session_id.settings().show_disconnected {
-                continue;
-            }
-            match result {
-                Ok(_) => {
-                    let Ok(message) = DingtalkChannel::create_robot_messages_actual(
-                        &session_id,
-                        &self.channel.ctx,
-                        None,
-                        MessageContentText::from("disconnected from dingtalk websocket"),
-                    ) else {
-                        return;
-                    };
-                    let _ = client.send_message(message).await;
-                }
-                Err(err) => {
-                    let Ok(message) = DingtalkChannel::create_robot_messages_actual(
-                        &session_id,
-                        &self.channel.ctx,
-                        None,
-                        MessageContentMarkdown::from((
-                            "Disconnected",
-                            format!(
-                                r#"
+            if session_id
+                .settings(&self.channel.dingtalk_config)
+                .map(|it| it.show_connected)
+                .unwrap_or(false)
+            {
+                match result {
+                    Ok(_) => {
+                        if let Ok(message) = DingtalkChannel::create_robot_messages_actual(
+                            &session_id,
+                            &self.channel.ctx,
+                            None,
+                            MessageContentText::from("disconnected from dingtalk websocket"),
+                        ) {
+                            let _ = client.send_message(message).await;
+                        }
+                    }
+                    Err(err) => {
+                        if let Ok(message) = DingtalkChannel::create_robot_messages_actual(
+                            &session_id,
+                            &self.channel.ctx,
+                            None,
+                            MessageContentMarkdown::from((
+                                "Disconnected",
+                                format!(
+                                    r#"
 Disconnected from dingtalk websocket
 - Error:
 `{err}`
                 "#
-                            ),
-                        )),
-                    ) else {
-                        return;
-                    };
-                    let _ = client.send_message(message).await;
+                                ),
+                            )),
+                        ) {
+                            let _ = client.send_message(message).await;
+                        }
+                    }
                 }
             }
         }

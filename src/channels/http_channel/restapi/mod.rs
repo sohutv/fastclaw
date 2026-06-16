@@ -1,6 +1,6 @@
-use crate::agent::{Agent, AgentGroup, AgentId};
+use crate::agent::{Agent, AgentGroup, AgentId, OwnerSession};
+use crate::channels::SessionId;
 use crate::channels::http_channel::AppState;
-use crate::channels::http_channel::type_::UserId;
 use axum::http::StatusCode;
 use log::{error, info};
 use std::sync::Arc;
@@ -12,7 +12,7 @@ pub mod fork_agent;
 pub mod drop_agent;
 pub async fn get_or_create(
     AppState { agent: main, .. }: &AppState,
-    user_id: &UserId,
+    session_id: &SessionId,
     agent_id: &AgentId,
     agent_group: &AgentGroup,
 ) -> Result<Arc<dyn Agent>, StatusCode> {
@@ -20,14 +20,20 @@ pub async fn get_or_create(
         return Ok(Arc::clone(&main));
     }
     let agent = main
-        .fork_child(agent_id, agent_group, None, None)
+        .fork_child(
+            agent_id,
+            agent_group,
+            None,
+            None,
+            &OwnerSession::Private(session_id.clone()),
+        )
         .await
         .map_err(|err| {
             error!("fork {agent_group} child agent failed, err: {err}");
             StatusCode::BAD_REQUEST
         })?;
     info!(
-        "get {agent_group} child agent for {user_id} ok, agent_id: {}",
+        "get {agent_group} child agent for {session_id} ok, agent_id: {}",
         agent.id()
     );
     Ok(agent)

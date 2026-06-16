@@ -17,22 +17,15 @@ use dingtalk_stream::{
 };
 use itertools::Itertools;
 use log::warn;
-use serde::{Deserialize, Serialize};
-use std::collections::BTreeMap;
 use std::ops::Deref;
 use std::sync::Arc;
 use tokio::sync::mpsc::Receiver;
 use tokio::task::JoinHandle;
 
 mod config;
+pub use config::DingTalkConfig;
 mod handle_input_message;
 mod recv_agent_message;
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct DingTalkConfig {
-    pub credential: dingtalk_stream::Credential,
-    pub allow_session_ids: BTreeMap<String, SessionId>,
-}
 
 pub struct DingtalkChannel {
     pub ctx: Arc<ChannelContext>,
@@ -127,15 +120,10 @@ impl Channel for DingtalkChannel {
     }
 
     fn allow_session_ids(&self) -> crate::Result<Vec<&SessionId>> {
-        let arr = self
-            .dingtalk_config
-            .allow_session_ids
-            .values()
-            .collect_vec();
+        let arr = self.dingtalk_config.allow_session_ids.keys().collect_vec();
         Ok(arr)
     }
 }
-
 
 impl DingtalkChannel {
     fn create_robot_messages<Content: Into<MessageContent>>(
@@ -156,16 +144,16 @@ impl DingtalkChannel {
     ) -> crate::Result<RobotMessage> {
         let content = content.into();
         let message = match &session_id {
-            SessionId::Master { .. } | SessionId::Anonymous { .. } => RobotPrivateMessage {
+            SessionId::Master(_) | SessionId::Anonymous(_) => RobotPrivateMessage {
                 user_ids: vec![DingTalkUserId::from(session_id.deref())],
                 content: content.clone(),
             }
-                .into(),
-            SessionId::Group { val: group, .. } => RobotGroupMessage {
+            .into(),
+            SessionId::Group(group) => RobotGroupMessage {
                 group_id: DingTalkGroupConversationId::from(&group.id),
                 content: content.clone(),
             }
-                .into(),
+            .into(),
         };
         Ok(message)
     }

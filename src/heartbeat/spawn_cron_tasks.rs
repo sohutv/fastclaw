@@ -84,10 +84,7 @@ where
                     }
                 }
             };
-            let session_id = SessionId::Anonymous {
-                val: Anonymous(task.session_id.clone()),
-                settings: Default::default(),
-            };
+            let session_id = Anonymous(task.session_id.clone()).into();
             match time_to_exec {
                 TaskScheduleResult::Exec | TaskScheduleResult::Delayed => {
                     // To optimize the problem of repeated task execution, the task status will be marked first.

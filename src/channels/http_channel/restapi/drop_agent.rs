@@ -24,7 +24,7 @@ pub async fn handle(
     }): State<AppState>,
     Query(Params { user_id, agent_id }): Query<Params>,
 ) -> Result<(), StatusCode> {
-    let _ = SessionId::try_from((user_id.deref(), &channel.config)).map_err(|err| {
+    let _ = SessionId::try_from((user_id.deref(), &channel.http_config)).map_err(|err| {
         warn!("{err}");
         StatusCode::FORBIDDEN
     })?;

@@ -94,6 +94,7 @@ pub trait Agent: SessionCompactSupport + AgentClone + Send + Sync {
         agent_group: &AgentGroup,
         addi_system_prompt: Option<SystemPrompt>,
         desc: Option<String>,
+        owner_session: &OwnerSession,
     ) -> crate::Result<Arc<dyn Agent>> {
         if self.id().eq(agent_id) || self.agent_group().eq(agent_group) {
             return Err(anyhow!(
@@ -127,6 +128,7 @@ pub trait Agent: SessionCompactSupport + AgentClone + Send + Sync {
                 agent_group,
                 addi_system_prompt,
                 desc,
+                owner_session,
             )
             .await?
         };
@@ -147,10 +149,17 @@ pub trait Agent: SessionCompactSupport + AgentClone + Send + Sync {
     fn id(&self) -> &AgentId;
     fn agent_context(&self) -> Arc<AgentContext>;
 
-    #[allow(unused)]
     fn agent_group(&self) -> &AgentGroup;
 
     fn description(&self) -> &str;
+
+    fn owner_session(&self) -> &OwnerSession;
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, From, Serialize, Deserialize)]
+pub enum OwnerSession {
+    GlobalShare,
+    Private(SessionId),
 }
 
 #[async_trait]
@@ -255,6 +264,7 @@ pub trait LlmAgentSupplier {
         mcp_registry: &'static McpRegistry,
         agent_settings: AgentSettings,
         description: Option<String>,
+        owner_session: &OwnerSession,
     ) -> crate::Result<Self::A>;
 }
 
@@ -417,3 +427,6 @@ impl Default for AgentSettings {
 
 mod agent_factory;
 pub use agent_factory::*;
+
+mod main_agent;
+pub use main_agent::MainAgent;

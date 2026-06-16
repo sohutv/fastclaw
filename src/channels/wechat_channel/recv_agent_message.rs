@@ -33,11 +33,16 @@ impl WechatChannel {
                 }
                 (None, AgentRespState::Start)
             }
-            AgentResponse::ToolCall(toolcall) => {
-                (format_tool_call(session_id, toolcall), curr_state)
-            }
+            AgentResponse::ToolCall(toolcall) => (
+                format_tool_call(session_id, &self.wechat_config, toolcall),
+                curr_state,
+            ),
             AgentResponse::ReasoningStream(reasoning) => {
-                buff.extend(extract_reasoning(session_id, reasoning));
+                buff.extend(extract_reasoning(
+                    session_id,
+                    &self.wechat_config,
+                    reasoning,
+                ));
                 (None, AgentRespState::Reasoning)
             }
             AgentResponse::MessageStream(message) => {
@@ -46,18 +51,20 @@ impl WechatChannel {
                 } else {
                     None
                 };
-                buff.extend(extract_message(session_id, message));
+                buff.extend(extract_message(session_id, &self.wechat_config, message));
                 (formated_message, AgentRespState::Messaging)
             }
             AgentResponse::Final(usage) => (
-                Some(format_message(
-                    session_id,
-                    agent.agent_settings().output_schema.is_some(),
-                    usage,
-                    buff,
-                ).map(|(msg, rt)| (
-                    msg.to_string(),rt
-                ))?),
+                Some(
+                    format_message(
+                        session_id,
+                        &self.wechat_config,
+                        agent.agent_settings().output_schema.is_some(),
+                        usage,
+                        buff,
+                    )
+                    .map(|(msg, rt)| (msg.to_string(), rt))?,
+                ),
                 AgentRespState::Final,
             ),
             AgentResponse::Error(error) => (
@@ -74,14 +81,20 @@ impl WechatChannel {
                 )),
                 curr_state,
             ),
-            AgentResponse::HistoryCompact(result) => {
-                (Some(format_history_compact(session_id, result)), curr_state)
-            }
+            AgentResponse::HistoryCompact(result) => (
+                Some(format_history_compact(
+                    session_id,
+                    &self.wechat_config,
+                    result,
+                )),
+                curr_state,
+            ),
         };
         if let Some((text, resp_type)) = formated_message {
             if let Some(robot_message) = create_robot_messages_for_agent(
                 agent,
                 session_id,
+                &self.wechat_config,
                 &self.ctx,
                 resp_type,
                 inbound_message,
