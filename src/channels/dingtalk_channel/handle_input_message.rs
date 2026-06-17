@@ -269,12 +269,13 @@ impl dingtalk_stream::handlers::CallbackHandler for DingTalkCallbackHandler {
         let msg_id = msg_id.clone();
         info!("Submit task to agent, msg_id: {}", msg_id);
         match Arc::clone(&self.channel)
-            .append_agent_task(
+            .spawn_agent_request(
                 Arc::clone(&dingtalk_client),
                 Some(addi_system_prompt),
                 AgentRequest {
                     id: msg_id.to_string().into(),
                     session_id,
+                    agent_id: self.channel.agent.id().clone(),
                     message: vec![user_contents],
                 },
             )

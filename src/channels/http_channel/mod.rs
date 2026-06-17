@@ -1,5 +1,5 @@
-use crate::agent::{Agent, AgentId, DelegatedAgent, MainAgent};
-use crate::channels::{AgentRespState, Channel, ChannelContext, ChannelMessage, SessionId};
+use crate::agent::{Agent, AgentId, AgentRequest, DelegatedAgent, MainAgent};
+use crate::channels::{spawn_agent_request, AgentRespState, Channel, ChannelContext, ChannelMessage, SessionId};
 use crate::config::{Config, Workspace};
 use anyhow::anyhow;
 use async_trait::async_trait;
@@ -127,6 +127,18 @@ impl Channel for HttpChannel {
     fn agent(&self) -> &Arc<dyn Agent> {
         self.agent.delegated()
     }
+
+    async fn spawn_agent_request(self: Arc<Self>, client: Arc<Self::Client>, addi_system_prompt: Option<String>, req: AgentRequest) -> crate::Result<()> {
+        let mut receiver =
+            spawn_agent_request::apply(Arc::clone(self.agent()), req.clone(), addi_system_prompt)
+                .await?;
+        let self_ = Arc::clone(&self);
+        let _ = tokio::spawn(async move {
+            let _ = self_.handle_agent_message(client, &mut receiver).await;
+        });
+        Ok(())
+    }
+
 
     async fn handle_agent_message(
         &self,

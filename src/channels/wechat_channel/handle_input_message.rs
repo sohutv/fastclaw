@@ -1,4 +1,4 @@
-use crate::agent::{AgentRequest, DelegatedAgent};
+use crate::agent::{AgentRequest, AgentVisitor, DelegatedAgent};
 use crate::channels::Channel;
 use crate::channels::console_cmd::Console;
 use crate::channels::wechat_channel::WechatChannel;
@@ -180,9 +180,7 @@ impl WechatChannel {
                     let self_ = Arc::clone(&self);
                     let client = Arc::clone(&wechat_client);
                     let _ = tokio::spawn(async move {
-                        let _ = self_
-                            .handle_agent_message(client, &mut receiver)
-                            .await;
+                        let _ = self_.handle_agent_message(client, &mut receiver).await;
                     });
                     return Ok(());
                 }
@@ -204,12 +202,13 @@ impl WechatChannel {
         let msg_id = message_id.clone();
         info!("Submit task to agent, msg_id: {}", msg_id);
         match Arc::clone(&self)
-            .append_agent_task(
+            .spawn_agent_request(
                 Arc::clone(&wechat_client),
                 None,
                 AgentRequest {
                     id: msg_id.to_string().into(),
                     session_id: self.wechat_config.session_id().clone(),
+                    agent_id: self.agent.id().clone(),
                     message: vec![user_content],
                 },
             )

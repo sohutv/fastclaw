@@ -106,12 +106,13 @@ where
             }
             if let TaskScheduleResult::Exec = time_to_exec {
                 match Arc::clone(&self.channel)
-                    .append_agent_task(
+                    .spawn_agent_request(
                         Arc::clone(&self.client),
                         None,
                         AgentRequest {
                             id: Default::default(),
                             session_id: session_id.clone(),
+                            agent_id: self.agent.id().clone(),
                             message: vec![OneOrMany::one(UserContent::text(format!(
                                 r#"
 **Execute task immediately**: task_id: {}

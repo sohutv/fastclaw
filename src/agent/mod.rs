@@ -272,6 +272,7 @@ pub trait LlmAgentSupplier {
 pub struct AgentRequest {
     pub id: RequestId,
     pub session_id: SessionId,
+    pub agent_id: AgentId,
     #[deref]
     #[into]
     pub message: Vec<OneOrMany<UserContent>>,

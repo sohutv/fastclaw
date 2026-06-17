@@ -154,12 +154,13 @@ impl HttpChannel {
         };
         let msg_id = message_id.clone();
         match Arc::clone(&self)
-            .append_agent_task(
+            .spawn_agent_request(
                 Arc::clone(&client),
                 None,
                 AgentRequest {
                     id: msg_id.to_string().into(),
                     session_id: session_id.clone(),
+                    agent_id: self.agent.id().clone(),
                     message: vec![user_content],
                 },
             )

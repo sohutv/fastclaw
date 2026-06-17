@@ -1,16 +1,16 @@
-use crate::agent::{Agent, AgentRequest, AgentRequestContext, AgentRequestPkg, AgentResponse, DelegatedAgent, MainAgent, Notify};
+use crate::agent::{Agent, AgentRequest, AgentRequestContext, AgentRequestPkg, AgentResponse, AgentVisitor, DelegatedAgent, MainAgent, Notify};
 use crate::channels::console_cmd::Console;
 use crate::channels::{Channel, ChannelContext, ChannelMessage, SessionId, SessionSettings};
 use crate::config::{Config, Workspace};
 use anyhow::anyhow;
 use async_trait::async_trait;
 use log::warn;
-use rig::OneOrMany;
 use rig::completion::Message;
 use rig::message::{AssistantContent, ReasoningContent, ToolCall, ToolFunction, UserContent};
-use rustyline::DefaultEditor;
+use rig::OneOrMany;
 use rustyline::error::ReadlineError;
-use std::io::{Write, stdout};
+use rustyline::DefaultEditor;
+use std::io::{stdout, Write};
 use std::sync::Arc;
 use std::thread::JoinHandle;
 use tokio::sync::mpsc::Receiver;
@@ -87,6 +87,7 @@ impl Channel for CliChannel {
                                             AgentRequest {
                                                 id: Default::default(),
                                                 session_id: self_.session_id.clone(),
+                                                agent_id: self_.agent.id().clone(),
                                                 message: vec![OneOrMany::one(UserContent::text(
                                                     line,
                                                 ))],

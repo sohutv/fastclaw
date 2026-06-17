@@ -18,7 +18,7 @@ pub mod wechat_channel;
 #[cfg(feature = "channel_http_channel")]
 pub mod http_channel;
 
-mod spawn_agent_task;
+mod spawn_agent_request;
 pub mod text_formater;
 
 mod session_id;
@@ -39,14 +39,14 @@ where
 
     /// handle_agent_task
     /// spawn_agent_task -> spawn(handle_agent_message)
-    async fn append_agent_task(
+    async fn spawn_agent_request(
         self: Arc<Self>,
         client: Arc<Self::Client>,
         addi_system_prompt: Option<String>,
         req: AgentRequest,
     ) -> crate::Result<()> {
         let mut receiver =
-            spawn_agent_task::apply(Arc::clone(self.agent()), req.clone(), addi_system_prompt)
+            spawn_agent_request::apply(Arc::clone(self.agent()), req.clone(), addi_system_prompt)
                 .await?;
         let self_ = Arc::clone(&self);
         let _ = tokio::spawn(async move {

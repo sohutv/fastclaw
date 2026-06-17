@@ -114,10 +114,22 @@ impl ImageUnderstandingTool {
         channel_message_sender: tokio::sync::mpsc::Sender<crate::Result<ChannelMessage>>,
         Args { prompt, images }: Args,
     ) -> crate::Result<()> {
+        let agent_settings = AgentSettings {
+            task_backpressure: TaskBackpressure::Latest,
+            ..self.ctx.parent_agent.agent_settings().clone()
+        };
+        let agent = self
+            .ctx
+            .parent_agent
+            .clone_with("tool-call".into(), Some(agent_settings))
+            .await?
+            .start()
+            .await?;
         let pkg = AgentRequestPkg::new_without_ack(
             AgentRequest {
                 id: uuid::Uuid::new_v4().into(),
                 session_id: self.ctx.session_id.clone(),
+                agent_id: agent.id().clone(),
                 message: vec![OneOrMany::many({
                     let mut vec = Vec::with_capacity(images.len() + 1);
                     vec.push(UserContent::text(prompt));
@@ -146,21 +158,8 @@ impl ImageUnderstandingTool {
                 with_history: false,
             },
         );
-        let agent_settings = AgentSettings {
-            task_backpressure: TaskBackpressure::Latest,
-            ..self.ctx.parent_agent.agent_settings().clone()
-        };
-        let _ = self
-            .ctx
-            .parent_agent
-            .clone_with("tool-call".into(), Some(agent_settings))
-            .await?
-            .start()
-            .await?
-            .get_channel_sender()
-            .await?
-            .send(pkg)
-            .await?;
+
+        agent.get_channel_sender().await?.send(pkg).await?;
         Ok(())
     }
 }
