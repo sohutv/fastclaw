@@ -1,4 +1,4 @@
-use crate::agent::a2a_channel::A2AChannel;
+use crate::channels::a2a_channel::A2AChannel;
 use crate::agent::{Agent, AgentId, DelegatedAgent, reload_agent};
 use crate::channels::Channel;
 use anyhow::anyhow;

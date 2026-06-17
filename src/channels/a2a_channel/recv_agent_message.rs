@@ -1,4 +1,4 @@
-use crate::agent::a2a_channel::A2AChannel;
+use crate::channels::a2a_channel::A2AChannel;
 use crate::agent::{Agent, AgentRequest, AgentResponse, Notify};
 use crate::channels::text_formater::*;
 use crate::channels::{AgentRespState, AgentRespType};
@@ -6,7 +6,7 @@ use crate::channels::{ChannelContext, ChannelMessage, SessionId, create_robot_me
 use anyhow::anyhow;
 
 impl A2AChannel {
-    pub(super) async fn handle_agent_message_actual(
+    pub(crate) async fn handle_agent_message_actual(
         &self,
         ChannelMessage {
             session_id,

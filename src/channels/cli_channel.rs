@@ -1,16 +1,19 @@
-use crate::agent::{Agent, AgentRequest, AgentRequestContext, AgentRequestPkg, AgentResponse, AgentVisitor, DelegatedAgent, MainAgent, Notify};
+use crate::agent::{
+    Agent, AgentRequest, AgentRequestContext, AgentRequestPkg, AgentResponse, AgentVisitor,
+    DelegatedAgent, MainAgent, Notify,
+};
 use crate::channels::console_cmd::Console;
 use crate::channels::{Channel, ChannelContext, ChannelMessage, SessionId, SessionSettings};
 use crate::config::{Config, Workspace};
 use anyhow::anyhow;
 use async_trait::async_trait;
 use log::warn;
+use rig::OneOrMany;
 use rig::completion::Message;
 use rig::message::{AssistantContent, ReasoningContent, ToolCall, ToolFunction, UserContent};
-use rig::OneOrMany;
-use rustyline::error::ReadlineError;
 use rustyline::DefaultEditor;
-use std::io::{stdout, Write};
+use rustyline::error::ReadlineError;
+use std::io::{Write, stdout};
 use std::sync::Arc;
 use std::thread::JoinHandle;
 use tokio::sync::mpsc::Receiver;
@@ -30,7 +33,7 @@ impl CliChannel {
         agent: &Arc<MainAgent>,
     ) -> crate::Result<Self> {
         let session_id = SessionId::Master("cli-session-channel".into());
-        let session_settings = SessionSettings::default_from(&session_id);
+        let session_settings = SessionSettings::default();
         Ok(CliChannel {
             ctx: Arc::new(ChannelContext { config, workspace }),
             session_id,
@@ -101,10 +104,7 @@ impl Channel for CliChannel {
                                         ))
                                         .await;
                                     let _ = self_
-                                        .handle_agent_message(
-                                            Arc::new(()),
-                                            &mut message_receiver,
-                                        )
+                                        .handle_agent_message(Arc::new(()), &mut message_receiver)
                                         .await;
                                 }
                             }

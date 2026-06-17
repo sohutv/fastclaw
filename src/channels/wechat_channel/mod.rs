@@ -70,7 +70,7 @@ impl Channel for WechatChannel {
             let self_ = Arc::clone(&self_);
             let wechat_client = Arc::clone(&wechat_client);
             tokio::spawn(async move {
-                if self_.wechat_config.session_settings.show_connected {
+                if self_.wechat_config.session_config.settings.show_connected {
                     let _ = wechat_client.send_message("robot connected").await;
                 }
                 loop {

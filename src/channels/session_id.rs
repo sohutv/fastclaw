@@ -33,8 +33,15 @@ impl Deref for SessionId {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct SessionSettings {
+pub struct SessionConfig{
     pub session_id: SessionId,
+    #[serde(default)]
+    pub settings: SessionSettings,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct SessionSettings {
     pub show_connected: bool,
     pub show_start: bool,
     pub show_toolcall: bool,
@@ -49,10 +56,9 @@ pub struct SessionSettings {
     pub show_token_usage: bool,
 }
 
-impl SessionSettings {
-    pub fn default_from<S: AsRef<SessionId>>(session_id: S) -> Self {
+impl Default for SessionSettings {
+    fn default() -> Self {
         Self {
-            session_id: session_id.as_ref().clone(),
             show_connected: false,
             show_start: true,
             show_toolcall: false,

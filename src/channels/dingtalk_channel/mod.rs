@@ -110,7 +110,7 @@ impl Channel for DingtalkChannel {
     fn allow_session_ids(&self) -> crate::Result<Vec<&SessionId>> {
         let arr = self
             .dingtalk_config
-            .allow_session_ids
+            .session_configs
             .iter()
             .map(|it| &it.session_id)
             .collect_vec();

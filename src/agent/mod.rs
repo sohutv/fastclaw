@@ -154,6 +154,15 @@ pub trait Agent: SessionCompactSupport + AgentClone + AgentVisitor + Send + Sync
         .ok_or(anyhow!("child {} agent not exist", id))?;
         Ok(child)
     }
+
+    async fn get_child(&self, id: &AgentId) -> Option<Arc<ChildAgent>> {
+        let context = self.context();
+        let child = {
+            let children = context.children.read().await;
+            children.get(id).map(|it| Arc::clone(it))
+        };
+        child
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, From, Serialize, Deserialize)]
@@ -428,8 +437,6 @@ impl Default for AgentSettings {
 
 mod agent_factory;
 pub use agent_factory::*;
-
-pub mod a2a_channel;
 
 pub trait DelegatedAgent {
     fn delegated(&self) -> &Arc<dyn Agent>;

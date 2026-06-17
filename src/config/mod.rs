@@ -51,7 +51,7 @@ impl Default for HeartbeatConfig {
 }
 
 mod workspace;
-use crate::agent::a2a_channel::A2AChannelConfig;
+use crate::channels::a2a_channel::A2AChannelConfig;
 use crate::tools::mcp_tool::McpToolSetConfigs;
 use crate::tools::{DaemonAgentToolsConfig, ImageUnderstandingConfig};
 pub use workspace::*;

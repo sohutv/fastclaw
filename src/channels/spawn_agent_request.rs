@@ -4,7 +4,7 @@ use log::error;
 use std::sync::Arc;
 use tokio::sync::mpsc::Receiver;
 
-pub(super) async fn apply(
+pub async fn apply(
     agent: Arc<dyn Agent>,
     req: AgentRequest,
     addi_system_prompt: Option<String>,
