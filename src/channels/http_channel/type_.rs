@@ -15,10 +15,7 @@ pub struct HttpReqMessage {
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize, From)]
-pub struct HttpRespMessage {
-    pub output: Payload,
-    pub input: Option<HttpReqMessage>,
-}
+pub struct HttpRespMessage(Payload);
 
 #[derive(Debug, Clone, Deserialize, Serialize, Display, Eq, PartialEq, Ord, PartialOrd, Hash)]
 #[display("{_0}")]

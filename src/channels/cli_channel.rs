@@ -43,7 +43,6 @@ impl CliChannel {
 #[async_trait]
 impl Channel for CliChannel {
     type Client = ();
-    type InboundMessage = String;
     type JoinHandle = JoinHandle<()>;
 
     async fn start(self) -> crate::Result<(Arc<Self>, Arc<Self::Client>, Self::JoinHandle)> {
@@ -103,7 +102,6 @@ impl Channel for CliChannel {
                                     let _ = self_
                                         .handle_agent_message(
                                             Arc::new(()),
-                                            Some(line.to_string()),
                                             &mut message_receiver,
                                         )
                                         .await;
@@ -132,7 +130,6 @@ impl Channel for CliChannel {
     async fn handle_agent_message(
         &self,
         _: Arc<Self::Client>,
-        _: Option<Self::InboundMessage>,
         receiver: &mut Receiver<crate::Result<ChannelMessage>>,
     ) -> crate::Result<()> {
         let mut state = AgentRespState::Init;

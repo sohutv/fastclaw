@@ -1,5 +1,5 @@
 use crate::agent::a2a_channel::A2AChannel;
-use crate::agent::{Agent, AgentRequest, AgentRequestPkg, AgentResponse, Notify};
+use crate::agent::{Agent, AgentRequest, AgentResponse, Notify};
 use crate::channels::text_formater::*;
 use crate::channels::{AgentRespState, AgentRespType};
 use crate::channels::{ChannelContext, ChannelMessage, SessionId, create_robot_messages_for_agent};
@@ -8,7 +8,6 @@ use anyhow::anyhow;
 impl A2AChannel {
     pub(super) async fn handle_agent_message_actual(
         &self,
-        inbound_message: Option<&AgentRequestPkg>,
         ChannelMessage {
             session_id,
             agent_id: _,
@@ -81,7 +80,6 @@ impl A2AChannel {
                 &self.config,
                 &self.ctx,
                 resp_type,
-                inbound_message,
                 text,
                 A2AChannel::create_robot_messages,
             )
@@ -99,7 +97,6 @@ impl A2AChannel {
         _: &dyn Agent,
         session_id: &SessionId,
         _: &ChannelContext,
-        _: Option<&AgentRequestPkg>,
         content: String,
     ) -> crate::Result<AgentRequest> {
         todo!()

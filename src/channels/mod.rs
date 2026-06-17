@@ -18,6 +18,9 @@ pub mod wechat_channel;
 #[cfg(feature = "channel_http_channel")]
 pub mod http_channel;
 
+mod spawn_agent_task;
+pub mod text_formater;
+
 mod session_id;
 pub use session_id::*;
 
@@ -27,8 +30,6 @@ where
     Self: 'static,
 {
     type Client: Sync + Send;
-
-    type InboundMessage: Sync + Send;
 
     type JoinHandle: Sync + Send;
 
@@ -42,7 +43,6 @@ where
         self: Arc<Self>,
         client: Arc<Self::Client>,
         addi_system_prompt: Option<String>,
-        inbound_message: Option<Self::InboundMessage>,
         req: AgentRequest,
     ) -> crate::Result<()> {
         let mut receiver =
@@ -50,9 +50,7 @@ where
                 .await?;
         let self_ = Arc::clone(&self);
         let _ = tokio::spawn(async move {
-            let _ = self_
-                .handle_agent_message(client, inbound_message, &mut receiver)
-                .await;
+            let _ = self_.handle_agent_message(client, &mut receiver).await;
         });
         Ok(())
     }
@@ -60,60 +58,10 @@ where
     async fn handle_agent_message(
         &self,
         client: Arc<Self::Client>,
-        inbound_message: Option<Self::InboundMessage>,
         receiver: &mut Receiver<crate::Result<ChannelMessage>>,
     ) -> crate::Result<()>;
 
     fn allow_session_ids(&self) -> crate::Result<Vec<&SessionId>>;
-}
-
-mod spawn_agent_task {
-    use crate::agent::{Agent, AgentRequest, AgentRequestContext, AgentRequestPkg};
-    use crate::channels::ChannelMessage;
-    use log::error;
-    use std::sync::Arc;
-    use tokio::sync::mpsc::Receiver;
-
-    pub(super) async fn apply(
-        agent: Arc<dyn Agent>,
-        req: AgentRequest,
-        addi_system_prompt: Option<String>,
-    ) -> crate::Result<Receiver<crate::Result<ChannelMessage>>> {
-        let (channel_message_sender, channel_message_receiver) = tokio::sync::mpsc::channel(32);
-        async fn spawn_agent_task_inner(
-            agent: Arc<dyn Agent>,
-            req: AgentRequest,
-            ctx: AgentRequestContext,
-        ) -> crate::Result<()> {
-            let sender = agent.get_channel_sender().await?;
-            let (pkg, ack) = AgentRequestPkg::new_with_ack(req, ctx);
-            let _ = sender.send(pkg).await?;
-            let _ = ack.await?;
-            Ok(())
-        }
-        let task_id = req.id.clone();
-        match spawn_agent_task_inner(
-            agent,
-            req,
-            AgentRequestContext {
-                channel_message_sender,
-                addi_system_prompt,
-                tool_filter: Default::default(),
-                with_history: true,
-            },
-        )
-        .await
-        {
-            Ok(_) => {}
-            Err(err) => {
-                error!(
-                    "agent task submit  failed, task_id: {}, error: {}",
-                    task_id, err
-                );
-            }
-        }
-        Ok(channel_message_receiver)
-    }
 }
 
 #[allow(unused)]
@@ -154,25 +102,18 @@ pub enum AgentRespState {
     Final,
 }
 
-pub async fn create_robot_messages_for_agent<P, Content, F, InboundMsg, OutboundMsg>(
+pub async fn create_robot_messages_for_agent<P, Content, F, OutboundMsg>(
     agent: &dyn Agent,
     session_id: &SessionId,
     session_settings_provider: &P,
     ctx: &ChannelContext,
     resp_type: AgentRespType,
-    inbound_msg: Option<&InboundMsg>,
     content: Content,
     outbound_msg_creator: F,
 ) -> crate::Result<Option<OutboundMsg>>
 where
     P: SessionSettingsProvider,
-    F: FnOnce(
-        &dyn Agent,
-        &SessionId,
-        &ChannelContext,
-        Option<&InboundMsg>,
-        Content,
-    ) -> crate::Result<OutboundMsg>,
+    F: FnOnce(&dyn Agent, &SessionId, &ChannelContext, Content) -> crate::Result<OutboundMsg>,
 {
     let SessionSettings {
         show_start,
@@ -229,8 +170,6 @@ where
             };
         }
     }
-    let msg = outbound_msg_creator(agent, &session_id, ctx, inbound_msg, content)?;
+    let msg = outbound_msg_creator(agent, &session_id, ctx, content)?;
     Ok(Some(msg))
 }
-
-pub mod text_formater;

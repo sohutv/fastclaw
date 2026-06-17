@@ -89,7 +89,6 @@ struct AppState {
 #[async_trait]
 impl Channel for HttpChannel {
     type Client = Client;
-    type InboundMessage = HttpReqMessage;
     type JoinHandle = tokio::task::JoinHandle<crate::Result<()>>;
 
     async fn start(self) -> crate::Result<(Arc<Self>, Arc<Self::Client>, Self::JoinHandle)> {
@@ -132,7 +131,6 @@ impl Channel for HttpChannel {
     async fn handle_agent_message(
         &self,
         client: Arc<Client>,
-        inbound_message: Option<Self::InboundMessage>,
         receiver: &mut Receiver<crate::Result<ChannelMessage>>,
     ) -> crate::Result<()> {
         let mut state = AgentRespState::Wait;
@@ -143,7 +141,6 @@ impl Channel for HttpChannel {
                     match self
                         .handle_agent_message_actual(
                             &client,
-                            inbound_message.as_ref(),
                             &message,
                             state,
                             &mut buff,

@@ -8,7 +8,6 @@ use crate::channels::text_formater::{
 };
 use anyhow::anyhow;
 use dingtalk_stream::DingTalkStream;
-use dingtalk_stream::frames::down_message::callback_message::MessageData;
 use dingtalk_stream::frames::up_message::{
     MessageContent, MessageContentMarkdown, MessageContentText,
 };
@@ -17,7 +16,6 @@ impl DingtalkChannel {
     pub(super) async fn handle_agent_message_actual(
         &self,
         dingtalk: &DingTalkStream,
-        inbound_message: Option<&MessageData>,
         ChannelMessage {
             session_id,
             agent_id: _,
@@ -125,7 +123,6 @@ impl DingtalkChannel {
                 &self.dingtalk_config,
                 &self.ctx,
                 resp_type,
-                inbound_message,
                 message_content,
                 DingtalkChannel::create_robot_messages,
             )

@@ -109,7 +109,6 @@ where
                     .append_agent_task(
                         Arc::clone(&self.client),
                         None,
-                        None,
                         AgentRequest {
                             id: Default::default(),
                             session_id: session_id.clone(),

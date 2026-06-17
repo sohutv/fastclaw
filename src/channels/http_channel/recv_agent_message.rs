@@ -1,5 +1,4 @@
 use crate::agent::{Agent, AgentId, AgentResponse, Notify};
-use crate::channels::http_channel::type_::HttpReqMessage;
 use crate::channels::http_channel::{Client, HttpChannel, Payload};
 use crate::channels::http_channel::{HttpRespMessage, UserId};
 use crate::channels::text_formater::{
@@ -16,7 +15,6 @@ impl HttpChannel {
     pub(super) async fn handle_agent_message_actual(
         &self,
         client: &Client,
-        inbound_message: Option<&HttpReqMessage>,
         ChannelMessage {
             session_id,
             agent_id,
@@ -96,7 +94,6 @@ impl HttpChannel {
                 &self.http_config,
                 &self.ctx,
                 resp_type,
-                inbound_message,
                 text,
                 HttpChannel::create_resp_messages,
             )
@@ -110,19 +107,16 @@ impl HttpChannel {
 }
 
 impl HttpChannel {
-    fn create_resp_messages(
+    fn create_resp_messages<C:Into<Payload>>(
         _: &dyn Agent,
         session_id: &SessionId,
         _: &ChannelContext,
-        input: Option<&HttpReqMessage>,
-        content: FormatedMessage,
+        content: C,
     ) -> crate::Result<HttpRespMessage> {
-        let output = content.into();
         match &session_id {
-            SessionId::Master { .. } | SessionId::Anonymous { .. } => Ok(HttpRespMessage {
-                output,
-                input: input.map(|it| it.clone()),
-            }),
+            SessionId::Master { .. } | SessionId::Anonymous { .. } => {
+                Ok(content.into().into())
+            }
             SessionId::Group { .. } => Err(anyhow!(
                 "send robot message to group is not supported by http"
             )),

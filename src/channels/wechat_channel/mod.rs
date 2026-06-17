@@ -7,7 +7,6 @@ use log::warn;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::mpsc::Receiver;
-use wechat_sdk::client::message::WechatMessage;
 use wechat_sdk::client::{WechatClient, WechatConfig as WechatInnerConfig};
 
 mod config;
@@ -41,7 +40,6 @@ impl WechatChannel {
 #[async_trait]
 impl Channel for WechatChannel {
     type Client = WechatClient;
-    type InboundMessage = WechatMessage;
     type JoinHandle = tokio::task::JoinHandle<crate::Result<()>>;
 
     async fn start(self) -> crate::Result<(Arc<Self>, Arc<Self::Client>, Self::JoinHandle)> {
@@ -106,7 +104,6 @@ impl Channel for WechatChannel {
     async fn handle_agent_message(
         &self,
         wechat: Arc<WechatClient>,
-        inbound_message: Option<Self::InboundMessage>,
         receiver: &mut Receiver<crate::Result<ChannelMessage>>,
     ) -> crate::Result<()> {
         let mut state = AgentRespState::Wait;
@@ -119,7 +116,6 @@ impl Channel for WechatChannel {
                         .handle_agent_message_actual(
                             &wechat,
                             typing_ticket.as_ref(),
-                            inbound_message.as_ref(),
                             &message,
                             state,
                             &mut buff,

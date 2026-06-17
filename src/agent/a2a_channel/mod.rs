@@ -1,4 +1,4 @@
-use crate::agent::{Agent, AgentRequestPkg};
+use crate::agent::Agent;
 use crate::channels::{AgentRespState, Channel, ChannelContext, ChannelMessage, SessionId};
 use async_trait::async_trait;
 use log::warn;
@@ -31,7 +31,6 @@ impl A2AChannel {
 #[async_trait]
 impl Channel for A2AChannel {
     type Client = ();
-    type InboundMessage = AgentRequestPkg;
     type JoinHandle = ();
 
     async fn start(self) -> crate::Result<(Arc<Self>, Arc<Self::Client>, Self::JoinHandle)> {
@@ -47,7 +46,6 @@ impl Channel for A2AChannel {
     async fn handle_agent_message(
         &self,
         _: Arc<Self::Client>,
-        inbound_message: Option<Self::InboundMessage>,
         receiver: &mut Receiver<crate::Result<ChannelMessage>>,
     ) -> crate::Result<()> {
         let mut state = AgentRespState::Wait;
@@ -56,12 +54,7 @@ impl Channel for A2AChannel {
             match message_result {
                 Ok(message) => {
                     match self
-                        .handle_agent_message_actual(
-                            inbound_message.as_ref(),
-                            &message,
-                            state,
-                            &mut buff,
-                        )
+                        .handle_agent_message_actual(&message, state, &mut buff)
                         .await
                     {
                         Ok(AgentRespState::Final) | Err(_) => {

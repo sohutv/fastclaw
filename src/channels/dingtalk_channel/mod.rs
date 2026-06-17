@@ -3,7 +3,6 @@ use crate::channels::{AgentRespState, Channel, ChannelContext, ChannelMessage, S
 use crate::config::{Config, Workspace};
 use anyhow::anyhow;
 use async_trait::async_trait;
-use dingtalk_stream::frames::down_message::callback_message::MessageData;
 use dingtalk_stream::{
     DingTalkStream,
     frames::{
@@ -53,7 +52,6 @@ impl DingtalkChannel {
 #[async_trait]
 impl Channel for DingtalkChannel {
     type Client = DingTalkStream;
-    type InboundMessage = MessageData;
     type JoinHandle = JoinHandle<crate::Result<()>>;
 
     async fn start(self) -> crate::Result<(Arc<Self>, Arc<Self::Client>, Self::JoinHandle)> {
@@ -81,7 +79,6 @@ impl Channel for DingtalkChannel {
     async fn handle_agent_message(
         &self,
         dingtalk: Arc<DingTalkStream>,
-        inbound_message: Option<Self::InboundMessage>,
         receiver: &mut Receiver<crate::Result<ChannelMessage>>,
     ) -> crate::Result<()> {
         let mut state = AgentRespState::Wait;
@@ -90,13 +87,7 @@ impl Channel for DingtalkChannel {
             match message {
                 Ok(message) => {
                     match self
-                        .handle_agent_message_actual(
-                            &dingtalk,
-                            inbound_message.as_ref(),
-                            &message,
-                            state,
-                            &mut buff,
-                        )
+                        .handle_agent_message_actual(&dingtalk, &message, state, &mut buff)
                         .await
                     {
                         Ok(AgentRespState::Final) | Err(_) => {
@@ -131,17 +122,14 @@ impl DingtalkChannel {
     fn create_robot_messages<Content: Into<MessageContent>>(
         _: &dyn Agent,
         session_id: &SessionId,
-        ctx: &ChannelContext,
-        data: Option<&MessageData>,
+        _: &ChannelContext,
         content: Content,
     ) -> crate::Result<RobotMessage> {
-        Self::create_robot_messages_actual(session_id, ctx, data, content)
+        Self::create_robot_messages_actual(session_id, content)
     }
 
     fn create_robot_messages_actual<Content: Into<MessageContent>>(
         session_id: &SessionId,
-        _: &ChannelContext,
-        _: Option<&MessageData>,
         content: Content,
     ) -> crate::Result<RobotMessage> {
         let content = content.into();

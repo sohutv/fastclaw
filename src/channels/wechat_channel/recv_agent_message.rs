@@ -5,14 +5,13 @@ use crate::channels::wechat_channel::WechatChannel;
 use crate::channels::{ChannelContext, ChannelMessage, SessionId, create_robot_messages_for_agent};
 use anyhow::anyhow;
 use wechat_sdk::client::WechatClient;
-use wechat_sdk::client::message::{MessageItems, TypingTicket, WechatMessage};
+use wechat_sdk::client::message::{MessageItems, TypingTicket};
 
 impl WechatChannel {
     pub(super) async fn handle_agent_message_actual(
         &self,
         wechat: &WechatClient,
         typing_ticket: Option<&TypingTicket>,
-        inbound_message: Option<&WechatMessage>,
         ChannelMessage {
             session_id,
             agent_id: _,
@@ -96,7 +95,6 @@ impl WechatChannel {
                 &self.wechat_config,
                 &self.ctx,
                 resp_type,
-                inbound_message,
                 text,
                 WechatChannel::create_robot_messages,
             )
@@ -114,7 +112,6 @@ impl WechatChannel {
         _: &dyn Agent,
         session_id: &SessionId,
         _: &ChannelContext,
-        _: Option<&WechatMessage>,
         content: Content,
     ) -> crate::Result<WechatRobotMessage> {
         let message = match &session_id {

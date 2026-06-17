@@ -45,15 +45,13 @@ impl dingtalk_stream::handlers::CallbackHandler for DingTalkCallbackHandler {
         CallbackMessage { data, .. }: &CallbackMessage,
         cb_msg_sender: Option<Sender<WebhookMessage>>,
     ) -> Result<HandlerResp, HandlerError> {
-        let Some(
-            inbound_message @ MessageData {
-                msg_id,
-                payload: Some(payload),
-                sender,
-                conversation,
-                ..
-            },
-        ) = data
+        let Some(MessageData {
+            msg_id,
+            payload: Some(payload),
+            sender,
+            conversation,
+            ..
+        }) = data
         else {
             return Err(HandlerError {
                 code: ErrorCode::BadRequest,
@@ -224,11 +222,8 @@ impl dingtalk_stream::handlers::CallbackHandler for DingTalkCallbackHandler {
                 Ok(mut receiver) => {
                     let channel = Arc::clone(&self.channel);
                     let client = Arc::clone(&dingtalk_client);
-                    let inbound_message = inbound_message.clone();
                     let _ = tokio::spawn(async move {
-                        let _ = channel
-                            .handle_agent_message(client, Some(inbound_message), &mut receiver)
-                            .await;
+                        let _ = channel.handle_agent_message(client, &mut receiver).await;
                     });
                     return Ok(HandlerResp::Text("cmd submitted".to_string()));
                 }
@@ -277,7 +272,6 @@ impl dingtalk_stream::handlers::CallbackHandler for DingTalkCallbackHandler {
             .append_agent_task(
                 Arc::clone(&dingtalk_client),
                 Some(addi_system_prompt),
-                Some(inbound_message.clone()),
                 AgentRequest {
                     id: msg_id.to_string().into(),
                     session_id,
@@ -347,8 +341,6 @@ impl LifecycleListener for DingTalkCallbackHandler {
             {
                 if let Ok(message) = DingtalkChannel::create_robot_messages_actual(
                     &session_id,
-                    &self.channel.ctx,
-                    None,
                     MessageContentMarkdown::from((
                         "Connected",
                         format!(
@@ -382,8 +374,6 @@ Connected to dingtalk websocket
                     Ok(_) => {
                         if let Ok(message) = DingtalkChannel::create_robot_messages_actual(
                             &session_id,
-                            &self.channel.ctx,
-                            None,
                             MessageContentText::from("disconnected from dingtalk websocket"),
                         ) {
                             let _ = client.send_message(message).await;
@@ -392,8 +382,6 @@ Connected to dingtalk websocket
                     Err(err) => {
                         if let Ok(message) = DingtalkChannel::create_robot_messages_actual(
                             &session_id,
-                            &self.channel.ctx,
-                            None,
                             MessageContentMarkdown::from((
                                 "Disconnected",
                                 format!(
