@@ -20,7 +20,7 @@ pub async fn get_or_create(
         return Ok(Arc::clone(&main) as Arc<dyn Agent>);
     }
     let agent = main
-        .fork_child(
+        .fork_agent(
             agent_id,
             agent_group,
             None,

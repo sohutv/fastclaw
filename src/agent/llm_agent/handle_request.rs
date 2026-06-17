@@ -31,7 +31,7 @@ where
                         req,
                         ctx,
                         ack_sender,
-                        create_time: _,
+                        ..
                     }) = rx.recv().await
                     {
                         let id = req.id.clone();
@@ -102,7 +102,6 @@ where
         agent_request: AgentRequest,
         AgentRequestContext {
             channel_message_sender,
-            addi_system_prompt,
             tool_filter,
             with_history,
         }: AgentRequestContext,
@@ -117,7 +116,7 @@ where
         let agent = match self
             .create_agent(
                 agent_request.session_id.clone(),
-                addi_system_prompt.as_deref(),
+                agent_request.addi_system_prompt.as_deref(),
                 channel_message_sender.clone(),
                 tool_filter,
                 Some(&agent_request),

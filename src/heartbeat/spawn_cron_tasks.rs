@@ -7,7 +7,6 @@ use log::{error, info, warn};
 use rig::OneOrMany;
 use rig::message::UserContent;
 use std::str::FromStr;
-use std::sync::Arc;
 
 impl<C, Client> super::Heartbeat<C, Client>
 where
@@ -105,14 +104,14 @@ where
                 _ => {}
             }
             if let TaskScheduleResult::Exec = time_to_exec {
-                match Arc::clone(&self.channel)
+                match self
+                    .channel
                     .spawn_agent_request(
-                        Arc::clone(&self.client),
-                        None,
+                        &self.client,
+                        self.agent.id(),
                         AgentRequest {
                             id: Default::default(),
                             session_id: session_id.clone(),
-                            agent_id: self.agent.id().clone(),
                             message: vec![OneOrMany::one(UserContent::text(format!(
                                 r#"
 **Execute task immediately**: task_id: {}
@@ -127,6 +126,7 @@ where
                                 now.to_rfc3339(),
                                 task.full_desc()
                             )))],
+                            addi_system_prompt: None,
                         },
                     )
                     .await

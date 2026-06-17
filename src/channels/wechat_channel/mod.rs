@@ -1,6 +1,5 @@
-use crate::agent::{Agent, DelegatedAgent, MainAgent};
+use crate::agent::MainAgent;
 use crate::channels::{AgentRespState, Channel, ChannelContext, ChannelMessage, SessionId};
-use crate::config::{Config, Workspace};
 use anyhow::anyhow;
 use async_trait::async_trait;
 use log::warn;
@@ -15,20 +14,20 @@ mod handle_input_message;
 mod recv_agent_message;
 
 pub struct WechatChannel {
-    pub ctx: Arc<ChannelContext>,
+    context: &'static ChannelContext,
     pub wechat_config: WechatConfig,
     pub agent: Arc<MainAgent>,
 }
 
 impl WechatChannel {
     pub async fn new(
-        config: &'static Config,
-        workspace: &'static Workspace,
+        context: &'static ChannelContext,
         agent: &Arc<MainAgent>,
     ) -> crate::Result<Self> {
         Ok(Self {
-            ctx: Arc::new(ChannelContext { config, workspace }),
-            wechat_config: config
+            context,
+            wechat_config: context
+                .config
                 .wechat_config
                 .clone()
                 .ok_or(anyhow!("dingtalk config not found"))?,
@@ -42,10 +41,12 @@ impl Channel for WechatChannel {
     type Client = WechatClient;
     type JoinHandle = tokio::task::JoinHandle<crate::Result<()>>;
 
-    async fn start(self) -> crate::Result<(Arc<Self>, Arc<Self::Client>, Self::JoinHandle)> {
+    async fn start(
+        &'static self,
+    ) -> crate::Result<(&'static Self, Arc<Self::Client>, Self::JoinHandle)> {
         let wechat_config = WechatInnerConfig {
             state_path: self
-                .ctx
+                .context
                 .workspace
                 .path
                 .parent()
@@ -65,12 +66,10 @@ impl Channel for WechatChannel {
                 })
                 .await?,
         );
-        let self_ = Arc::new(self);
         let join_handle = {
-            let self_ = Arc::clone(&self_);
             let wechat_client = Arc::clone(&wechat_client);
             tokio::spawn(async move {
-                if self_.wechat_config.session_config.settings.show_connected {
+                if self.wechat_config.session_config.settings.show_connected {
                     let _ = wechat_client.send_message("robot connected").await;
                 }
                 loop {
@@ -80,7 +79,7 @@ impl Channel for WechatChannel {
                                 let _ = (&mut l.items).append(&mut r.items);
                                 l
                             }) {
-                                let _ = Arc::clone(&self_)
+                                let _ = self
                                     .handle_input_message(Arc::clone(&wechat_client), message)
                                     .await;
                                 continue;
@@ -94,11 +93,11 @@ impl Channel for WechatChannel {
                 }
             })
         };
-        Ok((self_, wechat_client, join_handle))
+        Ok((self, wechat_client, join_handle))
     }
 
-    fn agent(&self) -> &Arc<dyn Agent> {
-        self.agent.delegated()
+    fn context(&self) -> &'static ChannelContext {
+        self.context
     }
 
     async fn handle_agent_message(

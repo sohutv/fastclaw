@@ -1,7 +1,8 @@
 use crate::agent::{
-    Agent, AgentGroup, AgentId, HistoryManager, JsonlHistoryManager, MainAgent, OwnerSession,
+    Agent, AgentContext, AgentGroup, AgentId, AgentRegistry, HistoryManager, JsonlHistoryManager,
+    MainAgent, OwnerSession,
 };
-use crate::channels::Channel;
+use crate::channels::{Channel, ChannelContext};
 use crate::cli::CmdRunner;
 use crate::config::logger::{Level, Logger};
 use crate::config::{Config, Workspace};
@@ -82,22 +83,38 @@ impl CmdRunner for Start {
         let history_manager: Arc<dyn HistoryManager> =
             Arc::new(JsonlHistoryManager::new(config, workspace).await?);
         let memory_manager = Arc::new(MemoryManager::new(config, workspace).await?);
+        let agent_registry = Box::leak(Box::new(AgentRegistry::new(config, workspace)?));
+        let channel_context = Box::leak(Box::new(ChannelContext {
+            config,
+            workspace,
+            agent_registry,
+        }));
+        let (a2a_channel, ..) = Box::leak(Box::new(
+            channels::a2a_channel::A2AChannel::new(channel_context).await?,
+        ))
+        .start()
+        .await?;
+        let agent_context = Box::leak(Box::new(AgentContext {
+            config,
+            workspace,
+            history_manager,
+            memory_manager,
+            mcp_registry,
+            agent_registry,
+            a2a_channel,
+        }));
         let (main_agent, heartbeat_agent) = {
             let main_agent = {
                 let (agent_id, agent_group) = AgentId::main();
                 Arc::new(
                     MainAgent::new(
                         agent::spawn_agent(
-                            config,
-                            &history_manager,
-                            &memory_manager,
-                            workspace,
-                            mcp_registry,
                             &agent_id,
                             &agent_group,
                             None,
                             None,
                             &OwnerSession::GlobalShare,
+                            agent_context,
                         )
                         .await?,
                     )
@@ -109,16 +126,12 @@ impl CmdRunner for Start {
             let heartbeat_agent = {
                 let (agent_id, agent_group) = ("heartbeat".into(), AgentGroup::main());
                 agent::spawn_agent(
-                    config,
-                    &history_manager,
-                    &memory_manager,
-                    workspace,
-                    mcp_registry,
                     &agent_id,
                     &agent_group,
                     None,
                     None,
                     &OwnerSession::GlobalShare,
+                    agent_context,
                 )
                 .await?
             };
@@ -136,21 +149,24 @@ impl CmdRunner for Start {
                 #[cfg(feature = "channel_cli_channel")]
                 ChannelType::Cli => {
                     info!("Starting CLI channel");
-                    let channel =
-                        channels::cli_channel::CliChannel::new(config, workspace, &main_agent)
-                            .await?;
-                    let (_, _, join_handle) = channel.start().await?;
+                    let (_channel, _, join_handle) = Box::leak(Box::new(
+                        channels::cli_channel::CliChannel::new(channel_context, &main_agent)
+                            .await?,
+                    ))
+                    .start()
+                    .await?;
                     join_handles.push(JoinHandle::Std(join_handle));
                 }
                 #[cfg(feature = "channel_dingtalk_channel")]
                 ChannelType::Dingtalk => {
                     info!("Starting Dingtalk channel");
-                    let channel = channels::dingtalk_channel::DingtalkChannel::new(
-                        config,
-                        workspace,
-                        &main_agent,
-                    )
-                    .await?;
+                    let channel = Box::leak(Box::new(
+                        channels::dingtalk_channel::DingtalkChannel::new(
+                            channel_context,
+                            &main_agent,
+                        )
+                        .await?,
+                    ));
                     let join_handle =
                         start_channel(config, workspace, channel, Arc::clone(&heartbeat_agent))
                             .await?;
@@ -158,12 +174,10 @@ impl CmdRunner for Start {
                 }
                 #[cfg(feature = "channel_wechat_channel")]
                 ChannelType::Wechat => {
-                    let channel = channels::wechat_channel::WechatChannel::new(
-                        config,
-                        workspace,
-                        &main_agent,
-                    )
-                    .await?;
+                    let channel = Box::leak(Box::new(
+                        channels::wechat_channel::WechatChannel::new(channel_context, &main_agent)
+                            .await?,
+                    ));
                     let join_handle =
                         start_channel(config, workspace, channel, Arc::clone(&heartbeat_agent))
                             .await?;
@@ -172,9 +186,10 @@ impl CmdRunner for Start {
                 #[cfg(feature = "channel_http_channel")]
                 ChannelType::Http => {
                     info!("Starting HttpStreamable channel");
-                    let channel =
-                        channels::http_channel::HttpChannel::new(config, workspace, &main_agent)
-                            .await?;
+                    let channel = Box::leak(Box::new(
+                        channels::http_channel::HttpChannel::new(channel_context, &main_agent)
+                            .await?,
+                    ));
                     let join_handle =
                         start_channel(config, workspace, channel, Arc::clone(&heartbeat_agent))
                             .await?;
@@ -182,6 +197,7 @@ impl CmdRunner for Start {
                 }
             }
         }
+
         for join_handle in join_handles {
             match join_handle {
                 JoinHandle::Std(it) => {
@@ -199,7 +215,7 @@ impl CmdRunner for Start {
 async fn start_channel<C>(
     config: &'static Config,
     workspace: &'static Workspace,
-    channel: C,
+    channel: &'static C,
     heartbeat_agent: Arc<dyn Agent>,
 ) -> crate::Result<tokio::task::JoinHandle<()>>
 where
@@ -210,7 +226,7 @@ where
     let (_, heartbeat_join_handle) = Heartbeat::new(
         config,
         workspace,
-        Arc::clone(&channel),
+        channel,
         Arc::clone(&client),
         heartbeat_agent,
     )?

@@ -1,11 +1,9 @@
 use crate::agent::{
-    Agent, AgentGroup, AgentId, AgentSettings, HistoryManager, LlmAgentSupplier, OwnerSession,
-    SystemPromptProvider,
+    Agent, AgentContext, AgentGroup, AgentId, AgentSettings, LlmAgentSupplier,
+    OwnerSession, SystemPromptProvider,
 };
-use crate::config::{Config, Workspace};
-use crate::memory::MemoryManager;
+use crate::config::Workspace;
 use crate::model_provider::{ModelProviderName, ModelProviders};
-use crate::tools::mcp_tool::McpRegistry;
 use crate::type_::{ModelName, SystemPrompt};
 use anyhow::anyhow;
 use async_trait::async_trait;
@@ -16,29 +14,15 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
 pub async fn reload_agent(
-    config: &'static Config,
-    history_manager: &Arc<dyn HistoryManager>,
-    memory_manager: &Arc<MemoryManager>,
-    workspace: &'static Workspace,
-    mcp_registry: &'static McpRegistry,
     agent_id: &AgentId,
+    agent_context: &'static AgentContext,
 ) -> crate::Result<Arc<dyn Agent>> {
-    let Ok(agent_config) = load_agent_config(workspace, agent_id).await else {
+    let Ok(agent_config) = load_agent_config(agent_context.workspace, agent_id).await else {
         return Err(anyhow!(
             "reload_agent failed, agent_config not exist, agent_id: {agent_id}"
         ));
     };
-    match spawn_agent_actual(
-        config,
-        history_manager,
-        memory_manager,
-        workspace,
-        mcp_registry,
-        agent_id,
-        &agent_config,
-    )
-    .await
-    {
+    match spawn_agent_actual(agent_id, &agent_config, agent_context).await {
         Ok(agent) => {
             info!(
                 "reload_agent ok, agent_id: {}, agent_group: {}",
@@ -55,57 +39,47 @@ pub async fn reload_agent(
 }
 
 pub async fn spawn_agent(
-    config: &'static Config,
-    history_manager: &Arc<dyn HistoryManager>,
-    memory_manager: &Arc<MemoryManager>,
-    workspace: &'static Workspace,
-    mcp_registry: &'static McpRegistry,
-
     agent_id: &AgentId,
     agent_group: &AgentGroup,
     addi_system_prompt: Option<SystemPrompt>,
     desc: Option<String>,
     owner_session: &OwnerSession,
+    agent_context: &'static AgentContext,
 ) -> crate::Result<Arc<dyn Agent>> {
-    let agent_config = if let Some(agent_config) = load_agent_config(workspace, agent_id).await.ok()
+    let agent_config = if let Some(agent_config) =
+        load_agent_config(agent_context.workspace, agent_id)
+            .await
+            .ok()
     {
         agent_config
     } else {
-        if config.agent_groups.get(&agent_group).is_none() {
+        if agent_context
+            .config
+            .agent_groups
+            .get(&agent_group)
+            .is_none()
+        {
             return Err(anyhow!("agent_group: {agent_group} is forbidden"));
         }
         let config = AgentConfig {
             agent_group: agent_group.clone(),
-            agent_group_config: get_agent_group_config(workspace, &agent_group).await?,
+            agent_group_config: get_agent_group_config(agent_context.workspace, &agent_group)
+                .await?,
             addi_system_prompt,
             desc,
             owner_session: owner_session.clone(),
         };
-        store_agent_config(workspace, agent_id, agent_group, config).await?
+        store_agent_config(agent_context.workspace, agent_id, agent_group, config).await?
     };
-    spawn_agent_actual(
-        config,
-        history_manager,
-        memory_manager,
-        workspace,
-        mcp_registry,
-        agent_id,
-        &agent_config,
-    )
-    .await
+    spawn_agent_actual(agent_id, &agent_config, agent_context).await
 }
 
 static SPAWN_MAIN_AGENT_LOCK: AtomicBool = AtomicBool::new(false);
 
 async fn spawn_agent_actual(
-    config: &'static Config,
-    history_manager: &Arc<dyn HistoryManager>,
-    memory_manager: &Arc<MemoryManager>,
-    workspace: &'static Workspace,
-    mcp_registry: &'static McpRegistry,
-
     agent_id: &AgentId,
     agent_config: &AgentConfig,
+    agent_context: &'static AgentContext,
 ) -> crate::Result<Arc<dyn Agent>> {
     if agent_id.is_main() {
         if let Err(_) = SPAWN_MAIN_AGENT_LOCK.compare_exchange(
@@ -130,25 +104,21 @@ async fn spawn_agent_actual(
         owner_session,
         ..
     } = &agent_config;
-    let agent = match config.model_provider(model_provider)? {
+    let agent = match agent_context.config.model_provider(model_provider)? {
         ModelProviders::OpenaiCompatible(model_provider) => {
             model_provider
                 .create_agent(
                     agent_id,
                     agent_group,
-                    config,
                     model.clone(),
-                    Arc::clone(history_manager),
-                    Arc::clone(memory_manager),
-                    workspace,
-                    Arc::new(SystemPromptProvider_ {
-                        workspace,
-                        agent_config: agent_config.clone(),
-                    }),
-                    mcp_registry,
                     agent_settings.clone(),
                     desc.clone(),
                     owner_session,
+                    Arc::new(SystemPromptProvider_ {
+                        workspace: agent_context.workspace,
+                        agent_config: agent_config.clone(),
+                    }),
+                    agent_context,
                 )
                 .await?
         }

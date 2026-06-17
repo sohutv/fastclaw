@@ -1,23 +1,23 @@
-use crate::agent::{Agent, AgentRequest};
+use crate::agent::{Agent, AgentRequest, AgentVisitor};
 use crate::channels::console_cmd::Console;
-use crate::channels::http_channel::{CameraFrame, Client, HttpChannel};
+use crate::channels::http_channel::{CameraFrame, HttpChannel, HttpClient};
 use crate::channels::http_channel::{HttpReqMessage, Payload};
 use crate::channels::{Channel, SessionId};
 use base64::Engine;
+use image::EncodableLayout;
 use log::warn;
 use rig::OneOrMany;
 use rig::message::{DocumentSourceKind, Image, ImageDetail, ImageMediaType, UserContent};
 use std::ops::Deref;
 use std::sync::Arc;
-use image::EncodableLayout;
 
 impl HttpChannel {
     /// ### handle_input_message
     pub(super) async fn handle_input_message(
-        self: Arc<Self>,
+        &'static self,
         agent: Arc<dyn Agent>,
         session_id: SessionId,
-        client: Arc<Client>,
+        http_client: Arc<HttpClient>,
         data: HttpReqMessage,
     ) -> crate::Result<()> {
         let HttpReqMessage {
@@ -59,7 +59,7 @@ impl HttpChannel {
                             }
                         };
 
-                        let filepath = &self.ctx.workspace.downloads_path().join(format!(
+                        let filepath = &self.context.workspace.downloads_path().join(format!(
                             "{}.{}",
                             uuid::Uuid::new_v4(),
                             extension
@@ -88,7 +88,7 @@ impl HttpChannel {
                             )
                             .into(),
                         ));
-                        break
+                        break;
                     }
                     Payload::CameraFrame(CameraFrame { meta, image }) => {
                         img_idx += 1;
@@ -123,17 +123,11 @@ impl HttpChannel {
             (cmd, user_contents)
         };
         if let Some(cmd_val) = &cmd {
-            match Console::handle_console_cmd(&self.ctx, &cmd_val, &agent, &session_id).await {
+            match Console::handle_console_cmd(&self.context, &cmd_val, &agent, &session_id).await {
                 Ok(mut receiver) => {
-                    let self_ = Arc::clone(&self);
-                    let client = Arc::clone(&client);
+                    let client = Arc::clone(&http_client);
                     let _ = tokio::spawn(async move {
-                        let _ = self_
-                            .handle_agent_message(
-                                client,
-                                &mut receiver,
-                            )
-                            .await;
+                        let _ = self.handle_agent_message(client, &mut receiver).await;
                     });
                     return Ok(());
                 }
@@ -153,15 +147,15 @@ impl HttpChannel {
             return Ok(());
         };
         let msg_id = message_id.clone();
-        match Arc::clone(&self)
+        match self
             .spawn_agent_request(
-                Arc::clone(&client),
-                None,
+                &http_client,
+                self.agent.id(),
                 AgentRequest {
                     id: msg_id.to_string().into(),
                     session_id: session_id.clone(),
-                    agent_id: self.agent.id().clone(),
                     message: vec![user_content],
+                    addi_system_prompt: None,
                 },
             )
             .await

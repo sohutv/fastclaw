@@ -121,7 +121,7 @@ impl DingtalkChannel {
                 &*self.agent,
                 session_id,
                 &self.dingtalk_config,
-                &self.ctx,
+                &self.context,
                 resp_type,
                 message_content,
                 DingtalkChannel::create_robot_messages,

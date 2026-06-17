@@ -78,7 +78,7 @@ The group to use for the new agent. This determines the agent's configuration pr
         match self
             .ctx
             .parent_agent
-            .fork_child(
+            .fork_agent(
                 &agent_id,
                 &agent_group,
                 Some(system_prompt),
@@ -87,30 +87,17 @@ The group to use for the new agent. This determines the agent's configuration pr
             )
             .await
         {
-            Ok(_) => {
-                let _ = tokio::fs::write(
-                    self.ctx
-                        .agent_context()
-                        .workspace
-                        .agent_group_agent_lock_path(&agent_id)
-                        .await
-                        .map_err(|err| ToolCallError(format!("{err}")))?,
-                    format!("{}", chrono::Local::now().timestamp_millis()).as_bytes(),
-                )
-                .await
-                .map_err(|err| ToolCallError(format!("{err}")))?;
-                Ok(ToolCallRsult {
-                    success: true,
-                    output: format!(
-                        r#"
+            Ok(_) => Ok(ToolCallRsult {
+                success: true,
+                output: format!(
+                    r#"
 Forking daemon agent ok
 - agent_id: `{}`
 "#,
-                        agent_id,
-                    ),
-                    error: None,
-                })
-            }
+                    agent_id,
+                ),
+                error: None,
+            }),
             Err(e) => {
                 warn!("fork child agent failed: {e}");
                 Ok(ToolCallRsult {

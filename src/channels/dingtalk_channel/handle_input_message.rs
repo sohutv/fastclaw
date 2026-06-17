@@ -1,4 +1,4 @@
-use crate::agent::{AgentRequest, DelegatedAgent};
+use crate::agent::{AgentRequest, AgentVisitor, DelegatedAgent};
 use crate::channels::console_cmd::Console;
 use crate::channels::dingtalk_channel::DingtalkChannel;
 use crate::channels::{Channel, GroupUserId, SessionId, session_id};
@@ -33,7 +33,7 @@ use tokio::sync::mpsc::Sender;
 
 #[allow(unused)]
 pub(super) struct DingTalkCallbackHandler {
-    pub(super) channel: Arc<DingtalkChannel>,
+    pub(super) channel: &'static DingtalkChannel,
     pub(super) dingtalk_bot_topic: MessageTopic,
 }
 
@@ -91,7 +91,12 @@ impl dingtalk_stream::handlers::CallbackHandler for DingTalkCallbackHandler {
                     }
                 }
                 MessagePayload::Picture { content: picture } => {
-                    let downloads_dir = self.channel.ctx.workspace.downloads_path().to_path_buf();
+                    let downloads_dir = self
+                        .channel
+                        .context
+                        .workspace
+                        .downloads_path()
+                        .to_path_buf();
                     match picture.fetch(&dingtalk_client, downloads_dir).await {
                         Ok((filepath, image)) => {
                             let mut buf = vec![];
@@ -120,7 +125,12 @@ impl dingtalk_stream::handlers::CallbackHandler for DingTalkCallbackHandler {
                     }
                 }
                 MessagePayload::Video { content } => {
-                    let downloads_dir = self.channel.ctx.workspace.downloads_path().to_path_buf();
+                    let downloads_dir = self
+                        .channel
+                        .context
+                        .workspace
+                        .downloads_path()
+                        .to_path_buf();
                     match content.fetch(&dingtalk_client, downloads_dir).await {
                         Ok((filepath, _)) => {
                             user_contents.push(UserContent::Text(
@@ -141,13 +151,23 @@ impl dingtalk_stream::handlers::CallbackHandler for DingTalkCallbackHandler {
                     if !text.is_empty() {
                         user_contents.push(UserContent::text(text));
                     }
-                    let downloads_dir = self.channel.ctx.workspace.downloads_path().to_path_buf();
+                    let downloads_dir = self
+                        .channel
+                        .context
+                        .workspace
+                        .downloads_path()
+                        .to_path_buf();
                     if let Err(err) = content.fetch(&dingtalk_client, downloads_dir).await {
                         warn!("download audio failed, {err}");
                     }
                 }
                 MessagePayload::File { content } => {
-                    let downloads_dir = self.channel.ctx.workspace.downloads_path().to_path_buf();
+                    let downloads_dir = self
+                        .channel
+                        .context
+                        .workspace
+                        .downloads_path()
+                        .to_path_buf();
                     match content.fetch(&dingtalk_client, downloads_dir).await {
                         Ok((filepath, _)) => {
                             user_contents.push(UserContent::Text(
@@ -164,7 +184,12 @@ impl dingtalk_stream::handlers::CallbackHandler for DingTalkCallbackHandler {
                     }
                 }
                 MessagePayload::RichText { content } => {
-                    let downloads_dir = self.channel.ctx.workspace.downloads_path().to_path_buf();
+                    let downloads_dir = self
+                        .channel
+                        .context
+                        .workspace
+                        .downloads_path()
+                        .to_path_buf();
                     let mut texts = vec![];
                     for content in content.iter() {
                         match content {
@@ -212,7 +237,7 @@ impl dingtalk_stream::handlers::CallbackHandler for DingTalkCallbackHandler {
         };
         if let Some(cmd_val) = &cmd {
             match Console::handle_console_cmd(
-                &self.channel.ctx,
+                &self.channel.context,
                 &cmd_val,
                 self.channel.agent.delegated(),
                 &session_id,
@@ -220,8 +245,8 @@ impl dingtalk_stream::handlers::CallbackHandler for DingTalkCallbackHandler {
             .await
             {
                 Ok(mut receiver) => {
-                    let channel = Arc::clone(&self.channel);
                     let client = Arc::clone(&dingtalk_client);
+                    let channel = self.channel;
                     let _ = tokio::spawn(async move {
                         let _ = channel.handle_agent_message(client, &mut receiver).await;
                     });
@@ -268,15 +293,16 @@ impl dingtalk_stream::handlers::CallbackHandler for DingTalkCallbackHandler {
 
         let msg_id = msg_id.clone();
         info!("Submit task to agent, msg_id: {}", msg_id);
-        match Arc::clone(&self.channel)
+        match self
+            .channel
             .spawn_agent_request(
-                Arc::clone(&dingtalk_client),
-                Some(addi_system_prompt),
+                &dingtalk_client,
+                self.channel.agent.id(),
                 AgentRequest {
                     id: msg_id.to_string().into(),
                     session_id,
-                    agent_id: self.channel.agent.id().clone(),
                     message: vec![user_contents],
+                    addi_system_prompt: Some(addi_system_prompt),
                 },
             )
             .await

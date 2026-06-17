@@ -1,6 +1,5 @@
-use crate::agent::{Agent, AgentId, DelegatedAgent, MainAgent};
+use crate::agent::{AgentId, MainAgent};
 use crate::channels::{AgentRespState, Channel, ChannelContext, ChannelMessage, SessionId};
-use crate::config::{Config, Workspace};
 use anyhow::anyhow;
 use async_trait::async_trait;
 use axum::routing::{delete, get};
@@ -27,21 +26,20 @@ pub use config::*;
 mod restapi;
 
 pub struct HttpChannel {
-    #[allow(dead_code)]
-    pub ctx: Arc<ChannelContext>,
+    context: &'static ChannelContext,
     pub http_config: HttpChannelConfig,
     pub agent: Arc<MainAgent>,
 }
 
 impl HttpChannel {
     pub async fn new(
-        config: &'static Config,
-        workspace: &'static Workspace,
+        context: &'static ChannelContext,
         agent: &Arc<MainAgent>,
     ) -> crate::Result<Self> {
         Ok(Self {
-            ctx: Arc::new(ChannelContext { config, workspace }),
-            http_config: config
+            context,
+            http_config: context
+                .config
                 .http_config
                 .clone()
                 .ok_or_else(|| anyhow!("http_config not found"))?,
@@ -78,21 +76,22 @@ impl Transport {
 }
 
 #[derive(Deref, Default)]
-pub struct Client(RwLock<HashMap<UserId, Arc<RwLock<HashMap<AgentId, Vec<Transport>>>>>>);
+pub struct HttpClient(RwLock<HashMap<UserId, Arc<RwLock<HashMap<AgentId, Vec<Transport>>>>>>);
 #[derive(Clone)]
 struct AppState {
-    channel: Arc<HttpChannel>,
+    channel: &'static HttpChannel,
     agent: Arc<MainAgent>,
-    client: Arc<Client>,
+    client: Arc<HttpClient>,
 }
 
 #[async_trait]
 impl Channel for HttpChannel {
-    type Client = Client;
+    type Client = HttpClient;
     type JoinHandle = tokio::task::JoinHandle<crate::Result<()>>;
 
-    async fn start(self) -> crate::Result<(Arc<Self>, Arc<Self::Client>, Self::JoinHandle)> {
-        let self_ = Arc::new(self);
+    async fn start(
+        &'static self,
+    ) -> crate::Result<(&'static Self, Arc<Self::Client>, Self::JoinHandle)> {
         let client = Default::default();
         let app = {
             Router::new()
@@ -105,11 +104,11 @@ impl Channel for HttpChannel {
                 )
         }
         .with_state(AppState {
-            channel: self_.clone(),
-            agent: Arc::clone(&self_.agent),
+            channel: self,
+            agent: Arc::clone(&self.agent),
             client: Arc::clone(&client),
         });
-        let addr: SocketAddr = self_.http_config.addr.parse()?;
+        let addr: SocketAddr = self.http_config.addr.parse()?;
         let listener = tokio::net::TcpListener::bind(&addr).await?;
         info!("HttpCompletable HTTP channel listening on {}", addr);
 
@@ -121,16 +120,15 @@ impl Channel for HttpChannel {
             Ok(())
         });
 
-        Ok((self_, client, join_handle))
+        Ok((self, client, join_handle))
     }
 
-    fn agent(&self) -> &Arc<dyn Agent> {
-        self.agent.delegated()
+    fn context(&self) -> &'static ChannelContext {
+        self.context
     }
-
     async fn handle_agent_message(
         &self,
-        client: Arc<Client>,
+        client: Arc<HttpClient>,
         receiver: &mut Receiver<crate::Result<ChannelMessage>>,
     ) -> crate::Result<()> {
         let mut state = AgentRespState::Wait;

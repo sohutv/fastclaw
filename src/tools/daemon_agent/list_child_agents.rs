@@ -44,7 +44,7 @@ impl Tool for ListChildAgentsTool {
     async fn call(&self, _args: Self::Args) -> Result<Self::Output, Self::Error> {
         info!("Listing all child daemon agents");
         let parent_ctx = self.ctx.parent_agent.context();
-        let children = parent_ctx.children.read().await;
+        let children = parent_ctx.agent_registry.read().await;
 
         if children.is_empty() {
             return Ok(ToolCallRsult {

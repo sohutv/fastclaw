@@ -1,10 +1,8 @@
 use crate::agent::{
-    Agent, AgentRequest, AgentRequestContext, AgentRequestPkg, AgentResponse, AgentVisitor,
-    DelegatedAgent, MainAgent, Notify,
+    AgentRequest, AgentResponse, AgentVisitor, DelegatedAgent, MainAgent, Notify,
 };
 use crate::channels::console_cmd::Console;
 use crate::channels::{Channel, ChannelContext, ChannelMessage, SessionId, SessionSettings};
-use crate::config::{Config, Workspace};
 use anyhow::anyhow;
 use async_trait::async_trait;
 use log::warn;
@@ -20,7 +18,7 @@ use tokio::sync::mpsc::Receiver;
 
 #[derive(Clone)]
 pub struct CliChannel {
-    ctx: Arc<ChannelContext>,
+    context: &'static ChannelContext,
     session_id: SessionId,
     session_settings: SessionSettings,
     agent: Arc<MainAgent>,
@@ -28,14 +26,13 @@ pub struct CliChannel {
 
 impl CliChannel {
     pub async fn new(
-        config: &'static Config,
-        workspace: &'static Workspace,
+        context: &'static ChannelContext,
         agent: &Arc<MainAgent>,
     ) -> crate::Result<Self> {
         let session_id = SessionId::Master("cli-session-channel".into());
         let session_settings = SessionSettings::default();
         Ok(CliChannel {
-            ctx: Arc::new(ChannelContext { config, workspace }),
+            context,
             session_id,
             session_settings,
             agent: Arc::clone(agent),
@@ -48,11 +45,10 @@ impl Channel for CliChannel {
     type Client = ();
     type JoinHandle = JoinHandle<()>;
 
-    async fn start(self) -> crate::Result<(Arc<Self>, Arc<Self::Client>, Self::JoinHandle)> {
-        let self_ = Arc::new(self);
-        let (message_sender, mut message_receiver) = tokio::sync::mpsc::channel(32);
+    async fn start(
+        &'static self,
+    ) -> crate::Result<(&'static Self, Arc<Self::Client>, Self::JoinHandle)> {
         let join_handle = {
-            let self_ = Arc::clone(&self_);
             let join_handle = std::thread::spawn(move || {
                 let rt = tokio::runtime::Builder::new_current_thread()
                     .enable_all()
@@ -60,6 +56,7 @@ impl Channel for CliChannel {
                     .expect("unexpected err");
                 let mut rl = DefaultEditor::new().expect("unexpected err");
                 let _ = rt.block_on(async move {
+                    let client = Arc::new(());
                     loop {
                         let readline = rl.readline(">> ");
                         match readline {
@@ -68,10 +65,10 @@ impl Channel for CliChannel {
                                 if !line.is_empty() {
                                     if line.starts_with('/') {
                                         match Console::handle_console_cmd(
-                                            &self_.ctx,
+                                            self.context,
                                             &line,
-                                            self_.agent.delegated(),
-                                            &self_.session_id,
+                                            self.agent.delegated(),
+                                            &self.session_id,
                                         )
                                         .await
                                         {
@@ -81,31 +78,23 @@ impl Channel for CliChannel {
                                             Err(_) => {}
                                         }
                                     }
-                                    let _ = self_
-                                        .agent
-                                        .get_channel_sender()
-                                        .await
-                                        .unwrap()
-                                        .send(AgentRequestPkg::new_without_ack(
+                                    if let Ok(join_handle) = self
+                                        .spawn_agent_request(
+                                            &client,
+                                            self.agent.id(),
                                             AgentRequest {
                                                 id: Default::default(),
-                                                session_id: self_.session_id.clone(),
-                                                agent_id: self_.agent.id().clone(),
+                                                session_id: self.session_id.clone(),
                                                 message: vec![OneOrMany::one(UserContent::text(
                                                     line,
                                                 ))],
-                                            },
-                                            AgentRequestContext {
-                                                channel_message_sender: message_sender.clone(),
                                                 addi_system_prompt: None,
-                                                tool_filter: Default::default(),
-                                                with_history: true,
                                             },
-                                        ))
-                                        .await;
-                                    let _ = self_
-                                        .handle_agent_message(Arc::new(()), &mut message_receiver)
-                                        .await;
+                                        )
+                                        .await
+                                    {
+                                        let _ = join_handle.await;
+                                    }
                                 }
                             }
                             Err(ReadlineError::Interrupted) => {
@@ -121,11 +110,11 @@ impl Channel for CliChannel {
             });
             join_handle
         };
-        Ok((self_, Default::default(), join_handle))
+        Ok((self, Default::default(), join_handle))
     }
 
-    fn agent(&self) -> &Arc<dyn Agent> {
-        self.agent.delegated()
+    fn context(&self) -> &'static ChannelContext {
+        self.context
     }
 
     async fn handle_agent_message(

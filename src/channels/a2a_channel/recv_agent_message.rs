@@ -1,5 +1,5 @@
-use crate::channels::a2a_channel::A2AChannel;
 use crate::agent::{Agent, AgentRequest, AgentResponse, Notify};
+use crate::channels::a2a_channel::A2AChannel;
 use crate::channels::text_formater::*;
 use crate::channels::{AgentRespState, AgentRespType};
 use crate::channels::{ChannelContext, ChannelMessage, SessionId, create_robot_messages_for_agent};
@@ -10,7 +10,7 @@ impl A2AChannel {
         &self,
         ChannelMessage {
             session_id,
-            agent_id: _,
+            agent_id,
             message,
         }: &ChannelMessage,
         curr_state: AgentRespState,
@@ -46,7 +46,13 @@ impl A2AChannel {
                     format_message(
                         session_id,
                         &self.config,
-                        self.agent.agent_settings().output_schema.is_some(),
+                        self.context
+                            .agent_registry
+                            .get(agent_id)
+                            .await?
+                            .agent_settings()
+                            .output_schema
+                            .is_some(),
                         usage,
                         buff,
                     )
@@ -75,10 +81,13 @@ impl A2AChannel {
         };
         if let Some((text, resp_type)) = formated_message {
             if let Some(robot_message) = create_robot_messages_for_agent(
-                &*self.agent,
+                &*self.context
+                    .agent_registry
+                    .get(agent_id)
+                    .await?,
                 session_id,
                 &self.config,
-                &self.ctx,
+                &self.context,
                 resp_type,
                 text,
                 A2AChannel::create_robot_messages,

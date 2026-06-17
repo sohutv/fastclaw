@@ -16,7 +16,7 @@ impl WechatChannel {
     /// ### handle_wechat_message
     /// - wechat-bot 不支持群聊, 所以不会出现未授权的会话
     pub(super) async fn handle_input_message(
-        self: Arc<Self>,
+        &'static self,
         wechat_client: Arc<WechatClient>,
         data: WechatMessage,
     ) -> crate::Result<()> {
@@ -61,7 +61,7 @@ impl WechatChannel {
                             continue;
                         };
                         let filepath = &self
-                            .ctx
+                            .context
                             .workspace
                             .downloads_path()
                             .join(format!("{}.png", uuid::Uuid::new_v4()));
@@ -102,7 +102,7 @@ impl WechatChannel {
                         };
 
                         let filepath = &self
-                            .ctx
+                            .context
                             .workspace
                             .downloads_path()
                             .join(format!("{}.mp4", uuid::Uuid::new_v4(),));
@@ -124,7 +124,7 @@ impl WechatChannel {
                             warn!("download file {} failed", file_item.media.full_url);
                             continue;
                         };
-                        let filepath = &self.ctx.workspace.downloads_path().join(format!(
+                        let filepath = &self.context.workspace.downloads_path().join(format!(
                             "{}_{}",
                             uuid::Uuid::new_v4(),
                             file_item.file_name
@@ -153,7 +153,7 @@ impl WechatChannel {
                             continue;
                         };
                         let filepath = &self
-                            .ctx
+                            .context
                             .workspace
                             .downloads_path()
                             .join(format!("{}.mp3", uuid::Uuid::new_v4(),));
@@ -169,7 +169,7 @@ impl WechatChannel {
         };
         if let Some(cmd_val) = &cmd {
             match Console::handle_console_cmd(
-                &self.ctx,
+                &self.context,
                 &cmd_val,
                 self.agent.delegated(),
                 &self.wechat_config.session_id(),
@@ -177,10 +177,9 @@ impl WechatChannel {
             .await
             {
                 Ok(mut receiver) => {
-                    let self_ = Arc::clone(&self);
                     let client = Arc::clone(&wechat_client);
                     let _ = tokio::spawn(async move {
-                        let _ = self_.handle_agent_message(client, &mut receiver).await;
+                        let _ = self.handle_agent_message(client, &mut receiver).await;
                     });
                     return Ok(());
                 }
@@ -201,15 +200,15 @@ impl WechatChannel {
         };
         let msg_id = message_id.clone();
         info!("Submit task to agent, msg_id: {}", msg_id);
-        match Arc::clone(&self)
+        match self
             .spawn_agent_request(
-                Arc::clone(&wechat_client),
-                None,
+                &wechat_client,
+                self.agent.id(),
                 AgentRequest {
                     id: msg_id.to_string().into(),
                     session_id: self.wechat_config.session_id().clone(),
-                    agent_id: self.agent.id().clone(),
                     message: vec![user_content],
+                    addi_system_prompt: None,
                 },
             )
             .await

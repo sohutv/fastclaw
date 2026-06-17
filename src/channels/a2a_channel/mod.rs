@@ -1,4 +1,3 @@
-use crate::agent::Agent;
 use crate::channels::{AgentRespState, Channel, ChannelContext, ChannelMessage, SessionId};
 use async_trait::async_trait;
 use log::warn;
@@ -7,23 +6,18 @@ use tokio::sync::mpsc::Receiver;
 
 mod config;
 pub use config::A2AChannelConfig;
+
 mod recv_agent_message;
 pub struct A2AChannel {
-    pub ctx: Arc<ChannelContext>,
+    pub context: &'static ChannelContext,
     pub config: A2AChannelConfig,
-    pub agent: Arc<dyn Agent>,
 }
 
 impl A2AChannel {
-    pub fn new(delegated: &Arc<dyn Agent>) -> crate::Result<Self> {
-        let context = delegated.context();
+    pub async fn new(channel_context: &'static ChannelContext) -> crate::Result<Self> {
         Ok(A2AChannel {
-            ctx: Arc::new(ChannelContext {
-                config: context.config,
-                workspace: context.workspace,
-            }),
-            config: context.config.a2a_channel.clone(),
-            agent: Arc::clone(delegated),
+            context: channel_context,
+            config: channel_context.config.a2a_channel.clone(),
         })
     }
 }
@@ -33,14 +27,12 @@ impl Channel for A2AChannel {
     type Client = ();
     type JoinHandle = ();
 
-    async fn start(self) -> crate::Result<(Arc<Self>, Arc<Self::Client>, Self::JoinHandle)> {
-        let self_ = Arc::new(self);
-        let client = Arc::new(());
-        Ok((self_, client, ()))
+    async fn start(&'static self) -> crate::Result<(&'static Self, Arc<Self::Client>, Self::JoinHandle)> {
+        Ok((Box::leak(Box::new(self)), Default::default(), ()))
     }
 
-    fn agent(&self) -> &Arc<dyn Agent> {
-        &self.agent
+    fn context(&self) -> &'static ChannelContext {
+        self.context
     }
 
     async fn handle_agent_message(

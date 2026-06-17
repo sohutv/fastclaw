@@ -1,12 +1,9 @@
 use crate::ModelName;
 use crate::agent::{
     Agent, AgentClone, AgentContext, AgentGroup, AgentId, AgentRequestPkg, AgentSettings,
-    AgentVisitor, HistoryManager, LlmAgentSupplier, OwnerSession, SystemPromptProvider, Workspace,
+    AgentVisitor, LlmAgentSupplier, OwnerSession, SystemPromptProvider,
 };
-use crate::config::Config;
-use crate::memory::MemoryManager;
 use crate::model_provider::{ModelProvider, ModelSettings};
-use crate::tools::mcp_tool::McpRegistry;
 use anyhow::anyhow;
 use async_trait::async_trait;
 use rig::client::CompletionClient;
@@ -27,7 +24,7 @@ where
 {
     id: AgentId,
     group: AgentGroup,
-    ctx: Arc<AgentContext>,
+    ctx: &'static AgentContext,
     model_provider: P,
     model_name: ModelName,
     pub model_settings: ModelSettings,
@@ -36,6 +33,7 @@ where
     /// Agent description
     description: String,
     owner_session: OwnerSession,
+    pub system_prompt: Arc<dyn SystemPromptProvider>,
 }
 
 #[async_trait]
@@ -50,26 +48,13 @@ where
         &self,
         agent_id: &AgentId,
         group: &AgentGroup,
-        config: &'static Config,
         model: ModelName,
-        history_manager: Arc<dyn HistoryManager>,
-        memory_manager: Arc<MemoryManager>,
-        workspace: &'static Workspace,
-        system_prompt: Arc<dyn SystemPromptProvider>,
-        mcp_registry: &'static McpRegistry,
         agent_settings: AgentSettings,
         description: Option<String>,
         owner_session: &OwnerSession,
+        system_prompt: Arc<dyn SystemPromptProvider>,
+        agent_context: &'static AgentContext,
     ) -> crate::Result<Self::A> {
-        let ctx = Arc::new(AgentContext {
-            config,
-            workspace,
-            history_manager,
-            memory_manager,
-            children: Default::default(),
-            system_prompt,
-            mcp_registry,
-        });
         Ok(LlmAgent {
             model_settings: self
                 .model_settings(&model)
@@ -80,10 +65,11 @@ where
             model_provider: self.clone(),
             id: agent_id.clone(),
             group: group.clone(),
-            ctx,
+            ctx: agent_context,
             channel_sender: Default::default(),
             description: description.unwrap_or_default(),
             owner_session: owner_session.clone(),
+            system_prompt,
         })
     }
 }
@@ -113,10 +99,11 @@ where
             },
             model_name: self.model_name.clone(),
             model_provider: self.model_provider.clone(),
-            ctx: self.ctx.clone(),
+            ctx: self.ctx,
             channel_sender: Default::default(),
             description: self.description.clone(),
             owner_session: self.owner_session.clone(),
+            system_prompt: Arc::clone(&self.system_prompt),
         };
         Ok(Arc::new(agent) as Arc<dyn Agent>)
     }
@@ -150,8 +137,8 @@ where
     fn id(&self) -> &AgentId {
         &self.id
     }
-    fn context(&self) -> Arc<AgentContext> {
-        Arc::clone(&self.ctx)
+    fn context(&self) -> &'static AgentContext {
+        self.ctx
     }
 
     fn agent_group(&self) -> &AgentGroup {

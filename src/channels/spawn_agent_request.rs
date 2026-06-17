@@ -7,7 +7,6 @@ use tokio::sync::mpsc::Receiver;
 pub async fn apply(
     agent: Arc<dyn Agent>,
     req: AgentRequest,
-    addi_system_prompt: Option<String>,
 ) -> crate::Result<Receiver<crate::Result<ChannelMessage>>> {
     let (rx, tx) = tokio::sync::mpsc::channel(32);
     let task_id = req.id.clone();
@@ -16,7 +15,6 @@ pub async fn apply(
         req,
         AgentRequestContext {
             channel_message_sender: rx,
-            addi_system_prompt,
             tool_filter: Default::default(),
             with_history: true,
         },

@@ -29,7 +29,7 @@ where
         TF: Into<ToolFilter>,
     {
         let model_client = &self.model_provider.completion_client()?;
-        let preamble= self.ctx.system_prompt.apply().await?;
+        let preamble= self.system_prompt.apply().await?;
         let mut builder = model_client
             .agent(&*self.model_name)
             .preamble(&*preamble)

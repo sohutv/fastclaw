@@ -1,4 +1,4 @@
-use crate::agent::{Agent, AgentId, AgentRequest, AgentResponse};
+use crate::agent::{Agent, AgentId, AgentRegistry, AgentRequest, AgentResponse};
 use crate::config::{Config, Workspace};
 use async_trait::async_trait;
 use derive_more::Deref;
@@ -21,8 +21,8 @@ pub mod http_channel;
 pub mod spawn_agent_request;
 pub mod text_formater;
 
-mod session_id;
 pub mod a2a_channel;
+mod session_id;
 
 pub use session_id::*;
 
@@ -35,30 +35,27 @@ where
 
     type JoinHandle: Sync + Send;
 
-    async fn start(self) -> crate::Result<(Arc<Self>, Arc<Self::Client>, Self::JoinHandle)>;
+    async fn start(
+        &'static self,
+    ) -> crate::Result<(&'static Self, Arc<Self::Client>, Self::JoinHandle)>;
 
-    fn agent(&self) -> &Arc<dyn Agent>;
+    fn context(&self) -> &'static ChannelContext;
 
     /// handle_agent_task
     /// spawn_agent_task -> spawn(handle_agent_message)
     async fn spawn_agent_request(
-        self: Arc<Self>,
-        client: Arc<Self::Client>,
-        addi_system_prompt: Option<String>,
+        &'static self,
+        client: &Arc<Self::Client>,
+        agent_id: &AgentId,
         req: AgentRequest,
-    ) -> crate::Result<()> {
-        let agent = if let Some(dst) = self.agent().get_child(&req.agent_id).await {
-            dst as Arc<dyn Agent>
-        } else {
-            Arc::clone(self.agent())
-        };
-        let mut receiver =
-            spawn_agent_request::apply(agent, req.clone(), addi_system_prompt).await?;
-        let self_ = Arc::clone(&self);
-        let _ = tokio::spawn(async move {
-            let _ = self_.handle_agent_message(client, &mut receiver).await;
+    ) -> crate::Result<tokio::task::JoinHandle<()>> {
+        let agent = self.context().agent_registry.get(agent_id).await?;
+        let mut receiver = spawn_agent_request::apply(agent, req).await?;
+        let client_ = Arc::clone(client);
+        let join_handle = tokio::spawn(async move {
+            let _ = self.handle_agent_message(client_, &mut receiver).await;
         });
-        Ok(())
+        Ok(join_handle)
     }
 
     async fn handle_agent_message(
@@ -75,6 +72,7 @@ where
 pub struct ChannelContext {
     pub config: &'static Config,
     pub workspace: &'static Workspace,
+    pub agent_registry: &'static AgentRegistry,
 }
 
 #[derive(Clone, Deref)]

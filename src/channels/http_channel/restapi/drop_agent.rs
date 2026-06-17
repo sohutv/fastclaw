@@ -1,4 +1,4 @@
-use crate::agent::AgentId;
+use crate::agent::{AgentId, AgentVisitor};
 use crate::channels::SessionId;
 use crate::channels::http_channel::AppState;
 use crate::channels::http_channel::type_::UserId;
@@ -28,17 +28,22 @@ pub async fn handle(
         warn!("{err}");
         StatusCode::FORBIDDEN
     })?;
-    if let Some(transports) =  client.read().await.get(&user_id) {
+    if let Some(transports) = client.read().await.get(&user_id) {
         if let Some(dst) = transports.write().await.remove(&agent_id) {
             for transport in dst {
                 drop(transport)
             }
         }
     }
-    let agent = agent.drop_child(&agent_id).await.map_err(|err| {
-        error!("drop agent {agent_id} failed, err: {err}");
-        StatusCode::BAD_REQUEST
-    })?;
+    let agent = agent
+        .context()
+        .agent_registry
+        .drop(&agent_id)
+        .await
+        .map_err(|err| {
+            error!("drop agent {agent_id} failed, err: {err}");
+            StatusCode::BAD_REQUEST
+        })?;
     log::info!("drop agent {} ok", agent.id());
     Ok(())
 }

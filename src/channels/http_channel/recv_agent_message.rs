@@ -1,5 +1,5 @@
 use crate::agent::{Agent, AgentId, AgentResponse, Notify};
-use crate::channels::http_channel::{Client, HttpChannel, Payload};
+use crate::channels::http_channel::{HttpClient, HttpChannel, Payload};
 use crate::channels::http_channel::{HttpRespMessage, UserId};
 use crate::channels::text_formater::{
     FormatedMessage, extract_message, extract_reasoning, format_history_compact, format_message,
@@ -14,7 +14,7 @@ use anyhow::anyhow;
 impl HttpChannel {
     pub(super) async fn handle_agent_message_actual(
         &self,
-        client: &Client,
+        client: &HttpClient,
         ChannelMessage {
             session_id,
             agent_id,
@@ -92,7 +92,7 @@ impl HttpChannel {
                 &*self.agent,
                 session_id,
                 &self.http_config,
-                &self.ctx,
+                &self.context,
                 resp_type,
                 text,
                 HttpChannel::create_resp_messages,
@@ -134,7 +134,7 @@ impl From<FormatedMessage> for Payload {
 }
 
 impl HttpRespMessage {
-    async fn send(self, client: &Client, session_id: &SessionId, agent_id: &AgentId) {
+    async fn send(self, client: &HttpClient, session_id: &SessionId, agent_id: &AgentId) {
         let user_id = UserId::from(session_id);
         if let Some(guard) = client.read().await.get(&user_id) {
             let mut user_transports = guard.write().await;

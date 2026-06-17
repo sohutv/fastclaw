@@ -1,7 +1,7 @@
 use crate::agent::{AgentGroup, AgentId};
 use crate::channels::SessionId;
 use crate::channels::http_channel::type_::{HttpReqMessage, UserId};
-use crate::channels::http_channel::{AppState, Client, Transport};
+use crate::channels::http_channel::{AppState, HttpClient, Transport};
 use crate::hash_map;
 use axum::Json;
 use axum::extract::{Path, Query, State};
@@ -116,7 +116,7 @@ pub async fn handle(
         }
         ChatRespType::Streamable => {
             let (transport, rx) = Transport::new(&session_id, agent_id.clone());
-            let client = Arc::new(Client(RwLock::new(hash_map!(
+            let client = Arc::new(HttpClient(RwLock::new(hash_map!(
                 user_id.clone() => Arc::new(RwLock::new(hash_map!(agent_id.clone() => vec![transport],))),
             ))));
             let _ = app_state
@@ -141,7 +141,7 @@ pub async fn handle(
         }
         ChatRespType::Completable => {
             let (transport, mut rx) = Transport::new(&session_id, agent_id.clone());
-            let client = Arc::new(Client(RwLock::new(hash_map!(
+            let client = Arc::new(HttpClient(RwLock::new(hash_map!(
                 user_id.clone() => Arc::new(RwLock::new(hash_map!(agent_id.clone() => vec![transport],))),
             ))));
             let _ = app_state

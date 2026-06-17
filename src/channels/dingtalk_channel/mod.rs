@@ -1,6 +1,5 @@
-use crate::agent::{Agent, DelegatedAgent, MainAgent};
+use crate::agent::{Agent, MainAgent};
 use crate::channels::{AgentRespState, Channel, ChannelContext, ChannelMessage, SessionId};
-use crate::config::{Config, Workspace};
 use anyhow::anyhow;
 use async_trait::async_trait;
 use dingtalk_stream::{
@@ -27,20 +26,20 @@ mod handle_input_message;
 mod recv_agent_message;
 
 pub struct DingtalkChannel {
-    pub ctx: Arc<ChannelContext>,
+    context: &'static ChannelContext,
     pub dingtalk_config: DingTalkConfig,
     pub agent: Arc<MainAgent>,
 }
 
 impl DingtalkChannel {
     pub async fn new(
-        config: &'static Config,
-        workspace: &'static Workspace,
+        context: &'static ChannelContext,
         agent: &Arc<MainAgent>,
     ) -> crate::Result<Self> {
         Ok(Self {
-            ctx: Arc::new(ChannelContext { config, workspace }),
-            dingtalk_config: config
+            context,
+            dingtalk_config: context
+                .config
                 .dingtalk_config
                 .clone()
                 .ok_or(anyhow!("dingtalk config not found"))?,
@@ -54,14 +53,15 @@ impl Channel for DingtalkChannel {
     type Client = DingTalkStream;
     type JoinHandle = JoinHandle<crate::Result<()>>;
 
-    async fn start(self) -> crate::Result<(Arc<Self>, Arc<Self::Client>, Self::JoinHandle)> {
-        let self_ = Arc::new(self);
+    async fn start(
+        &'static self,
+    ) -> crate::Result<(&'static Self, Arc<Self::Client>, Self::JoinHandle)> {
         let cb_handler = Arc::new(handle_input_message::DingTalkCallbackHandler {
-            channel: Arc::clone(&self_),
+            channel: self,
             dingtalk_bot_topic: MessageTopic::Callback(dingtalk_stream::TOPIC_ROBOT.to_string()),
         });
         let (dingtalk, dingtalk_stream_handle) = Arc::new(
-            DingTalkStream::new(self_.dingtalk_config.credential.clone())
+            DingTalkStream::new(self.dingtalk_config.credential.clone())
                 .register_lifecycle_listener(Arc::clone(&cb_handler))
                 .await
                 .register_callback_handler(Arc::clone(&cb_handler))
@@ -69,13 +69,12 @@ impl Channel for DingtalkChannel {
         )
         .start()
         .await?;
-        Ok((self_, dingtalk, dingtalk_stream_handle))
+        Ok((self, dingtalk, dingtalk_stream_handle))
     }
 
-    fn agent(&self) -> &Arc<dyn Agent> {
-        self.agent.delegated()
+    fn context(&self) -> &'static ChannelContext {
+        self.context
     }
-
     async fn handle_agent_message(
         &self,
         dingtalk: Arc<DingTalkStream>,

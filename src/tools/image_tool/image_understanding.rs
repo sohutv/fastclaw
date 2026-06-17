@@ -129,7 +129,6 @@ impl ImageUnderstandingTool {
             AgentRequest {
                 id: uuid::Uuid::new_v4().into(),
                 session_id: self.ctx.session_id.clone(),
-                agent_id: agent.id().clone(),
                 message: vec![OneOrMany::many({
                     let mut vec = Vec::with_capacity(images.len() + 1);
                     vec.push(UserContent::text(prompt));
@@ -150,10 +149,10 @@ impl ImageUnderstandingTool {
                     }
                     vec
                 })?],
+                addi_system_prompt: None,
             },
             AgentRequestContext {
                 channel_message_sender,
-                addi_system_prompt: None,
                 tool_filter: ToolFilter::from(|_| None),
                 with_history: false,
             },

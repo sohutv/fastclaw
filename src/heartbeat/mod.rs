@@ -9,11 +9,11 @@ use tokio::task::JoinHandle;
 mod spawn_cron_tasks;
 
 #[allow(unused)]
-pub struct Heartbeat<C, Client> {
+pub struct Heartbeat<C:'static, Client> {
     config: &'static Config,
     workspace: &'static Workspace,
     interval: Duration,
-    channel: Arc<C>,
+    channel: &'static C,
     client: Arc<Client>,
     agent: Arc<dyn Agent>,
 }
@@ -25,7 +25,7 @@ where
     pub fn new(
         config: &'static Config,
         workspace: &'static Workspace,
-        channel: Arc<C>,
+        channel: &'static C,
         client: Arc<Client>,
         agent: Arc<dyn Agent>,
     ) -> crate::Result<Self> {

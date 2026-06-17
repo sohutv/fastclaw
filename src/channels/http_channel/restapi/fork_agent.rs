@@ -42,7 +42,7 @@ pub async fn handle(
     })?;
     let agent = app_state
         .agent
-        .fork_child(
+        .fork_agent(
             &(uuid::Uuid::new_v4().into()),
             &agent_group,
             Some(system_prompt),

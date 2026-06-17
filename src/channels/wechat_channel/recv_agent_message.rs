@@ -93,7 +93,7 @@ impl WechatChannel {
                 &*self.agent,
                 session_id,
                 &self.wechat_config,
-                &self.ctx,
+                &self.context,
                 resp_type,
                 text,
                 WechatChannel::create_robot_messages,
