@@ -75,6 +75,6 @@ impl Channel for A2AChannel {
     }
 
     fn allow_session_ids(&self) -> crate::Result<Vec<&SessionId>> {
-        Ok(vec![&self.config.session_id()])
+        Ok(vec![])
     }
 }
