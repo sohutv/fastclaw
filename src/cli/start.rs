@@ -108,15 +108,19 @@ impl CmdRunner for Start {
                 let (agent_id, agent_group) = AgentId::main();
                 Arc::new(
                     MainAgent::new(
-                        agent::spawn_agent(
-                            &agent_id,
-                            &agent_group,
-                            None,
-                            None,
-                            &OwnerSession::GlobalShare,
-                            agent_context,
-                        )
-                        .await?,
+                        agent_registry
+                            .get_with(agent_context, &agent_id, |agent_context, agent_id| async move {
+                                agent::spawn_agent(
+                                    &agent_id,
+                                    &agent_group,
+                                    None,
+                                    None,
+                                    &OwnerSession::GlobalShare,
+                                    agent_context,
+                                )
+                                .await
+                            })
+                            .await?,
                     )
                     .await?
                     .init_children()
@@ -223,14 +227,9 @@ where
     <C as Channel>::JoinHandle: Future + Sync + Send,
 {
     let (channel, chanel_join_handle) = channel.start().await?;
-    let (_, heartbeat_join_handle) = Heartbeat::new(
-        config,
-        workspace,
-        channel,
-        heartbeat_agent,
-    )?
-    .start()
-    .await?;
+    let (_, heartbeat_join_handle) = Heartbeat::new(config, workspace, channel, heartbeat_agent)?
+        .start()
+        .await?;
     let join_handle = tokio::spawn(async {
         let _ = chanel_join_handle.await;
         let _ = heartbeat_join_handle.await;

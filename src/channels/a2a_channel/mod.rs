@@ -104,14 +104,22 @@ impl Channel for A2AChannel {
                                         received.clear();
                                         message
                                     };
+                                    println!(
+                                        r#"
+from: =========={}==========
+{}
+"#,
+                                        message_from.id(),
+                                        message
+                                    );
                                     let _ = client
                                         .context()
                                         .a2a_channel
                                         .spawn_request(
-                                            Arc::clone(&message_from),
+                                            &message_from,
                                             AgentRequest::new(
                                                 &SessionId::master(client.id().deref()),
-                                                message_from.id(),
+                                                client.id(),
                                                 message,
                                             ),
                                         )
