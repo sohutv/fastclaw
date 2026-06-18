@@ -2,7 +2,7 @@ use crate::agent::{AgentGroup, AgentId, OwnerSession};
 use crate::channels::SessionId;
 use crate::channels::http_channel::AppState;
 use crate::channels::http_channel::type_::UserId;
-use crate::type_::SystemPrompt;
+use crate::type_::Preamble;
 use axum::Json;
 use axum::extract::{Query, State};
 use axum::http::StatusCode;
@@ -18,7 +18,7 @@ pub struct Params {
 #[derive(Clone, Serialize, Deserialize)]
 pub struct Body {
     agent_group: AgentGroup,
-    prompt: SystemPrompt,
+    prompt: Preamble,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

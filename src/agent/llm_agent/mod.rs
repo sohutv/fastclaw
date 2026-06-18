@@ -1,7 +1,7 @@
 use crate::ModelName;
 use crate::agent::{
     Agent, AgentClone, AgentContext, AgentGroup, AgentId, AgentRequestPkg, AgentSettings,
-    AgentVisitor, LlmAgentSupplier, OwnerSession, SystemPromptProvider,
+    AgentVisitor, LlmAgentSupplier, OwnerSession, PreambleProvider,
 };
 use crate::model_provider::{ModelProvider, ModelSettings};
 use anyhow::anyhow;
@@ -33,7 +33,7 @@ where
     /// Agent description
     description: String,
     owner_session: OwnerSession,
-    pub system_prompt: Arc<dyn SystemPromptProvider>,
+    pub preamble: Arc<dyn PreambleProvider>,
 }
 
 #[async_trait]
@@ -52,7 +52,7 @@ where
         agent_settings: AgentSettings,
         description: Option<String>,
         owner_session: &OwnerSession,
-        system_prompt: Arc<dyn SystemPromptProvider>,
+        preamble: Arc<dyn PreambleProvider>,
         agent_context: &'static AgentContext,
     ) -> crate::Result<Self::A> {
         Ok(LlmAgent {
@@ -69,7 +69,7 @@ where
             channel_sender: Default::default(),
             description: description.unwrap_or_default(),
             owner_session: owner_session.clone(),
-            system_prompt,
+            preamble,
         })
     }
 }
@@ -103,7 +103,7 @@ where
             channel_sender: Default::default(),
             description: self.description.clone(),
             owner_session: self.owner_session.clone(),
-            system_prompt: Arc::clone(&self.system_prompt),
+            preamble: Arc::clone(&self.preamble),
         };
         Ok(Arc::new(agent) as Arc<dyn Agent>)
     }

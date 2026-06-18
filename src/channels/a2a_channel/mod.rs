@@ -5,6 +5,7 @@ use std::sync::Arc;
 use tokio::sync::mpsc::Receiver;
 
 mod config;
+use crate::agent::{AgentId, AgentRequest};
 pub use config::A2AChannelConfig;
 
 mod recv_agent_message;
@@ -20,6 +21,15 @@ impl A2AChannel {
             config: channel_context.config.a2a_channel.clone(),
         })
     }
+
+    pub async fn spawn_request(
+        &'static self,
+        agent_id: &AgentId,
+        req: AgentRequest,
+    ) -> crate::Result<tokio::task::JoinHandle<()>> {
+        self.spawn_agent_request(&Default::default(), agent_id, req)
+            .await
+    }
 }
 
 #[async_trait]
@@ -27,7 +37,9 @@ impl Channel for A2AChannel {
     type Client = ();
     type JoinHandle = ();
 
-    async fn start(&'static self) -> crate::Result<(&'static Self, Arc<Self::Client>, Self::JoinHandle)> {
+    async fn start(
+        &'static self,
+    ) -> crate::Result<(&'static Self, Arc<Self::Client>, Self::JoinHandle)> {
         Ok((Box::leak(Box::new(self)), Default::default(), ()))
     }
 

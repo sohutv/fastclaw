@@ -3,7 +3,7 @@ use crate::channels::a2a_channel::A2AChannel;
 use crate::config::{Config, Workspace};
 use crate::memory::MemoryManager;
 use crate::tools::mcp_tool::McpRegistry;
-use crate::type_::SystemPrompt;
+use crate::type_::Preamble;
 use anyhow::anyhow;
 use async_trait::async_trait;
 use derive_more::Deref;
@@ -24,8 +24,8 @@ pub struct AgentContext {
 }
 
 #[async_trait]
-pub trait SystemPromptProvider: Send + Sync {
-    async fn apply(&self) -> crate::Result<SystemPrompt>;
+pub trait PreambleProvider: Send + Sync {
+    async fn apply(&self) -> crate::Result<Preamble>;
 }
 
 #[derive(Clone, Deref)]

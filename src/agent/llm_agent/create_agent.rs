@@ -3,6 +3,7 @@ use crate::agent::{Agent, AgentRequest, ToolFilter};
 use crate::channels::{ChannelMessage, SessionId};
 use crate::model_provider::ModelProvider;
 use crate::tools::ToolContext;
+use crate::type_::Preamble;
 use itertools::Itertools;
 use rig::agent::Agent as RigAgent;
 use rig::client::CompletionClient;
@@ -19,7 +20,7 @@ where
     pub(super) async fn create_agent<TF>(
         self: &Arc<Self>,
         session_id: SessionId,
-        addi_system_prompt: Option<&str>,
+        addi_preamble: Option<&Preamble>,
         channel_message_sender: Sender<crate::Result<ChannelMessage>>,
         tool_filter: TF,
         agent_request: Option<&AgentRequest>,
@@ -29,7 +30,7 @@ where
         TF: Into<ToolFilter>,
     {
         let model_client = &self.model_provider.completion_client()?;
-        let preamble= self.system_prompt.apply().await?;
+        let preamble = self.preamble.apply().await?;
         let mut builder = model_client
             .agent(&*self.model_name)
             .preamble(&*preamble)
@@ -40,7 +41,7 @@ where
             "#,
                 &self.id
             ))
-            .append_preamble(addi_system_prompt.unwrap_or_default())
+            .append_preamble(addi_preamble.map(|it| it.as_str()).unwrap_or_default())
             .tools({
                 let filter = self
                     .agent_settings
@@ -69,7 +70,7 @@ where
                     .max_tokens
                     .unwrap_or(self.model_settings.max_tokens),
             )
-            .additional_params(AdditionalParams::from( &**self).jsonify()?);
+            .additional_params(AdditionalParams::from(&**self).jsonify()?);
         if let Some(s) = &self.agent_settings.output_schema {
             builder = builder.output_schema_raw(s.clone());
         }

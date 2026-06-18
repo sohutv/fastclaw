@@ -1,9 +1,10 @@
 use crate::agent::ToolFilter;
 use crate::channels::{ChannelMessage, SessionId};
+use crate::type_::Preamble;
 use chrono::Local;
 use derive_more::{Deref, Display, From, FromStr, Into};
-use rig::message::UserContent;
 use rig::OneOrMany;
+use rig::message::UserContent;
 use tokio::sync::mpsc::Sender;
 
 pub struct AgentRequestPkg {
@@ -48,7 +49,18 @@ pub struct AgentRequest {
     #[deref]
     #[into]
     pub message: Vec<OneOrMany<UserContent>>,
-    pub addi_system_prompt: Option<String>,
+    pub addi_preamble: Option<Preamble>,
+}
+
+impl AgentRequest {
+    pub fn new<M: Into<UserContent>>(session_id: &SessionId, message: M) -> Self {
+        Self {
+            id: Default::default(),
+            session_id: session_id.clone(),
+            message: vec![OneOrMany::one(message.into())],
+            addi_preamble: None,
+        }
+    }
 }
 
 #[derive(Clone)]

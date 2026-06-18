@@ -263,7 +263,7 @@ impl dingtalk_stream::handlers::CallbackHandler for DingTalkCallbackHandler {
             }
         };
 
-        let addi_system_prompt = match &session_id {
+        let addi_preamble = match &session_id {
             SessionId::Master(session_id) => format!(
                 "- **Attention current session_id**: {session_id}. You are speaking to your owner",
             ),
@@ -289,7 +289,7 @@ impl dingtalk_stream::handlers::CallbackHandler for DingTalkCallbackHandler {
                     group_name.as_deref().unwrap_or("<unknown>"),
                 ),
             },
-        };
+        }.into();
 
         let msg_id = msg_id.clone();
         info!("Submit task to agent, msg_id: {}", msg_id);
@@ -302,7 +302,7 @@ impl dingtalk_stream::handlers::CallbackHandler for DingTalkCallbackHandler {
                     id: msg_id.to_string().into(),
                     session_id,
                     message: vec![user_contents],
-                    addi_system_prompt: Some(addi_system_prompt),
+                    addi_preamble: Some(addi_preamble),
                 },
             )
             .await

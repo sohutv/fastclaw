@@ -149,7 +149,7 @@ impl ImageUnderstandingTool {
                     }
                     vec
                 })?],
-                addi_system_prompt: None,
+                addi_preamble: None,
             },
             AgentRequestContext {
                 channel_message_sender,

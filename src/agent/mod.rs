@@ -13,7 +13,7 @@ use crate::model_provider::ModelSettings;
 pub use session_history::{HistoryManager, JsonlHistoryManager};
 
 pub use crate::tools::tool_filter::ToolFilter;
-use crate::type_::SystemPrompt;
+use crate::type_::Preamble;
 
 #[async_trait]
 pub trait LlmAgentSupplier {
@@ -26,7 +26,7 @@ pub trait LlmAgentSupplier {
         agent_settings: AgentSettings,
         description: Option<String>,
         owner_session: &OwnerSession,
-        system_prompt: Arc<dyn SystemPromptProvider>,
+        preamble: Arc<dyn PreambleProvider>,
         agent_context: &'static AgentContext,
     ) -> crate::Result<Self::A>;
 }
@@ -57,7 +57,7 @@ pub trait Agent: SessionCompactSupport + AgentClone + AgentVisitor + Send + Sync
         &self,
         agent_id: &AgentId,
         agent_group: &AgentGroup,
-        addi_system_prompt: Option<SystemPrompt>,
+        addi_preamble: Option<Preamble>,
         desc: Option<String>,
         owner_session: &OwnerSession,
     ) -> crate::Result<Arc<dyn Agent>> {
@@ -79,7 +79,7 @@ pub trait Agent: SessionCompactSupport + AgentClone + AgentVisitor + Send + Sync
                         spawn_agent(
                             &agent_id,
                             agent_group,
-                            addi_system_prompt,
+                            addi_preamble,
                             desc,
                             &owner_session,
                             context,

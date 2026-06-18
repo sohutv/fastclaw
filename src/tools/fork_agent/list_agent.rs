@@ -8,7 +8,7 @@ use serde::Serialize;
 use serde_json::json;
 
 #[derive(Clone)]
-pub struct ListChildAgentsTool {
+pub struct ListAgentsTool {
     pub ctx: ToolContext,
 }
 
@@ -17,15 +17,15 @@ pub struct ListChildAgentsTool {
 pub struct Args {}
 
 #[derive(Debug, Clone, Serialize)]
-struct ChildAgentInfo<'a> {
+struct AgentInfo<'a> {
     agent_id: &'a AgentId,
     agent_group: &'a AgentGroup,
     desc: &'a str,
 }
 
 #[allow(async_fn_in_trait)]
-impl Tool for ListChildAgentsTool {
-    const NAME: &'static str = "list-daemon-agents";
+impl Tool for ListAgentsTool {
+    const NAME: &'static str = "list-agents";
     type Error = ToolCallError;
     type Args = Args;
     type Output = ToolCallRsult;
@@ -33,7 +33,7 @@ impl Tool for ListChildAgentsTool {
     async fn definition(&self, _prompt: String) -> ToolDefinition {
         ToolDefinition {
             name: Self::NAME.to_string(),
-            description: "List all active child daemon agents and their configurations".to_string(),
+            description: "List all active agents and their configurations".to_string(),
             parameters: json!({
                 "type": "object",
                 "properties": {},
@@ -42,28 +42,27 @@ impl Tool for ListChildAgentsTool {
     }
 
     async fn call(&self, _args: Self::Args) -> Result<Self::Output, Self::Error> {
-        info!("Listing all child daemon agents");
+        info!("Listing all agents");
         let parent_ctx = self.ctx.parent_agent.context();
-        let children = parent_ctx.agent_registry.read().await;
-
-        if children.is_empty() {
+        let agents = parent_ctx.agent_registry.read().await;
+        if agents.is_empty() {
             return Ok(ToolCallRsult {
                 success: true,
-                output: "No active child daemon agents found.".to_string(),
+                output: "No active agents found.".to_string(),
                 error: None,
             });
         }
 
-        let infos = children
+        let infos = agents
             .iter()
-            .map(|(_, child)| ChildAgentInfo {
-                agent_id: child.id(),
-                agent_group: child.agent_group(),
-                desc: child.description(),
+            .map(|(_, agent)| AgentInfo {
+                agent_id: agent.id(),
+                agent_group: agent.agent_group(),
+                desc: agent.description(),
             })
             .sorted_by_key(|it| it.agent_id)
             .collect_vec();
-        let mut md = String::from("### Active Child Daemon Agents\n\n");
+        let mut md = String::from("### Active Agents\n\n");
         md.push_str("| Agent ID | Agent Group | System Prompt |\n");
         md.push_str("| --- | --- | --- |\n");
         for info in &infos {

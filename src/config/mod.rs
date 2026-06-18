@@ -34,7 +34,7 @@ pub struct Config {
     pub embedding: Option<EmbeddingConfigs>,
     #[serde(default)]
     pub mcp_tools: Option<McpToolSetConfigs>,
-    pub daemon_agent_tools: Option<DaemonAgentToolsConfig>,
+    pub fork_agent: Option<ForkAgentToolsConfig>,
     pub a2a_channel: A2AChannelConfig,
 }
 
@@ -53,5 +53,5 @@ impl Default for HeartbeatConfig {
 mod workspace;
 use crate::channels::a2a_channel::A2AChannelConfig;
 use crate::tools::mcp_tool::McpToolSetConfigs;
-use crate::tools::{DaemonAgentToolsConfig, ImageUnderstandingConfig};
+use crate::tools::{ForkAgentToolsConfig, ImageUnderstandingConfig};
 pub use workspace::*;

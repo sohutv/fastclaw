@@ -208,7 +208,7 @@ impl WechatChannel {
                     id: msg_id.to_string().into(),
                     session_id: self.wechat_config.session_id().clone(),
                     message: vec![user_content],
-                    addi_system_prompt: None,
+                    addi_preamble: None,
                 },
             )
             .await

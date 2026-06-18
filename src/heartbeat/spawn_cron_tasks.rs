@@ -126,7 +126,7 @@ where
                                 now.to_rfc3339(),
                                 task.full_desc()
                             )))],
-                            addi_system_prompt: None,
+                            addi_preamble: None,
                         },
                     )
                     .await

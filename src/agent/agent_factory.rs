@@ -1,10 +1,10 @@
 use crate::agent::{
     Agent, AgentContext, AgentGroup, AgentId, AgentSettings, LlmAgentSupplier,
-    OwnerSession, SystemPromptProvider,
+    OwnerSession, PreambleProvider,
 };
 use crate::config::Workspace;
 use crate::model_provider::{ModelProviderName, ModelProviders};
-use crate::type_::{ModelName, SystemPrompt};
+use crate::type_::{ModelName, Preamble};
 use anyhow::anyhow;
 use async_trait::async_trait;
 use log::info;
@@ -41,7 +41,7 @@ pub async fn reload_agent(
 pub async fn spawn_agent(
     agent_id: &AgentId,
     agent_group: &AgentGroup,
-    addi_system_prompt: Option<SystemPrompt>,
+    addi_preamble: Option<Preamble>,
     desc: Option<String>,
     owner_session: &OwnerSession,
     agent_context: &'static AgentContext,
@@ -65,7 +65,7 @@ pub async fn spawn_agent(
             agent_group: agent_group.clone(),
             agent_group_config: get_agent_group_config(agent_context.workspace, &agent_group)
                 .await?,
-            addi_system_prompt,
+            addi_preamble: addi_preamble,
             desc,
             owner_session: owner_session.clone(),
         };
@@ -195,20 +195,20 @@ async fn get_agent_group_config(
     Ok(config)
 }
 
-async fn get_predefined_agent_group_system_prompt(
+async fn get_predefined_preamble(
     workspace: &Workspace,
     agent_group: &AgentGroup,
-    use_global_system_prompt: bool,
-) -> crate::Result<Option<SystemPrompt>> {
-    let system_prompt = workspace
+    default_preamble: bool,
+) -> crate::Result<Option<Preamble>> {
+    let preamble_path = workspace
         .agent_group_path(agent_group)
         .await?
         .join("system_prompt.md");
     match (
-        use_global_system_prompt,
-        tokio::fs::read_to_string(&system_prompt)
+        default_preamble,
+        tokio::fs::read_to_string(&preamble_path)
             .await
-            .map(|it| SystemPrompt::from(it)),
+            .map(|it| Preamble::from(it)),
     ) {
         (true, Ok(predefined)) => {
             let global = super::prompt::PromptSection::Identity
@@ -234,13 +234,13 @@ struct AgentGroupConfig {
     agent_settings: AgentSettings,
     /// true if not present
     #[serde(default)]
-    use_global_system_prompt: Option<bool>,
+    default_preamble: Option<bool>,
 }
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct AgentConfig {
     agent_group: AgentGroup,
     agent_group_config: AgentGroupConfig,
-    addi_system_prompt: Option<SystemPrompt>,
+    addi_preamble: Option<Preamble>,
     desc: Option<String>,
     owner_session: OwnerSession,
 }
@@ -251,8 +251,8 @@ struct SystemPromptProvider_ {
 }
 
 #[async_trait]
-impl SystemPromptProvider for SystemPromptProvider_ {
-    async fn apply(&self) -> crate::Result<SystemPrompt> {
+impl PreambleProvider for SystemPromptProvider_ {
+    async fn apply(&self) -> crate::Result<Preamble> {
         let Self {
             workspace,
             agent_config:
@@ -260,20 +260,20 @@ impl SystemPromptProvider for SystemPromptProvider_ {
                     agent_group,
                     agent_group_config:
                         AgentGroupConfig {
-                            use_global_system_prompt,
+                            default_preamble,
                             ..
                         },
-                    addi_system_prompt,
+                    addi_preamble: addi_preamble,
                     ..
                 },
         } = self;
-        let predefined = get_predefined_agent_group_system_prompt(
+        let predefined = get_predefined_preamble(
             workspace,
             &agent_group,
-            use_global_system_prompt.unwrap_or(true),
+            default_preamble.unwrap_or(true),
         )
         .await?;
-        match (predefined, addi_system_prompt.clone()) {
+        match (predefined, addi_preamble.clone()) {
             (Some(l), Some(r)) => Ok(l + r),
             (Some(it), _) | (_, Some(it)) => Ok(it),
             _ => Err(anyhow!("system prompt not exist!!!")),

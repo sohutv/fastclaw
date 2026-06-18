@@ -1,5 +1,5 @@
 use crate::config::Workspace;
-use crate::type_::SystemPrompt;
+use crate::type_::Preamble;
 use itertools::Itertools;
 use log::error;
 use std::path::Path;
@@ -31,7 +31,7 @@ const IDENTITY_MD_FILES: &[(&str, &str)] = &[
 ];
 
 impl IdentityPrompt {
-    pub(super) async fn build(&self, workspace: &Workspace) -> crate::Result<SystemPrompt> {
+    pub(super) async fn build(&self, workspace: &Workspace) -> crate::Result<Preamble> {
         let prompt = self.build_actual(&workspace.path).await?;
         Ok(prompt.into())
     }

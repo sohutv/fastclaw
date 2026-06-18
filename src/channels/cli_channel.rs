@@ -88,7 +88,7 @@ impl Channel for CliChannel {
                                                 message: vec![OneOrMany::one(UserContent::text(
                                                     line,
                                                 ))],
-                                                addi_system_prompt: None,
+                                                addi_preamble: None,
                                             },
                                         )
                                         .await

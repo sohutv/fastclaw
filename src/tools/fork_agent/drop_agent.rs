@@ -6,7 +6,7 @@ use rig::tool::Tool;
 use serde_json::json;
 
 #[derive(Clone)]
-pub struct DropChildAgentTool {
+pub struct DropAgentTool {
     pub ctx: ToolContext,
 }
 
@@ -17,8 +17,8 @@ pub struct Args {
 }
 
 #[allow(async_fn_in_trait)]
-impl Tool for DropChildAgentTool {
-    const NAME: &'static str = "drop-daemon-agent";
+impl Tool for DropAgentTool {
+    const NAME: &'static str = "drop-agent";
     type Error = ToolCallError;
     type Args = Args;
     type Output = ToolCallRsult;
@@ -26,7 +26,7 @@ impl Tool for DropChildAgentTool {
     async fn definition(&self, _prompt: String) -> ToolDefinition {
         ToolDefinition {
             name: Self::NAME.to_string(),
-            description: "Drop a child daemon agent by its ID".to_string(),
+            description: "Drop agent by its ID".to_string(),
             parameters: json!({
                 "type": "object",
                 "properties": {

@@ -75,9 +75,9 @@ impl Prompt {
     Into,
     Default,
 )]
-pub struct SystemPrompt(Prompt);
+pub struct Preamble(Prompt);
 
-impl Add<Self> for SystemPrompt {
+impl Add<Self> for Preamble {
     type Output = Self;
 
     fn add(self, rhs: Self) -> Self::Output {
@@ -85,19 +85,19 @@ impl Add<Self> for SystemPrompt {
     }
 }
 
-impl From<&str> for SystemPrompt {
+impl From<&str> for Preamble {
     fn from(value: &str) -> Self {
         Self(value.into())
     }
 }
 
-impl From<String> for SystemPrompt {
+impl From<String> for Preamble {
     fn from(value: String) -> Self {
         Self(value.into())
     }
 }
 
-impl From<super::Text> for SystemPrompt {
+impl From<super::Text> for Preamble {
     fn from(value: super::Text) -> Self {
         Self(value.into())
     }

@@ -26,10 +26,10 @@ use media::*;
 mod cloud_storage_tool;
 mod memory_recall;
 
-mod daemon_agent;
+mod fork_agent;
 pub mod tool_filter;
 
-pub use daemon_agent::DaemonAgentToolsConfig;
+pub use fork_agent::ForkAgentToolsConfig;
 
 #[derive(Debug, Copy, Clone, serde::Deserialize)]
 pub enum RiskLevel {
@@ -112,7 +112,7 @@ impl FunctionTool {
                 vec![]
             },
             ctx.mcp_registry.tools(ctx.clone()).await?,
-            daemon_agent::DaemonAgentTools::create(ctx.clone()).await?,
+            fork_agent::ForkAgentTools::create(ctx.clone()).await?,
         ];
         Ok(tools.into_iter().flatten().collect())
     }
