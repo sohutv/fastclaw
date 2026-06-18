@@ -2,7 +2,7 @@ use super::super::{AgentRespState, AgentRespType};
 use crate::agent::{Agent, AgentResponse, Notify};
 use crate::channels::text_formater::*;
 use crate::channels::wechat_channel::WechatChannel;
-use crate::channels::{ChannelContext, ChannelMessage, SessionId, create_robot_messages_for_agent};
+use crate::channels::{ChannelContext, ChannelMessage, SessionId, create_outbound_msg};
 use anyhow::anyhow;
 use wechat_sdk::client::WechatClient;
 use wechat_sdk::client::message::{MessageItems, TypingTicket};
@@ -89,7 +89,8 @@ impl WechatChannel {
             ),
         };
         if let Some((text, resp_type)) = formated_message {
-            if let Some(robot_message) = create_robot_messages_for_agent(
+            if let Some(robot_message) = create_outbound_msg(
+                wechat,
                 &*self.agent,
                 session_id,
                 &self.wechat_config,
@@ -109,6 +110,7 @@ impl WechatChannel {
 
 impl WechatChannel {
     fn create_robot_messages<Content: Into<MessageItems>>(
+        _: &WechatClient,
         _: &dyn Agent,
         session_id: &SessionId,
         _: &ChannelContext,

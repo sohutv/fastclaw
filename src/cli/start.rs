@@ -149,7 +149,7 @@ impl CmdRunner for Start {
                 #[cfg(feature = "channel_cli_channel")]
                 ChannelType::Cli => {
                     info!("Starting CLI channel");
-                    let (_channel, _, join_handle) = Box::leak(Box::new(
+                    let (_channel, join_handle) = Box::leak(Box::new(
                         channels::cli_channel::CliChannel::new(channel_context, &main_agent)
                             .await?,
                     ))
@@ -222,12 +222,11 @@ where
     C: Channel,
     <C as Channel>::JoinHandle: Future + Sync + Send,
 {
-    let (channel, client, chanel_join_handle) = channel.start().await?;
+    let (channel, chanel_join_handle) = channel.start().await?;
     let (_, heartbeat_join_handle) = Heartbeat::new(
         config,
         workspace,
         channel,
-        Arc::clone(&client),
         heartbeat_agent,
     )?
     .start()

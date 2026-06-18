@@ -8,9 +8,9 @@ use rig::OneOrMany;
 use rig::message::UserContent;
 use std::str::FromStr;
 
-impl<C, Client> super::Heartbeat<C, Client>
+impl<C> super::Heartbeat<C>
 where
-    C: Channel<Client = Client>,
+    C: Channel,
 {
     pub(super) async fn spawn_cron_tasks(&self) -> crate::Result<()> {
         let session_ids = self.channel.allow_session_ids()?;
@@ -106,14 +106,12 @@ where
             if let TaskScheduleResult::Exec = time_to_exec {
                 match self
                     .channel
-                    .spawn_agent_request(
-                        &self.client,
-                        self.agent.id(),
-                        AgentRequest {
-                            id: Default::default(),
-                            session_id: session_id.clone(),
-                            message: vec![OneOrMany::one(UserContent::text(format!(
-                                r#"
+                    .spawn_agent_request(AgentRequest {
+                        id: Default::default(),
+                        session_id: session_id.clone(),
+                        agent_id: self.agent.id().clone(),
+                        message: vec![OneOrMany::one(UserContent::text(format!(
+                            r#"
 **Execute task immediately**: task_id: {}
 - **CurrentTime**: {}
 - **Task Detail**:
@@ -122,13 +120,12 @@ where
 ```
 - **Tips**: If the task fails, you are authorized to retry or ignore it at your discretion.
                                             "#,
-                                &task.id,
-                                now.to_rfc3339(),
-                                task.full_desc()
-                            )))],
-                            addi_preamble: None,
-                        },
-                    )
+                            &task.id,
+                            now.to_rfc3339(),
+                            task.full_desc()
+                        )))],
+                        addi_preamble: None,
+                    })
                     .await
                 {
                     Ok(_) => {

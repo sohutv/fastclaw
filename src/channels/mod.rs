@@ -35,25 +35,25 @@ where
 
     type JoinHandle: Sync + Send;
 
-    async fn start(
-        &'static self,
-    ) -> crate::Result<(&'static Self, Arc<Self::Client>, Self::JoinHandle)>;
+    async fn start(&'static self) -> crate::Result<(&'static Self, Self::JoinHandle)>;
 
     fn context(&self) -> &'static ChannelContext;
+
+    async fn client(&self) -> crate::Result<Arc<Self::Client>>;
 
     /// handle_agent_task
     /// spawn_agent_task -> spawn(handle_agent_message)
     async fn spawn_agent_request(
         &'static self,
-        client: &Arc<Self::Client>,
-        agent_id: &AgentId,
         req: AgentRequest,
     ) -> crate::Result<tokio::task::JoinHandle<()>> {
-        let agent = self.context().agent_registry.get(agent_id).await?;
-        let mut receiver = spawn_agent_request::apply(agent, req).await?;
-        let client_ = Arc::clone(client);
+        let client = self.client().await?;
+        let agent = self.context().agent_registry.get(&req.agent_id).await?;
+        let mut receiver = spawn_agent_request::apply(&*agent, req).await?;
         let join_handle = tokio::spawn(async move {
-            let _ = self.handle_agent_message(client_, &mut receiver).await;
+            let _ = self
+                .handle_agent_message(client, agent, &mut receiver)
+                .await;
         });
         Ok(join_handle)
     }
@@ -61,6 +61,7 @@ where
     async fn handle_agent_message(
         &self,
         client: Arc<Self::Client>,
+        message_from: Arc<dyn Agent>,
         receiver: &mut Receiver<crate::Result<ChannelMessage>>,
     ) -> crate::Result<()>;
 
@@ -106,7 +107,8 @@ pub enum AgentRespState {
     Final,
 }
 
-pub async fn create_robot_messages_for_agent<P, Content, F, OutboundMsg>(
+pub async fn create_outbound_msg<Client, P, Content, F, OutboundMsg>(
+    client: &Client,
     agent: &dyn Agent,
     session_id: &SessionId,
     session_settings_provider: &P,
@@ -117,7 +119,13 @@ pub async fn create_robot_messages_for_agent<P, Content, F, OutboundMsg>(
 ) -> crate::Result<Option<OutboundMsg>>
 where
     P: SessionSettingsProvider,
-    F: FnOnce(&dyn Agent, &SessionId, &ChannelContext, Content) -> crate::Result<OutboundMsg>,
+    F: FnOnce(
+        &Client,
+        &dyn Agent,
+        &SessionId,
+        &ChannelContext,
+        Content,
+    ) -> crate::Result<OutboundMsg>,
 {
     let SessionSettings {
         show_start,
@@ -174,6 +182,6 @@ where
             };
         }
     }
-    let msg = outbound_msg_creator(agent, &session_id, ctx, content)?;
+    let msg = outbound_msg_creator(client, agent, &session_id, ctx, content)?;
     Ok(Some(msg))
 }

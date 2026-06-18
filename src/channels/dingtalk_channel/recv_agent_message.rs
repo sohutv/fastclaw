@@ -117,7 +117,8 @@ impl DingtalkChannel {
             }
         };
         if let Some((message_content, resp_type)) = formated_message {
-            if let Ok(Some(robot_message)) = super::super::create_robot_messages_for_agent(
+            if let Ok(Some(robot_message)) = super::super::create_outbound_msg(
+                dingtalk,
                 &*self.agent,
                 session_id,
                 &self.dingtalk_config,

@@ -1,4 +1,4 @@
-use crate::agent::ToolFilter;
+use crate::agent::{AgentId, ToolFilter};
 use crate::channels::{ChannelMessage, SessionId};
 use crate::type_::Preamble;
 use chrono::Local;
@@ -46,6 +46,7 @@ impl AgentRequestPkg {
 pub struct AgentRequest {
     pub id: RequestId,
     pub session_id: SessionId,
+    pub agent_id: AgentId,
     #[deref]
     #[into]
     pub message: Vec<OneOrMany<UserContent>>,
@@ -53,10 +54,11 @@ pub struct AgentRequest {
 }
 
 impl AgentRequest {
-    pub fn new<M: Into<UserContent>>(session_id: &SessionId, message: M) -> Self {
+    pub fn new<M: Into<UserContent>>(session_id: &SessionId, agent_id: &AgentId, message: M) -> Self {
         Self {
             id: Default::default(),
             session_id: session_id.clone(),
+            agent_id: agent_id.clone(),
             message: vec![OneOrMany::one(message.into())],
             addi_preamble: None,
         }

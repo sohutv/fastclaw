@@ -1,10 +1,11 @@
-use crate::agent::MainAgent;
+use crate::agent::{Agent, MainAgent};
 use crate::channels::{AgentRespState, Channel, ChannelContext, ChannelMessage, SessionId};
 use anyhow::anyhow;
 use async_trait::async_trait;
 use log::warn;
 use std::sync::Arc;
 use std::time::Duration;
+use tokio::sync::RwLock;
 use tokio::sync::mpsc::Receiver;
 use wechat_sdk::client::{WechatClient, WechatConfig as WechatInnerConfig};
 
@@ -16,6 +17,7 @@ mod recv_agent_message;
 pub struct WechatChannel {
     context: &'static ChannelContext,
     pub wechat_config: WechatConfig,
+    pub wechat_client: Arc<RwLock<Option<Arc<WechatClient>>>>,
     pub agent: Arc<MainAgent>,
 }
 
@@ -31,6 +33,7 @@ impl WechatChannel {
                 .wechat_config
                 .clone()
                 .ok_or(anyhow!("dingtalk config not found"))?,
+            wechat_client: Default::default(),
             agent: Arc::clone(agent),
         })
     }
@@ -41,9 +44,11 @@ impl Channel for WechatChannel {
     type Client = WechatClient;
     type JoinHandle = tokio::task::JoinHandle<crate::Result<()>>;
 
-    async fn start(
-        &'static self,
-    ) -> crate::Result<(&'static Self, Arc<Self::Client>, Self::JoinHandle)> {
+    async fn start(&'static self) -> crate::Result<(&'static Self, Self::JoinHandle)> {
+        let mut guard = self.wechat_client.write().await;
+        if guard.is_some() {
+            return Err(anyhow!("channel had been already started!!!"));
+        }
         let wechat_config = WechatInnerConfig {
             state_path: self
                 .context
@@ -93,16 +98,27 @@ impl Channel for WechatChannel {
                 }
             })
         };
-        Ok((self, wechat_client, join_handle))
+        *guard = Some(wechat_client);
+        Ok((self, join_handle))
     }
 
     fn context(&self) -> &'static ChannelContext {
         self.context
     }
 
+    async fn client(&self) -> crate::Result<Arc<Self::Client>> {
+        self.wechat_client
+            .read()
+            .await
+            .as_ref()
+            .map(|it| Arc::clone(it))
+            .ok_or(anyhow!("channel not started"))
+    }
+
     async fn handle_agent_message(
         &self,
-        wechat: Arc<WechatClient>,
+        wechat: Arc<Self::Client>,
+        _message_from: Arc<dyn Agent>,
         receiver: &mut Receiver<crate::Result<ChannelMessage>>,
     ) -> crate::Result<()> {
         let mut state = AgentRespState::Wait;

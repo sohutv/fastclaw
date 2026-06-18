@@ -13,6 +13,16 @@ pub enum SessionId {
     Group(Group),
 }
 
+impl SessionId {
+    pub fn master<S: Into<Master>>(s: S) -> Self {
+        s.into().into()
+    }
+
+    pub fn anonymous<S: Into<Anonymous>>(s: S) -> Self {
+        s.into().into()
+    }
+}
+
 impl AsRef<SessionId> for SessionId {
     fn as_ref(&self) -> &SessionId {
         self
@@ -33,7 +43,7 @@ impl Deref for SessionId {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct SessionConfig{
+pub struct SessionConfig {
     pub session_id: SessionId,
     #[serde(default)]
     pub settings: SessionSettings,

@@ -9,31 +9,28 @@ use tokio::task::JoinHandle;
 mod spawn_cron_tasks;
 
 #[allow(unused)]
-pub struct Heartbeat<C:'static, Client> {
+pub struct Heartbeat<C: 'static> {
     config: &'static Config,
     workspace: &'static Workspace,
     interval: Duration,
     channel: &'static C,
-    client: Arc<Client>,
     agent: Arc<dyn Agent>,
 }
 
-impl<C, Client> Heartbeat<C, Client>
+impl<C> Heartbeat<C>
 where
-    C: Channel<Client = Client>,
+    C: Channel,
 {
     pub fn new(
         config: &'static Config,
         workspace: &'static Workspace,
         channel: &'static C,
-        client: Arc<Client>,
         agent: Arc<dyn Agent>,
     ) -> crate::Result<Self> {
         Ok(Self {
             config,
             workspace,
             channel,
-            client,
             agent,
             interval: Duration::from_secs(config.heartbeat_config.interval),
         })
@@ -41,8 +38,7 @@ where
 
     pub async fn start(self) -> crate::Result<(Arc<Self>, JoinHandle<()>)>
     where
-        Client: Send + Sync + 'static,
-        C: Channel<Client = Client>,
+        C: Channel,
     {
         let self_ = Arc::new(self);
         let handle = {

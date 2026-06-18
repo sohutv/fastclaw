@@ -118,10 +118,11 @@ impl ImageUnderstandingTool {
             task_backpressure: TaskBackpressure::Latest,
             ..self.ctx.parent_agent.agent_settings().clone()
         };
+        let agent_id = "tool-call".into();
         let agent = self
             .ctx
             .parent_agent
-            .clone_with("tool-call".into(), Some(agent_settings))
+            .clone_with(&agent_id, Some(agent_settings))
             .await?
             .start()
             .await?;
@@ -129,6 +130,7 @@ impl ImageUnderstandingTool {
             AgentRequest {
                 id: uuid::Uuid::new_v4().into(),
                 session_id: self.ctx.session_id.clone(),
+                agent_id,
                 message: vec![OneOrMany::many({
                     let mut vec = Vec::with_capacity(images.len() + 1);
                     vec.push(UserContent::text(prompt));

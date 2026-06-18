@@ -1,5 +1,4 @@
 use crate::agent::{AgentGroup, AgentId, AgentRequest, OwnerSession};
-use crate::channels::Channel;
 use crate::tools::{ToolCallError, ToolCallRsult, ToolContext};
 use crate::type_::{Preamble, Prompt};
 use itertools::Itertools;
@@ -109,8 +108,12 @@ fork agent ok
                     .context()
                     .a2a_channel
                     .spawn_request(
-                        &agent_id,
-                        AgentRequest::new(&self.ctx.session_id, UserContent::text(prompt.deref())),
+                        &self.ctx.parent_agent,
+                        AgentRequest::new(
+                            &self.ctx.session_id,
+                            agent.id(),
+                            UserContent::text(prompt.deref()),
+                        ),
                     )
                     .await
                 {

@@ -1,20 +1,19 @@
 use crate::agent::{Agent, AgentId, AgentResponse, Notify};
-use crate::channels::http_channel::{HttpClient, HttpChannel, Payload};
+use crate::channels::http_channel::{HttpChannel, HttpClient, Payload};
 use crate::channels::http_channel::{HttpRespMessage, UserId};
 use crate::channels::text_formater::{
     FormatedMessage, extract_message, extract_reasoning, format_history_compact, format_message,
     format_reasoning, format_tool_call,
 };
 use crate::channels::{
-    AgentRespState, AgentRespType, ChannelContext, ChannelMessage, SessionId,
-    create_robot_messages_for_agent,
+    AgentRespState, AgentRespType, ChannelContext, ChannelMessage, SessionId, create_outbound_msg,
 };
 use anyhow::anyhow;
 
 impl HttpChannel {
     pub(super) async fn handle_agent_message_actual(
         &self,
-        client: &HttpClient,
+        http_client: &HttpClient,
         ChannelMessage {
             session_id,
             agent_id,
@@ -88,7 +87,8 @@ impl HttpChannel {
             ),
         };
         if let Some((text, resp_type)) = formated_message {
-            if let Some(robot_message) = create_robot_messages_for_agent(
+            if let Some(robot_message) = create_outbound_msg(
+                http_client,
                 &*self.agent,
                 session_id,
                 &self.http_config,
@@ -99,7 +99,9 @@ impl HttpChannel {
             )
             .await?
             {
-                let _ = robot_message.send(client, session_id, agent_id).await;
+                let _ = robot_message
+                    .send(http_client, session_id, agent_id)
+                    .await;
             }
         }
         Ok(next_state)
@@ -107,16 +109,15 @@ impl HttpChannel {
 }
 
 impl HttpChannel {
-    fn create_resp_messages<C:Into<Payload>>(
+    fn create_resp_messages<C: Into<Payload>>(
+        _: &HttpClient,
         _: &dyn Agent,
         session_id: &SessionId,
         _: &ChannelContext,
         content: C,
     ) -> crate::Result<HttpRespMessage> {
         match &session_id {
-            SessionId::Master { .. } | SessionId::Anonymous { .. } => {
-                Ok(content.into().into())
-            }
+            SessionId::Master { .. } | SessionId::Anonymous { .. } => Ok(content.into().into()),
             SessionId::Group { .. } => Err(anyhow!(
                 "send robot message to group is not supported by http"
             )),

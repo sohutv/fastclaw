@@ -1,4 +1,4 @@
-use crate::agent::{AgentId, MainAgent};
+use crate::agent::{Agent, AgentId, MainAgent};
 use crate::channels::{AgentRespState, Channel, ChannelContext, ChannelMessage, SessionId};
 use anyhow::anyhow;
 use async_trait::async_trait;
@@ -28,6 +28,7 @@ mod restapi;
 pub struct HttpChannel {
     context: &'static ChannelContext,
     pub http_config: HttpChannelConfig,
+    pub http_client: Arc<RwLock<Option<Arc<HttpClient>>>>,
     pub agent: Arc<MainAgent>,
 }
 
@@ -43,6 +44,7 @@ impl HttpChannel {
                 .http_config
                 .clone()
                 .ok_or_else(|| anyhow!("http_config not found"))?,
+            http_client: Default::default(),
             agent: Arc::clone(agent),
         })
     }
@@ -89,9 +91,11 @@ impl Channel for HttpChannel {
     type Client = HttpClient;
     type JoinHandle = tokio::task::JoinHandle<crate::Result<()>>;
 
-    async fn start(
-        &'static self,
-    ) -> crate::Result<(&'static Self, Arc<Self::Client>, Self::JoinHandle)> {
+    async fn start(&'static self) -> crate::Result<(&'static Self, Self::JoinHandle)> {
+        let mut guard = self.http_client.write().await;
+        if guard.is_some() {
+            return Err(anyhow!("channel had been already started!!!"));
+        }
         let client = Default::default();
         let app = {
             Router::new()
@@ -119,16 +123,27 @@ impl Channel for HttpChannel {
             }
             Ok(())
         });
-
-        Ok((self, client, join_handle))
+        *guard = Some(client);
+        Ok((self, join_handle))
     }
 
     fn context(&self) -> &'static ChannelContext {
         self.context
     }
+
+    async fn client(&self) -> crate::Result<Arc<Self::Client>> {
+        self.http_client
+            .read()
+            .await
+            .as_ref()
+            .map(|it| Arc::clone(it))
+            .ok_or(anyhow!("channel not started"))
+    }
+
     async fn handle_agent_message(
         &self,
-        client: Arc<HttpClient>,
+        http_client: Arc<HttpClient>,
+        _message_from: Arc<dyn Agent>,
         receiver: &mut Receiver<crate::Result<ChannelMessage>>,
     ) -> crate::Result<()> {
         let mut state = AgentRespState::Wait;
@@ -137,7 +152,7 @@ impl Channel for HttpChannel {
             match message_result {
                 Ok(message) => {
                     match self
-                        .handle_agent_message_actual(&client, &message, state, &mut buff)
+                        .handle_agent_message_actual(&http_client, &message, state, &mut buff)
                         .await
                     {
                         Ok(AgentRespState::Final) | Err(_) => {

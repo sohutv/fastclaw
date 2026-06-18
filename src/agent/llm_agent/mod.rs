@@ -82,14 +82,14 @@ where
 {
     async fn clone_with(
         &self,
-        id: AgentId,
+        id: &AgentId,
         agent_settings: Option<AgentSettings>,
     ) -> crate::Result<Arc<dyn Agent>> {
         if id.eq(&self.id) {
             return Err(anyhow!("clone agent failed, duplicated id: {id}"));
         }
         let agent = Self {
-            id,
+            id: id.clone(),
             group: self.group.clone(),
             model_settings: self.model_settings.clone(),
             agent_settings: if let Some(agent_settings) = agent_settings {

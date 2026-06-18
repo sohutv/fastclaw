@@ -69,26 +69,22 @@ pub trait Agent: SessionCompactSupport + AgentClone + AgentVisitor + Send + Sync
         let forked = self
             .context()
             .agent_registry
-            .get_with(
-                self.context(),
-                agent_id,
-                |context, agent_id| async move {
-                    let agent = if let Ok(agent) = reload_agent(&agent_id, context).await {
-                        agent
-                    } else {
-                        spawn_agent(
-                            &agent_id,
-                            agent_group,
-                            addi_preamble,
-                            desc,
-                            &owner_session,
-                            context,
-                        )
-                        .await?
-                    };
-                    Ok::<_, anyhow::Error>(agent)
-                },
-            )
+            .get_with(self.context(), agent_id, |context, agent_id| async move {
+                let agent = if let Ok(agent) = reload_agent(&agent_id, context).await {
+                    agent
+                } else {
+                    spawn_agent(
+                        &agent_id,
+                        agent_group,
+                        addi_preamble,
+                        desc,
+                        &owner_session,
+                        context,
+                    )
+                    .await?
+                };
+                Ok::<_, anyhow::Error>(agent)
+            })
             .await?;
         Ok(forked)
     }
@@ -98,7 +94,7 @@ pub trait Agent: SessionCompactSupport + AgentClone + AgentVisitor + Send + Sync
 pub trait AgentClone: Send + Sync {
     async fn clone_with(
         &self,
-        id: AgentId,
+        id: &AgentId,
         agent_settings: Option<AgentSettings>,
     ) -> crate::Result<Arc<dyn Agent>>;
 }
@@ -154,7 +150,7 @@ where
 {
     async fn clone_with(
         &self,
-        id: AgentId,
+        id: &AgentId,
         agent_settings: Option<AgentSettings>,
     ) -> crate::Result<Arc<dyn Agent>> {
         Arc::clone(&self.delegated())

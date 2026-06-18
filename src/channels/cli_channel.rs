@@ -1,5 +1,5 @@
 use crate::agent::{
-    AgentRequest, AgentResponse, AgentVisitor, DelegatedAgent, MainAgent, Notify,
+    Agent, AgentRequest, AgentResponse, AgentVisitor, DelegatedAgent, MainAgent, Notify,
 };
 use crate::channels::console_cmd::Console;
 use crate::channels::{Channel, ChannelContext, ChannelMessage, SessionId, SessionSettings};
@@ -21,6 +21,7 @@ pub struct CliChannel {
     context: &'static ChannelContext,
     session_id: SessionId,
     session_settings: SessionSettings,
+    client: Arc<()>,
     agent: Arc<MainAgent>,
 }
 
@@ -35,6 +36,7 @@ impl CliChannel {
             context,
             session_id,
             session_settings,
+            client: Default::default(),
             agent: Arc::clone(agent),
         })
     }
@@ -45,9 +47,7 @@ impl Channel for CliChannel {
     type Client = ();
     type JoinHandle = JoinHandle<()>;
 
-    async fn start(
-        &'static self,
-    ) -> crate::Result<(&'static Self, Arc<Self::Client>, Self::JoinHandle)> {
+    async fn start(&'static self) -> crate::Result<(&'static Self, Self::JoinHandle)> {
         let join_handle = {
             let join_handle = std::thread::spawn(move || {
                 let rt = tokio::runtime::Builder::new_current_thread()
@@ -56,7 +56,6 @@ impl Channel for CliChannel {
                     .expect("unexpected err");
                 let mut rl = DefaultEditor::new().expect("unexpected err");
                 let _ = rt.block_on(async move {
-                    let client = Arc::new(());
                     loop {
                         let readline = rl.readline(">> ");
                         match readline {
@@ -79,18 +78,13 @@ impl Channel for CliChannel {
                                         }
                                     }
                                     if let Ok(join_handle) = self
-                                        .spawn_agent_request(
-                                            &client,
-                                            self.agent.id(),
-                                            AgentRequest {
-                                                id: Default::default(),
-                                                session_id: self.session_id.clone(),
-                                                message: vec![OneOrMany::one(UserContent::text(
-                                                    line,
-                                                ))],
-                                                addi_preamble: None,
-                                            },
-                                        )
+                                        .spawn_agent_request(AgentRequest {
+                                            id: Default::default(),
+                                            session_id: self.session_id.clone(),
+                                            agent_id: self.agent.id().clone(),
+                                            message: vec![OneOrMany::one(UserContent::text(line))],
+                                            addi_preamble: None,
+                                        })
                                         .await
                                     {
                                         let _ = join_handle.await;
@@ -110,16 +104,21 @@ impl Channel for CliChannel {
             });
             join_handle
         };
-        Ok((self, Default::default(), join_handle))
+        Ok((self, join_handle))
     }
 
     fn context(&self) -> &'static ChannelContext {
         self.context
     }
 
+    async fn client(&self) -> crate::Result<Arc<Self::Client>> {
+        Ok(Arc::clone(&self.client))
+    }
+
     async fn handle_agent_message(
         &self,
         _: Arc<Self::Client>,
+        _message_from: Arc<dyn Agent>,
         receiver: &mut Receiver<crate::Result<ChannelMessage>>,
     ) -> crate::Result<()> {
         let mut state = AgentRespState::Init;

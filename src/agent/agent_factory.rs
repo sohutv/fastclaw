@@ -263,7 +263,7 @@ impl PreambleProvider for SystemPromptProvider_ {
                             default_preamble,
                             ..
                         },
-                    addi_preamble: addi_preamble,
+                    addi_preamble,
                     ..
                 },
         } = self;

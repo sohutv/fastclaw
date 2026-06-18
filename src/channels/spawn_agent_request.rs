@@ -1,11 +1,10 @@
 use crate::agent::{Agent, AgentRequest, AgentRequestContext, AgentRequestPkg};
 use crate::channels::ChannelMessage;
 use log::error;
-use std::sync::Arc;
 use tokio::sync::mpsc::Receiver;
 
 pub async fn apply(
-    agent: Arc<dyn Agent>,
+    agent: &dyn Agent,
     req: AgentRequest,
 ) -> crate::Result<Receiver<crate::Result<ChannelMessage>>> {
     let (rx, tx) = tokio::sync::mpsc::channel(32);
@@ -34,7 +33,7 @@ pub async fn apply(
 
 #[inline(always)]
 async fn spawn_agent_task_inner(
-    agent: Arc<dyn Agent>,
+    agent: &dyn Agent,
     req: AgentRequest,
     ctx: AgentRequestContext,
 ) -> crate::Result<()> {

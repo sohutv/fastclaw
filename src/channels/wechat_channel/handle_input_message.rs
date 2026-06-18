@@ -178,8 +178,9 @@ impl WechatChannel {
             {
                 Ok(mut receiver) => {
                     let client = Arc::clone(&wechat_client);
+                    let agent = Arc::clone(&self.agent);
                     let _ = tokio::spawn(async move {
-                        let _ = self.handle_agent_message(client, &mut receiver).await;
+                        let _ = self.handle_agent_message(client, agent, &mut receiver).await;
                     });
                     return Ok(());
                 }
@@ -202,11 +203,10 @@ impl WechatChannel {
         info!("Submit task to agent, msg_id: {}", msg_id);
         match self
             .spawn_agent_request(
-                &wechat_client,
-                self.agent.id(),
                 AgentRequest {
                     id: msg_id.to_string().into(),
                     session_id: self.wechat_config.session_id().clone(),
+                    agent_id: self.agent.id().clone(),
                     message: vec![user_content],
                     addi_preamble: None,
                 },

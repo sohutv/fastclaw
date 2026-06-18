@@ -17,6 +17,7 @@ use itertools::Itertools;
 use log::warn;
 use std::ops::Deref;
 use std::sync::Arc;
+use tokio::sync::RwLock;
 use tokio::sync::mpsc::Receiver;
 use tokio::task::JoinHandle;
 
@@ -28,6 +29,7 @@ mod recv_agent_message;
 pub struct DingtalkChannel {
     context: &'static ChannelContext,
     pub dingtalk_config: DingTalkConfig,
+    pub dingtalk_client: Arc<RwLock<Option<Arc<DingTalkStream>>>>,
     pub agent: Arc<MainAgent>,
 }
 
@@ -43,6 +45,7 @@ impl DingtalkChannel {
                 .dingtalk_config
                 .clone()
                 .ok_or(anyhow!("dingtalk config not found"))?,
+            dingtalk_client: Default::default(),
             agent: Arc::clone(agent),
         })
     }
@@ -53,9 +56,11 @@ impl Channel for DingtalkChannel {
     type Client = DingTalkStream;
     type JoinHandle = JoinHandle<crate::Result<()>>;
 
-    async fn start(
-        &'static self,
-    ) -> crate::Result<(&'static Self, Arc<Self::Client>, Self::JoinHandle)> {
+    async fn start(&'static self) -> crate::Result<(&'static Self, Self::JoinHandle)> {
+        let mut guard = self.dingtalk_client.write().await;
+        if guard.is_some() {
+            return Err(anyhow!("channel had been already started!!!"));
+        }
         let cb_handler = Arc::new(handle_input_message::DingTalkCallbackHandler {
             channel: self,
             dingtalk_bot_topic: MessageTopic::Callback(dingtalk_stream::TOPIC_ROBOT.to_string()),
@@ -69,15 +74,27 @@ impl Channel for DingtalkChannel {
         )
         .start()
         .await?;
-        Ok((self, dingtalk, dingtalk_stream_handle))
+        *guard = Some(dingtalk);
+        Ok((self, dingtalk_stream_handle))
     }
 
     fn context(&self) -> &'static ChannelContext {
         self.context
     }
+
+    async fn client(&self) -> crate::Result<Arc<Self::Client>> {
+        self.dingtalk_client
+            .read()
+            .await
+            .as_ref()
+            .map(|it| Arc::clone(it))
+            .ok_or(anyhow!("channel not started"))
+    }
+
     async fn handle_agent_message(
         &self,
-        dingtalk: Arc<DingTalkStream>,
+        dingtalk: Arc<Self::Client>,
+        _message_from: Arc<dyn Agent>,
         receiver: &mut Receiver<crate::Result<ChannelMessage>>,
     ) -> crate::Result<()> {
         let mut state = AgentRespState::Wait;
@@ -119,6 +136,7 @@ impl Channel for DingtalkChannel {
 
 impl DingtalkChannel {
     fn create_robot_messages<Content: Into<MessageContent>>(
+        _: &DingTalkStream,
         _: &dyn Agent,
         session_id: &SessionId,
         _: &ChannelContext,

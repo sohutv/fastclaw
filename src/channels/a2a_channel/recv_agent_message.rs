@@ -1,21 +1,23 @@
-use crate::agent::{Agent, AgentRequest, AgentResponse, Notify};
-use crate::channels::a2a_channel::A2AChannel;
+use crate::agent::{Agent, AgentResponse, Notify};
+use crate::channels::a2a_channel::{A2AChannel, A2AChannelClient};
 use crate::channels::text_formater::*;
 use crate::channels::{AgentRespState, AgentRespType};
-use crate::channels::{ChannelContext, ChannelMessage, SessionId, create_robot_messages_for_agent};
+use crate::channels::{ChannelContext, ChannelMessage, SessionId, create_outbound_msg};
 use anyhow::anyhow;
 
 impl A2AChannel {
     pub(crate) async fn handle_agent_message_actual(
         &self,
+        client: &A2AChannelClient,
         ChannelMessage {
             session_id,
-            agent_id,
             message,
+            agent_id: message_from,
+            ..
         }: &ChannelMessage,
         curr_state: AgentRespState,
         buff: &mut Vec<String>,
-    ) -> crate::Result<AgentRespState> {
+    ) -> crate::Result<(AgentRespState, Option<String>)> {
         let (formated_message, next_state) = match message {
             AgentResponse::Start => {
                 let AgentRespState::Wait = curr_state else {
@@ -48,7 +50,7 @@ impl A2AChannel {
                         &self.config,
                         self.context
                             .agent_registry
-                            .get(agent_id)
+                            .get(message_from)
                             .await?
                             .agent_settings()
                             .output_schema
@@ -80,11 +82,9 @@ impl A2AChannel {
             ),
         };
         if let Some((text, resp_type)) = formated_message {
-            if let Some(robot_message) = create_robot_messages_for_agent(
-                &*self.context
-                    .agent_registry
-                    .get(agent_id)
-                    .await?,
+            if let Some(robot_message) = create_outbound_msg(
+                client,
+                &*self.context.agent_registry.get(message_from).await?,
                 session_id,
                 &self.config,
                 &self.context,
@@ -94,20 +94,21 @@ impl A2AChannel {
             )
             .await?
             {
-                todo!()
+                return Ok((next_state, Some(robot_message)));
             }
         }
-        Ok(next_state)
+        Ok((next_state, None))
     }
 }
 
 impl A2AChannel {
     fn create_robot_messages(
+        _: &A2AChannelClient,
         _: &dyn Agent,
-        session_id: &SessionId,
+        _: &SessionId,
         _: &ChannelContext,
         content: String,
-    ) -> crate::Result<AgentRequest> {
-        todo!()
+    ) -> crate::Result<String> {
+        Ok(content)
     }
 }
