@@ -77,11 +77,11 @@ impl Prompt {
 )]
 pub struct Preamble(Prompt);
 
-impl Add<Self> for Preamble {
+impl<P: Into<Self>> Add<P> for Preamble {
     type Output = Self;
 
-    fn add(self, rhs: Self) -> Self::Output {
-        (self.0 + rhs.0).into()
+    fn add(self, rhs: P) -> Self::Output {
+        (self.0 + rhs.into().0).into()
     }
 }
 

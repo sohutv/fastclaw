@@ -8,6 +8,10 @@ pub mod drop_agent;
 
 pub mod list_agent;
 
+pub mod a2a_notifier;
+
+pub mod a2user_notifier;
+
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 #[serde(default)]
 pub struct ForkAgentToolsConfig {
@@ -26,6 +30,10 @@ impl ForkAgentTools {
             arr.push(Box::new(fork_agent::ForkAgentTool { ctx: ctx.clone() }));
             arr.push(Box::new(drop_agent::DropAgentTool { ctx: ctx.clone() }));
             arr.push(Box::new(list_agent::ListAgentsTool { ctx: ctx.clone() }));
+            arr.push(Box::new(a2a_notifier::A2ANotifyTool { ctx: ctx.clone() }));
+            arr.push(Box::new(a2user_notifier::A2UserNotifyTool {
+                ctx: ctx.clone(),
+            }));
         }
         Ok(arr)
     }

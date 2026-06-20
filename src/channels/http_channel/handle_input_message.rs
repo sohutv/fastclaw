@@ -125,10 +125,9 @@ impl HttpChannel {
         if let Some(cmd_val) = &cmd {
             match Console::handle_console_cmd(&self.context, &cmd_val, &agent, &session_id).await {
                 Ok(mut receiver) => {
-                    let client = Arc::clone(&http_client);
                     let agent = Arc::clone(&self.agent);
                     let _ = tokio::spawn(async move {
-                        let _ = self.handle_agent_message(client, agent, &mut receiver).await;
+                        let _ = self.handle_agent_message(&http_client, agent, &mut receiver).await;
                     });
                     return Ok(());
                 }

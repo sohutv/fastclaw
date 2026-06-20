@@ -36,7 +36,7 @@ pub async fn handle(
         ..
     }): Json<Body>,
 ) -> Result<Json<Resp>, StatusCode> {
-    let session_id = SessionId::try_from((user_id.deref(), &app_state.channel.http_config)).map_err(|err| {
+    let session_id = SessionId::try_from((user_id.deref(), app_state.channel.http_config)).map_err(|err| {
         warn!("{err}");
         StatusCode::FORBIDDEN
     })?;

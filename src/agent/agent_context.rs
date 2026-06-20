@@ -1,4 +1,5 @@
 use crate::agent::{Agent, AgentId, HistoryManager};
+use crate::channels::ChannelNotifier;
 use crate::channels::a2a_channel::A2AChannel;
 use crate::config::{Config, Workspace};
 use crate::memory::MemoryManager;
@@ -21,6 +22,7 @@ pub struct AgentContext {
     pub mcp_registry: &'static McpRegistry,
     pub agent_registry: &'static AgentRegistry,
     pub a2a_channel: &'static A2AChannel,
+    pub channel_notifier: Arc<RwLock<Vec<ChannelNotifier>>>,
 }
 
 #[async_trait]

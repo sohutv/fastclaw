@@ -28,18 +28,12 @@ pub async fn handle(
         agent_group,
     }): Query<Params>,
 ) -> Result<axum::response::Response, StatusCode> {
-    let session_id =
-        SessionId::try_from((user_id.deref(), &app_state.channel.http_config)).map_err(|err| {
+    let session_id = SessionId::try_from((user_id.deref(), app_state.channel.http_config))
+        .map_err(|err| {
             warn!("{err}");
             StatusCode::FORBIDDEN
         })?;
-    let agent = super::get_or_create(
-        &app_state,
-        &session_id,
-        &agent_id,
-        &agent_group,
-    )
-    .await?;
+    let agent = super::get_or_create(&app_state, &session_id, &agent_id, &agent_group).await?;
     let agent_id = agent.id();
     let rx = {
         let mut transports = app_state.client.write().await;
@@ -55,12 +49,8 @@ pub async fn handle(
         rx
     };
     use futures_util::stream::StreamExt as _;
-    let sse = Sse::new(
-        ReceiverStream::new(rx).map(|it|{
-            Event::default().json_data(it)
-        }),
-    )
-    .keep_alive(Default::default());
+    let sse = Sse::new(ReceiverStream::new(rx).map(|it| Event::default().json_data(it)))
+        .keep_alive(Default::default());
     let mut response = sse.into_response();
     response.headers_mut().insert(
         axum::http::header::CONTENT_TYPE,

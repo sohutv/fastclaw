@@ -1,21 +1,20 @@
 use crate::channels::{
-    AgentRespState, Channel, ChannelContext, ChannelMessage, SessionId, spawn_agent_request,
+    AgentRespState, Channel, ChannelContext, ChannelMessage, ChannelNotifier, SessionId,
 };
 use async_trait::async_trait;
-use derive_more::{Deref, From};
 use log::warn;
-use std::ops::Deref;
 use std::sync::Arc;
 use tokio::sync::mpsc::Receiver;
 
 mod config;
-use crate::agent::{Agent, AgentRequest};
+use crate::agent::Agent;
 pub use config::A2AChannelConfig;
 
 mod recv_agent_message;
 pub struct A2AChannel {
     pub context: &'static ChannelContext,
     pub config: A2AChannelConfig,
+    pub client: (),
 }
 
 impl A2AChannel {
@@ -23,61 +22,34 @@ impl A2AChannel {
         Ok(A2AChannel {
             context: channel_context,
             config: channel_context.config.a2a_channel.clone(),
+            client: Default::default(),
         })
-    }
-
-    pub async fn spawn_request<C: Into<A2AChannelClient>>(
-        &'static self,
-        client: C,
-        req: AgentRequest,
-    ) -> crate::Result<tokio::task::JoinHandle<()>> {
-        let client = Arc::new(client.into());
-        let agent = self.context().agent_registry.get(&req.agent_id).await?;
-        let mut receiver = spawn_agent_request::apply(&*agent, req).await?;
-        let join_handle = tokio::spawn(async move {
-            let _ = self
-                .handle_agent_message(client, agent, &mut receiver)
-                .await;
-        });
-        Ok(join_handle)
-    }
-}
-#[derive(Clone, Deref, From)]
-pub struct A2AChannelClient(Arc<dyn Agent>);
-
-impl From<&Arc<dyn Agent>> for A2AChannelClient {
-    fn from(value: &Arc<dyn Agent>) -> Self {
-        Self(Arc::clone(value))
     }
 }
 
 #[async_trait]
 impl Channel for A2AChannel {
-    type Client = A2AChannelClient;
+    type Client = ();
     type JoinHandle = ();
 
-    async fn start(&'static self) -> crate::Result<(&'static Self, Self::JoinHandle)> {
-        Ok((Box::leak(Box::new(self)), ()))
+    async fn start(
+        &'static self,
+    ) -> crate::Result<(&'static Self, ChannelNotifier, Self::JoinHandle)> {
+        let (tx, _rx) = tokio::sync::mpsc::channel::<super::Notify>(32);
+        Ok((Box::leak(Box::new(self)), tx.into(), ()))
     }
 
     fn context(&self) -> &'static ChannelContext {
         self.context
     }
 
-    async fn client(&self) -> crate::Result<Arc<Self::Client>> {
-        unreachable!("unsupported")
-    }
-
-    async fn spawn_agent_request(
-        &'static self,
-        _: AgentRequest,
-    ) -> crate::Result<tokio::task::JoinHandle<()>> {
-        unreachable!("use spawn_request replaced")
+    async fn client(&self) -> crate::Result<()> {
+        Ok(self.client)
     }
 
     async fn handle_agent_message(
         &self,
-        client: Arc<Self::Client>,
+        client: &Self::Client,
         message_from: Arc<dyn Agent>,
         receiver: &mut Receiver<crate::Result<ChannelMessage>>,
     ) -> crate::Result<()> {
@@ -112,18 +84,6 @@ from: =========={}==========
                                         message_from.id(),
                                         message
                                     );
-                                    let _ = client
-                                        .context()
-                                        .a2a_channel
-                                        .spawn_request(
-                                            &message_from,
-                                            AgentRequest::new(
-                                                &SessionId::master(client.id().deref()),
-                                                client.id(),
-                                                message,
-                                            ),
-                                        )
-                                        .await;
                                 }
                                 next => state = next,
                             }

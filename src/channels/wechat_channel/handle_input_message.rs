@@ -177,10 +177,9 @@ impl WechatChannel {
             .await
             {
                 Ok(mut receiver) => {
-                    let client = Arc::clone(&wechat_client);
                     let agent = Arc::clone(&self.agent);
                     let _ = tokio::spawn(async move {
-                        let _ = self.handle_agent_message(client, agent, &mut receiver).await;
+                        let _ = self.handle_agent_message(&wechat_client, agent, &mut receiver).await;
                     });
                     return Ok(());
                 }

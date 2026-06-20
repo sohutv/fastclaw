@@ -1,11 +1,11 @@
 use super::super::{AgentRespState, AgentRespType};
-use crate::agent::{Agent, AgentResponse, Notify};
+use crate::agent::{AgentResponse, Notify};
 use crate::channels::text_formater::*;
 use crate::channels::wechat_channel::WechatChannel;
-use crate::channels::{ChannelContext, ChannelMessage, SessionId, create_outbound_msg};
+use crate::channels::{ChannelMessage, create_outbound_msg};
 use anyhow::anyhow;
 use wechat_sdk::client::WechatClient;
-use wechat_sdk::client::message::{MessageItems, TypingTicket};
+use wechat_sdk::client::message::TypingTicket;
 
 impl WechatChannel {
     pub(super) async fn handle_agent_message_actual(
@@ -32,15 +32,11 @@ impl WechatChannel {
                 (None, AgentRespState::Start)
             }
             AgentResponse::ToolCall(toolcall) => (
-                format_tool_call(session_id, &self.wechat_config, toolcall),
+                format_tool_call(session_id, self.wechat_config, toolcall),
                 curr_state,
             ),
             AgentResponse::ReasoningStream(reasoning) => {
-                buff.extend(extract_reasoning(
-                    session_id,
-                    &self.wechat_config,
-                    reasoning,
-                ));
+                buff.extend(extract_reasoning(session_id, self.wechat_config, reasoning));
                 (None, AgentRespState::Reasoning)
             }
             AgentResponse::MessageStream(message) => {
@@ -49,14 +45,14 @@ impl WechatChannel {
                 } else {
                     None
                 };
-                buff.extend(extract_message(session_id, &self.wechat_config, message));
+                buff.extend(extract_message(session_id, self.wechat_config, message));
                 (formated_message, AgentRespState::Messaging)
             }
             AgentResponse::Final(usage) => (
                 Some(
                     format_message(
                         session_id,
-                        &self.wechat_config,
+                        self.wechat_config,
                         self.agent.agent_settings().output_schema.is_some(),
                         usage,
                         buff,
@@ -82,7 +78,7 @@ impl WechatChannel {
             AgentResponse::HistoryCompact(result) => (
                 Some(format_history_compact(
                     session_id,
-                    &self.wechat_config,
+                    self.wechat_config,
                     result,
                 )),
                 curr_state,
@@ -93,7 +89,7 @@ impl WechatChannel {
                 wechat,
                 &*self.agent,
                 session_id,
-                &self.wechat_config,
+                self.wechat_config,
                 &self.context,
                 resp_type,
                 text,
@@ -105,36 +101,5 @@ impl WechatChannel {
             }
         }
         Ok(next_state)
-    }
-}
-
-impl WechatChannel {
-    fn create_robot_messages<Content: Into<MessageItems>>(
-        _: &WechatClient,
-        _: &dyn Agent,
-        session_id: &SessionId,
-        _: &ChannelContext,
-        content: Content,
-    ) -> crate::Result<WechatRobotMessage> {
-        let message = match &session_id {
-            SessionId::Master { .. } | SessionId::Anonymous { .. } => WechatRobotMessage {
-                content: content.into(),
-            },
-            SessionId::Group { .. } => {
-                unreachable!("send robot message to group is not supported by wechat")
-            }
-        };
-        Ok(message)
-    }
-}
-
-struct WechatRobotMessage {
-    content: MessageItems,
-}
-
-impl WechatRobotMessage {
-    async fn send(self, wechat: &WechatClient) -> crate::Result<()> {
-        let _ = wechat.send_message(self.content).await?;
-        Ok(())
     }
 }

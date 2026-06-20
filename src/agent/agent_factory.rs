@@ -65,7 +65,7 @@ pub async fn spawn_agent(
             agent_group: agent_group.clone(),
             agent_group_config: get_agent_group_config(agent_context.workspace, &agent_group)
                 .await?,
-            addi_preamble: addi_preamble,
+            addi_preamble,
             desc,
             owner_session: owner_session.clone(),
         };

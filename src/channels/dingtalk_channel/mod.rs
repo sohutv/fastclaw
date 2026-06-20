@@ -1,7 +1,10 @@
 use crate::agent::{Agent, MainAgent};
-use crate::channels::{AgentRespState, Channel, ChannelContext, ChannelMessage, SessionId};
+use crate::channels::{
+    AgentRespState, Channel, ChannelContext, ChannelMessage, ChannelNotifier, Notify, SessionId,
+};
 use anyhow::anyhow;
 use async_trait::async_trait;
+use dingtalk_stream::frames::up_message::MessageContentMarkdown;
 use dingtalk_stream::{
     DingTalkStream,
     frames::{
@@ -28,7 +31,7 @@ mod recv_agent_message;
 
 pub struct DingtalkChannel {
     context: &'static ChannelContext,
-    pub dingtalk_config: DingTalkConfig,
+    pub dingtalk_config: &'static DingTalkConfig,
     pub dingtalk_client: Arc<RwLock<Option<Arc<DingTalkStream>>>>,
     pub agent: Arc<MainAgent>,
 }
@@ -43,7 +46,7 @@ impl DingtalkChannel {
             dingtalk_config: context
                 .config
                 .dingtalk_config
-                .clone()
+                .as_ref()
                 .ok_or(anyhow!("dingtalk config not found"))?,
             dingtalk_client: Default::default(),
             agent: Arc::clone(agent),
@@ -53,10 +56,13 @@ impl DingtalkChannel {
 
 #[async_trait]
 impl Channel for DingtalkChannel {
-    type Client = DingTalkStream;
+    type Client = Arc<DingTalkStream>;
+
     type JoinHandle = JoinHandle<crate::Result<()>>;
 
-    async fn start(&'static self) -> crate::Result<(&'static Self, Self::JoinHandle)> {
+    async fn start(
+        &'static self,
+    ) -> crate::Result<(&'static Self, ChannelNotifier, Self::JoinHandle)> {
         let mut guard = self.dingtalk_client.write().await;
         if guard.is_some() {
             return Err(anyhow!("channel had been already started!!!"));
@@ -74,15 +80,40 @@ impl Channel for DingtalkChannel {
         )
         .start()
         .await?;
+        let notifier = {
+            let config = self.dingtalk_config;
+            let client = Arc::clone(&dingtalk);
+            let (rx, mut tx) = tokio::sync::mpsc::channel(32);
+            tokio::spawn(async move {
+                while let Some(Notify { title, content, .. }) = tx.recv().await {
+                    let master_session_ids = config.master_session_ids();
+                    for session_id in master_session_ids {
+                        if session_id
+                            .settings(config)
+                            .map(|it| it.show_connected)
+                            .unwrap_or(false)
+                        {
+                            if let Ok(message) = DingtalkChannel::create_robot_messages_actual(
+                                &session_id,
+                                MessageContentMarkdown::from((title.clone(), content.clone())),
+                            ) {
+                                let _ = client.send_message(message).await;
+                            }
+                        }
+                    }
+                }
+            });
+            rx.into()
+        };
         *guard = Some(dingtalk);
-        Ok((self, dingtalk_stream_handle))
+        Ok((self, notifier, dingtalk_stream_handle))
     }
 
     fn context(&self) -> &'static ChannelContext {
         self.context
     }
 
-    async fn client(&self) -> crate::Result<Arc<Self::Client>> {
+    async fn client(&self) -> crate::Result<Self::Client> {
         self.dingtalk_client
             .read()
             .await
@@ -93,7 +124,7 @@ impl Channel for DingtalkChannel {
 
     async fn handle_agent_message(
         &self,
-        dingtalk: Arc<Self::Client>,
+        dingtalk: &Self::Client,
         _message_from: Arc<dyn Agent>,
         receiver: &mut Receiver<crate::Result<ChannelMessage>>,
     ) -> crate::Result<()> {
@@ -103,7 +134,7 @@ impl Channel for DingtalkChannel {
             match message {
                 Ok(message) => {
                     match self
-                        .handle_agent_message_actual(&dingtalk, &message, state, &mut buff)
+                        .handle_agent_message_actual(dingtalk, &message, state, &mut buff)
                         .await
                     {
                         Ok(AgentRespState::Final) | Err(_) => {

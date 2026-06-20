@@ -1,5 +1,7 @@
 use crate::agent::{Agent, AgentId, MainAgent};
-use crate::channels::{AgentRespState, Channel, ChannelContext, ChannelMessage, SessionId};
+use crate::channels::{
+    AgentRespState, Channel, ChannelContext, ChannelMessage, ChannelNotifier, Notify, SessionId,
+};
 use anyhow::anyhow;
 use async_trait::async_trait;
 use axum::routing::{delete, get};
@@ -23,11 +25,12 @@ mod recv_agent_message;
 
 mod config;
 pub use config::*;
+
 mod restapi;
 
 pub struct HttpChannel {
     context: &'static ChannelContext,
-    pub http_config: HttpChannelConfig,
+    pub http_config: &'static HttpChannelConfig,
     pub http_client: Arc<RwLock<Option<Arc<HttpClient>>>>,
     pub agent: Arc<MainAgent>,
 }
@@ -42,7 +45,7 @@ impl HttpChannel {
             http_config: context
                 .config
                 .http_config
-                .clone()
+                .as_ref()
                 .ok_or_else(|| anyhow!("http_config not found"))?,
             http_client: Default::default(),
             agent: Arc::clone(agent),
@@ -88,10 +91,12 @@ struct AppState {
 
 #[async_trait]
 impl Channel for HttpChannel {
-    type Client = HttpClient;
+    type Client = Arc<HttpClient>;
     type JoinHandle = tokio::task::JoinHandle<crate::Result<()>>;
 
-    async fn start(&'static self) -> crate::Result<(&'static Self, Self::JoinHandle)> {
+    async fn start(
+        &'static self,
+    ) -> crate::Result<(&'static Self, ChannelNotifier, Self::JoinHandle)> {
         let mut guard = self.http_client.write().await;
         if guard.is_some() {
             return Err(anyhow!("channel had been already started!!!"));
@@ -123,15 +128,42 @@ impl Channel for HttpChannel {
             }
             Ok(())
         });
+        let notifier = {
+            let config = self.http_config;
+            let client = Arc::clone(&client);
+            let (rx, mut tx) = tokio::sync::mpsc::channel(32);
+            tokio::spawn(async move {
+                while let Some(Notify {
+                    agent_id, content, ..
+                }) = tx.recv().await
+                {
+                    let master_session_ids = config.master_session_ids();
+                    for session_id in master_session_ids {
+                        if session_id
+                            .settings(config)
+                            .map(|it| it.show_connected)
+                            .unwrap_or(false)
+                        {
+                            if let Ok(message) =
+                                Self::create_resp_messages_actual(&session_id, content.clone())
+                            {
+                                let _ = message.send(&client, session_id, &agent_id).await;
+                            }
+                        }
+                    }
+                }
+            });
+            rx.into()
+        };
         *guard = Some(client);
-        Ok((self, join_handle))
+        Ok((self, notifier, join_handle))
     }
 
     fn context(&self) -> &'static ChannelContext {
         self.context
     }
 
-    async fn client(&self) -> crate::Result<Arc<Self::Client>> {
+    async fn client(&self) -> crate::Result<Self::Client> {
         self.http_client
             .read()
             .await
@@ -142,7 +174,7 @@ impl Channel for HttpChannel {
 
     async fn handle_agent_message(
         &self,
-        http_client: Arc<HttpClient>,
+        http_client: &Self::Client,
         _message_from: Arc<dyn Agent>,
         receiver: &mut Receiver<crate::Result<ChannelMessage>>,
     ) -> crate::Result<()> {
@@ -152,7 +184,7 @@ impl Channel for HttpChannel {
             match message_result {
                 Ok(message) => {
                     match self
-                        .handle_agent_message_actual(&http_client, &message, state, &mut buff)
+                        .handle_agent_message_actual(http_client, &message, state, &mut buff)
                         .await
                     {
                         Ok(AgentRespState::Final) | Err(_) => {
@@ -180,5 +212,57 @@ impl Channel for HttpChannel {
             .map(|it| &it.session_id)
             .collect_vec();
         Ok(arr)
+    }
+}
+
+impl HttpChannel {
+    fn create_resp_messages<C: Into<Payload>>(
+        _: &HttpClient,
+        _: &dyn Agent,
+        session_id: &SessionId,
+        _: &ChannelContext,
+        content: C,
+    ) -> crate::Result<HttpRespMessage> {
+        Self::create_resp_messages_actual(session_id, content)
+    }
+
+    fn create_resp_messages_actual<C: Into<Payload>>(
+        session_id: &SessionId,
+        content: C,
+    ) -> crate::Result<HttpRespMessage> {
+        match &session_id {
+            SessionId::Master { .. } | SessionId::Anonymous { .. } => Ok(content.into().into()),
+            SessionId::Group { .. } => Err(anyhow!(
+                "send robot message to group is not supported by http"
+            )),
+        }
+    }
+}
+
+impl HttpRespMessage {
+    async fn send(self, client: &HttpClient, session_id: &SessionId, agent_id: &AgentId) {
+        let user_id = UserId::from(session_id);
+        if let Some(guard) = client.read().await.get(&user_id) {
+            let mut user_transports = guard.write().await;
+            if let Some((agent_id, agent_transports)) = user_transports.remove_entry(agent_id) {
+                let mut updated = vec![];
+                for transport in agent_transports {
+                    let sender = &transport.sender;
+                    if sender.is_closed() {
+                        log::warn!(
+                            "failed to send resp message, transport had been closed, user_id: {}, agent_id: {} ",
+                            user_id,
+                            agent_id
+                        );
+                    } else {
+                        let _ = sender.send(self.clone()).await;
+                        updated.push(transport)
+                    }
+                }
+                if !updated.is_empty() {
+                    user_transports.insert(agent_id, updated);
+                }
+            }
+        }
     }
 }

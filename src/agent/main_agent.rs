@@ -1,4 +1,4 @@
-use crate::agent::{Agent, AgentId, DelegatedAgent, reload_agent, AgentVisitor};
+use crate::agent::{Agent, AgentId, AgentVisitor, DelegatedAgent, reload_agent};
 use anyhow::anyhow;
 use std::ops::Deref;
 use std::sync::Arc;
@@ -44,11 +44,13 @@ impl MainAgent {
                             workspace.agent_group_agent_lock_path(&agent_id).await
                         {
                             if agent_lock_path.exists() {
-                                let _ = reload_agent(
-                                    &agent_id,
-                                    self.context(),
-                                )
-                                .await;
+                                let _ = self
+                                    .context()
+                                    .agent_registry
+                                    .get_with(self.context(), &agent_id, |context, agent_id| async move {
+                                        reload_agent(&agent_id, context).await
+                                    })
+                                    .await;
                             }
                         }
                     }

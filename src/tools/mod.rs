@@ -67,10 +67,10 @@ pub struct ToolCallRsult {
 }
 
 impl ToolCallRsult {
-    fn ok(output: String) -> Self {
+    fn ok<M: Into<String>>(output: M) -> Self {
         Self {
             success: true,
-            output,
+            output: output.into(),
             error: None,
         }
     }

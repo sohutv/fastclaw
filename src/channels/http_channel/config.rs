@@ -1,5 +1,6 @@
 use crate::channels::{SessionConfig, SessionId, SessionSettings, SessionSettingsProvider};
 use anyhow::anyhow;
+use itertools::Itertools;
 use serde::{Deserialize, Serialize};
 use std::ops::Deref;
 
@@ -7,6 +8,22 @@ use std::ops::Deref;
 pub struct HttpChannelConfig {
     pub addr: String,
     pub session_configs: Vec<SessionConfig>,
+}
+
+impl HttpChannelConfig {
+    pub(super) fn master_session_ids(&self) -> Vec<&SessionId> {
+        self.session_configs
+            .iter()
+            .map(|it| &it.session_id)
+            .flat_map(|it| {
+                if let SessionId::Master { .. } = it {
+                    Some(it)
+                } else {
+                    None
+                }
+            })
+            .collect_vec()
+    }
 }
 
 impl SessionSettingsProvider for HttpChannelConfig {

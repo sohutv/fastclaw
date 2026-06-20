@@ -2,7 +2,9 @@ use crate::agent::{
     Agent, AgentRequest, AgentResponse, AgentVisitor, DelegatedAgent, MainAgent, Notify,
 };
 use crate::channels::console_cmd::Console;
-use crate::channels::{Channel, ChannelContext, ChannelMessage, SessionId, SessionSettings};
+use crate::channels::{
+    Channel, ChannelContext, ChannelMessage, ChannelNotifier, SessionId, SessionSettings,
+};
 use anyhow::anyhow;
 use async_trait::async_trait;
 use log::warn;
@@ -21,7 +23,7 @@ pub struct CliChannel {
     context: &'static ChannelContext,
     session_id: SessionId,
     session_settings: SessionSettings,
-    client: Arc<()>,
+    client: (),
     agent: Arc<MainAgent>,
 }
 
@@ -47,7 +49,9 @@ impl Channel for CliChannel {
     type Client = ();
     type JoinHandle = JoinHandle<()>;
 
-    async fn start(&'static self) -> crate::Result<(&'static Self, Self::JoinHandle)> {
+    async fn start(
+        &'static self,
+    ) -> crate::Result<(&'static Self, ChannelNotifier, Self::JoinHandle)> {
         let join_handle = {
             let join_handle = std::thread::spawn(move || {
                 let rt = tokio::runtime::Builder::new_current_thread()
@@ -104,20 +108,33 @@ impl Channel for CliChannel {
             });
             join_handle
         };
-        Ok((self, join_handle))
+        let notifier = {
+            let (tx, mut rx) = tokio::sync::mpsc::channel::<super::Notify>(32);
+            while let Some(notify) = rx.recv().await {
+                println!(
+                    r#"
+//////// Notify: {}
+{}
+"#,
+                    notify.title, notify.content
+                );
+            }
+            ChannelNotifier::from(tx)
+        };
+        Ok((self, notifier, join_handle))
     }
 
     fn context(&self) -> &'static ChannelContext {
         self.context
     }
 
-    async fn client(&self) -> crate::Result<Arc<Self::Client>> {
-        Ok(Arc::clone(&self.client))
+    async fn client(&self) -> crate::Result<Self::Client> {
+        Ok(self.client)
     }
 
     async fn handle_agent_message(
         &self,
-        _: Arc<Self::Client>,
+        _: &Self::Client,
         _message_from: Arc<dyn Agent>,
         receiver: &mut Receiver<crate::Result<ChannelMessage>>,
     ) -> crate::Result<()> {

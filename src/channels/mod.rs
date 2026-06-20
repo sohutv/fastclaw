@@ -1,10 +1,10 @@
 use crate::agent::{Agent, AgentId, AgentRegistry, AgentRequest, AgentResponse};
 use crate::config::{Config, Workspace};
 use async_trait::async_trait;
-use derive_more::Deref;
+use derive_more::{Deref, From};
 use std::sync::Arc;
 use strum::Display;
-use tokio::sync::mpsc::Receiver;
+use tokio::sync::mpsc::{Receiver, Sender};
 
 #[cfg(feature = "channel_cli_channel")]
 pub mod cli_channel;
@@ -26,6 +26,15 @@ mod session_id;
 
 pub use session_id::*;
 
+#[derive(Clone, From, Deref)]
+pub struct ChannelNotifier(Sender<Notify>);
+#[derive(Clone)]
+pub struct Notify {
+    pub agent_id: AgentId,
+    pub title: String,
+    pub content: String,
+}
+
 #[async_trait]
 pub trait Channel: Sync + Send
 where
@@ -35,11 +44,13 @@ where
 
     type JoinHandle: Sync + Send;
 
-    async fn start(&'static self) -> crate::Result<(&'static Self, Self::JoinHandle)>;
+    async fn start(
+        &'static self,
+    ) -> crate::Result<(&'static Self, ChannelNotifier, Self::JoinHandle)>;
 
     fn context(&self) -> &'static ChannelContext;
 
-    async fn client(&self) -> crate::Result<Arc<Self::Client>>;
+    async fn client(&self) -> crate::Result<Self::Client>;
 
     /// handle_agent_task
     /// spawn_agent_task -> spawn(handle_agent_message)
@@ -52,7 +63,7 @@ where
         let mut receiver = spawn_agent_request::apply(&*agent, req).await?;
         let join_handle = tokio::spawn(async move {
             let _ = self
-                .handle_agent_message(client, agent, &mut receiver)
+                .handle_agent_message(&client, agent, &mut receiver)
                 .await;
         });
         Ok(join_handle)
@@ -60,7 +71,7 @@ where
 
     async fn handle_agent_message(
         &self,
-        client: Arc<Self::Client>,
+        client: &Self::Client,
         message_from: Arc<dyn Agent>,
         receiver: &mut Receiver<crate::Result<ChannelMessage>>,
     ) -> crate::Result<()>;

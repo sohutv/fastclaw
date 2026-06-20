@@ -1,4 +1,6 @@
 use crate::agent::{AgentGroup, AgentId, AgentRequest, OwnerSession};
+use crate::channels::Channel;
+use crate::tools::fork_agent::a2a_notifier::A2ANotifyTool;
 use crate::tools::{ToolCallError, ToolCallRsult, ToolContext};
 use crate::type_::{Preamble, Prompt};
 use itertools::Itertools;
@@ -88,7 +90,13 @@ The group to use for the new agent. This determines the agent's configuration pr
             .fork_agent(
                 &agent_id,
                 &agent_group,
-                Some(preamble),
+                Some(
+                    preamble
+                        + format!(
+                            r#"All of your responses must go through the `{}`"#,
+                            A2ANotifyTool::NAME
+                        ),
+                ),
                 Some(description),
                 &OwnerSession::Private(self.ctx.session_id.clone()),
             )
@@ -107,14 +115,11 @@ fork agent ok
                     .parent_agent
                     .context()
                     .a2a_channel
-                    .spawn_request(
-                        &self.ctx.parent_agent,
-                        AgentRequest::new(
-                            &self.ctx.session_id,
-                            agent.id(),
-                            UserContent::text(prompt.deref()),
-                        ),
-                    )
+                    .spawn_agent_request(AgentRequest::new(
+                        &self.ctx.session_id,
+                        agent.id(),
+                        UserContent::text(prompt.deref()),
+                    ))
                     .await
                 {
                     Ok(_) => Ok(ToolCallRsult {

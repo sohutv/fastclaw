@@ -1,13 +1,10 @@
-use crate::agent::{Agent, AgentId, AgentResponse, Notify};
+use crate::agent::{AgentResponse, Notify};
 use crate::channels::http_channel::{HttpChannel, HttpClient, Payload};
-use crate::channels::http_channel::{HttpRespMessage, UserId};
 use crate::channels::text_formater::{
     FormatedMessage, extract_message, extract_reasoning, format_history_compact, format_message,
     format_reasoning, format_tool_call,
 };
-use crate::channels::{
-    AgentRespState, AgentRespType, ChannelContext, ChannelMessage, SessionId, create_outbound_msg,
-};
+use crate::channels::{AgentRespState, AgentRespType, ChannelMessage, create_outbound_msg};
 use anyhow::anyhow;
 
 impl HttpChannel {
@@ -31,12 +28,12 @@ impl HttpChannel {
                 (None, AgentRespState::Start)
             }
             AgentResponse::ToolCall(toolcall) => (
-                format_tool_call(session_id, &self.http_config, toolcall)
+                format_tool_call(session_id, self.http_config, toolcall)
                     .map(|(text, rt)| (text.into(), rt)),
                 curr_state,
             ),
             AgentResponse::ReasoningStream(reasoning) => {
-                buff.extend(extract_reasoning(session_id, &self.http_config, reasoning));
+                buff.extend(extract_reasoning(session_id, self.http_config, reasoning));
                 (None, AgentRespState::Reasoning)
             }
             AgentResponse::MessageStream(message) => {
@@ -45,13 +42,13 @@ impl HttpChannel {
                 } else {
                     None
                 };
-                buff.extend(extract_message(session_id, &self.http_config, message));
+                buff.extend(extract_message(session_id, self.http_config, message));
                 (formated_message, AgentRespState::Messaging)
             }
             AgentResponse::Final(usage) => (
                 Some(format_message(
                     session_id,
-                    &self.http_config,
+                    self.http_config,
                     self.agent.agent_settings().output_schema.is_some(),
                     usage,
                     buff,
@@ -77,12 +74,8 @@ impl HttpChannel {
                 curr_state,
             ),
             AgentResponse::HistoryCompact(result) => (
-                Some(format_history_compact(
-                    session_id,
-                    &self.http_config,
-                    result,
-                ))
-                .map(|(text, rt)| (text.into(), rt)),
+                Some(format_history_compact(session_id, self.http_config, result))
+                    .map(|(text, rt)| (text.into(), rt)),
                 curr_state,
             ),
         };
@@ -91,7 +84,7 @@ impl HttpChannel {
                 http_client,
                 &*self.agent,
                 session_id,
-                &self.http_config,
+                self.http_config,
                 &self.context,
                 resp_type,
                 text,
@@ -99,29 +92,10 @@ impl HttpChannel {
             )
             .await?
             {
-                let _ = robot_message
-                    .send(http_client, session_id, agent_id)
-                    .await;
+                let _ = robot_message.send(http_client, session_id, agent_id).await;
             }
         }
         Ok(next_state)
-    }
-}
-
-impl HttpChannel {
-    fn create_resp_messages<C: Into<Payload>>(
-        _: &HttpClient,
-        _: &dyn Agent,
-        session_id: &SessionId,
-        _: &ChannelContext,
-        content: C,
-    ) -> crate::Result<HttpRespMessage> {
-        match &session_id {
-            SessionId::Master { .. } | SessionId::Anonymous { .. } => Ok(content.into().into()),
-            SessionId::Group { .. } => Err(anyhow!(
-                "send robot message to group is not supported by http"
-            )),
-        }
     }
 }
 
@@ -130,34 +104,6 @@ impl From<FormatedMessage> for Payload {
         match value {
             FormatedMessage::Markdown(text) => text.into(),
             FormatedMessage::Json(json) => json.into(),
-        }
-    }
-}
-
-impl HttpRespMessage {
-    async fn send(self, client: &HttpClient, session_id: &SessionId, agent_id: &AgentId) {
-        let user_id = UserId::from(session_id);
-        if let Some(guard) = client.read().await.get(&user_id) {
-            let mut user_transports = guard.write().await;
-            if let Some((agent_id, agent_transports)) = user_transports.remove_entry(agent_id) {
-                let mut updated = vec![];
-                for transport in agent_transports {
-                    let sender = &transport.sender;
-                    if sender.is_closed() {
-                        log::warn!(
-                            "failed to send resp message, transport had been closed, user_id: {}, agent_id: {} ",
-                            user_id,
-                            agent_id
-                        );
-                    } else {
-                        let _ = sender.send(self.clone()).await;
-                        updated.push(transport)
-                    }
-                }
-                if !updated.is_empty() {
-                    user_transports.insert(agent_id, updated);
-                }
-            }
         }
     }
 }

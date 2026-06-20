@@ -11,9 +11,7 @@ impl Config {
             Err(anyhow!("Model provider not found for name: {}", name))
         }
     }
-}
 
-impl Config {
     pub fn default_workdir() -> PathBuf {
         let user_dirs = directories::UserDirs::new().expect("user home not exist!!!");
         user_dirs.home_dir().join(".fastclaw")

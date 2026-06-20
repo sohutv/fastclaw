@@ -1,4 +1,5 @@
 use crate::channels::SessionId;
+use anyhow::anyhow;
 use derive_more::{Deref, Display, From};
 use serde::{Deserialize, Serialize};
 use std::fmt::{Display, Formatter};
@@ -76,6 +77,27 @@ impl Display for OwnerSession {
         match self {
             OwnerSession::GlobalShare => write!(f, "GlobalShare"),
             OwnerSession::Private(s) => write!(f, "{}", s),
+        }
+    }
+}
+
+impl TryFrom<&OwnerSession> for SessionId {
+    type Error = anyhow::Error;
+
+    fn try_from(value: &OwnerSession) -> Result<Self, Self::Error> {
+        value.clone().try_into()
+    }
+}
+
+impl TryFrom<OwnerSession> for SessionId {
+    type Error = anyhow::Error;
+
+    fn try_from(value: OwnerSession) -> Result<Self, Self::Error> {
+        match value {
+            OwnerSession::GlobalShare => Err(anyhow!(
+                "convert to session-id failed, global-share not supported"
+            )),
+            OwnerSession::Private(dst) => Ok(dst),
         }
     }
 }

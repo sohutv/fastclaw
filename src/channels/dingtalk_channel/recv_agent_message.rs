@@ -39,7 +39,7 @@ impl DingtalkChannel {
                 )
             }
             AgentResponse::ToolCall(toolcall) => (
-                format_tool_call(session_id, &self.dingtalk_config, toolcall).map(|(text, rt)| {
+                format_tool_call(session_id, self.dingtalk_config, toolcall).map(|(text, rt)| {
                     (
                         MessageContentMarkdown::from((
                             format!("工具调用: {}...", toolcall.function.name),
@@ -54,7 +54,7 @@ impl DingtalkChannel {
             AgentResponse::ReasoningStream(reasoning) => {
                 buff.extend(extract_reasoning(
                     session_id,
-                    &self.dingtalk_config,
+                    self.dingtalk_config,
                     reasoning,
                 ));
                 (None, AgentRespState::Reasoning)
@@ -69,13 +69,13 @@ impl DingtalkChannel {
                 } else {
                     None
                 };
-                buff.extend(extract_message(session_id, &self.dingtalk_config, message));
+                buff.extend(extract_message(session_id, self.dingtalk_config, message));
                 (formated_message, AgentRespState::Messaging)
             }
             AgentResponse::Final(usage) => {
                 let (text, rt) = format_message(
                     session_id,
-                    &self.dingtalk_config,
+                    self.dingtalk_config,
                     self.agent.agent_settings().output_schema.is_some(),
                     usage,
                     buff,
@@ -106,7 +106,7 @@ impl DingtalkChannel {
                 curr_state,
             ),
             AgentResponse::HistoryCompact(result) => {
-                let (text, rt) = format_history_compact(session_id, &self.dingtalk_config, result);
+                let (text, rt) = format_history_compact(session_id, self.dingtalk_config, result);
                 (
                     Some((
                         MessageContentMarkdown::from(("压缩上下文", text)).into(),
@@ -121,7 +121,7 @@ impl DingtalkChannel {
                 dingtalk,
                 &*self.agent,
                 session_id,
-                &self.dingtalk_config,
+                self.dingtalk_config,
                 &self.context,
                 resp_type,
                 message_content,

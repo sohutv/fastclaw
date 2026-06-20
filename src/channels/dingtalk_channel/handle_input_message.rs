@@ -60,7 +60,7 @@ impl dingtalk_stream::handlers::CallbackHandler for DingTalkCallbackHandler {
         };
         let session_id = {
             let (sender_id, dingtalk_user_id) = parse_sender_id(sender, conversation)?;
-            let Ok(session_id) = SessionId::try_from((&sender_id, &self.channel.dingtalk_config))
+            let Ok(session_id) = SessionId::try_from((&sender_id, self.channel.dingtalk_config))
             else {
                 if let Some(cb_msg_sender) = cb_msg_sender {
                     let _ = cb_msg_sender
@@ -245,11 +245,14 @@ impl dingtalk_stream::handlers::CallbackHandler for DingTalkCallbackHandler {
             .await
             {
                 Ok(mut receiver) => {
-                    let client = Arc::clone(&dingtalk_client);
                     let channel = self.channel;
                     let _ = tokio::spawn(async move {
                         let _ = channel
-                            .handle_agent_message(client, Arc::clone(&channel.agent) as Arc<dyn Agent>, &mut receiver)
+                            .handle_agent_message(
+                                &dingtalk_client,
+                                Arc::clone(&channel.agent) as Arc<dyn Agent>,
+                                &mut receiver,
+                            )
                             .await;
                     });
                     return Ok(HandlerResp::Text("cmd submitted".to_string()));
@@ -297,15 +300,13 @@ impl dingtalk_stream::handlers::CallbackHandler for DingTalkCallbackHandler {
         info!("Submit task to agent, msg_id: {}", msg_id);
         match self
             .channel
-            .spawn_agent_request(
-                AgentRequest {
-                    id: msg_id.to_string().into(),
-                    session_id,
-                    agent_id: self.channel.agent.id().clone(),
-                    message: vec![user_contents],
-                    addi_preamble: Some(addi_preamble),
-                },
-            )
+            .spawn_agent_request(AgentRequest {
+                id: msg_id.to_string().into(),
+                session_id,
+                agent_id: self.channel.agent.id().clone(),
+                message: vec![user_contents],
+                addi_preamble: Some(addi_preamble),
+            })
             .await
         {
             Ok(_) => {
@@ -363,7 +364,7 @@ impl LifecycleListener for DingTalkCallbackHandler {
         let master_session_ids = self.channel.dingtalk_config.master_session_ids();
         for session_id in master_session_ids {
             if session_id
-                .settings(&self.channel.dingtalk_config)
+                .settings(self.channel.dingtalk_config)
                 .map(|it| it.show_connected)
                 .unwrap_or(false)
             {
@@ -394,7 +395,7 @@ Connected to dingtalk websocket
         let master_session_ids = self.channel.dingtalk_config.master_session_ids();
         for session_id in master_session_ids {
             if session_id
-                .settings(&self.channel.dingtalk_config)
+                .settings(self.channel.dingtalk_config)
                 .map(|it| it.show_connected)
                 .unwrap_or(false)
             {

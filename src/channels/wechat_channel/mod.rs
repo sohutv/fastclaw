@@ -1,5 +1,7 @@
 use crate::agent::{Agent, MainAgent};
-use crate::channels::{AgentRespState, Channel, ChannelContext, ChannelMessage, SessionId};
+use crate::channels::{
+    AgentRespState, Channel, ChannelContext, ChannelMessage, ChannelNotifier, Notify, SessionId,
+};
 use anyhow::anyhow;
 use async_trait::async_trait;
 use log::warn;
@@ -7,16 +9,18 @@ use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::RwLock;
 use tokio::sync::mpsc::Receiver;
+use wechat_sdk::client::message::MessageItems;
 use wechat_sdk::client::{WechatClient, WechatConfig as WechatInnerConfig};
 
 mod config;
 pub use config::WechatConfig;
+
 mod handle_input_message;
 mod recv_agent_message;
 
 pub struct WechatChannel {
     context: &'static ChannelContext,
-    pub wechat_config: WechatConfig,
+    pub wechat_config: &'static WechatConfig,
     pub wechat_client: Arc<RwLock<Option<Arc<WechatClient>>>>,
     pub agent: Arc<MainAgent>,
 }
@@ -31,7 +35,7 @@ impl WechatChannel {
             wechat_config: context
                 .config
                 .wechat_config
-                .clone()
+                .as_ref()
                 .ok_or(anyhow!("dingtalk config not found"))?,
             wechat_client: Default::default(),
             agent: Arc::clone(agent),
@@ -41,10 +45,12 @@ impl WechatChannel {
 
 #[async_trait]
 impl Channel for WechatChannel {
-    type Client = WechatClient;
+    type Client = Arc<WechatClient>;
     type JoinHandle = tokio::task::JoinHandle<crate::Result<()>>;
 
-    async fn start(&'static self) -> crate::Result<(&'static Self, Self::JoinHandle)> {
+    async fn start(
+        &'static self,
+    ) -> crate::Result<(&'static Self, ChannelNotifier, Self::JoinHandle)> {
         let mut guard = self.wechat_client.write().await;
         if guard.is_some() {
             return Err(anyhow!("channel had been already started!!!"));
@@ -98,15 +104,37 @@ impl Channel for WechatChannel {
                 }
             })
         };
+        let notifier = {
+            let config = self.wechat_config;
+            let client = Arc::clone(&wechat_client);
+            let (rx, mut tx) = tokio::sync::mpsc::channel(32);
+            tokio::spawn(async move {
+                while let Some(Notify { content, .. }) = tx.recv().await {
+                    let session_id = config.session_id();
+                    if session_id
+                        .settings(config)
+                        .map(|it| it.show_connected)
+                        .unwrap_or(false)
+                    {
+                        if let Ok(message) =
+                            Self::create_robot_messages_actual(&session_id, content)
+                        {
+                            let _ = message.send(&client).await;
+                        }
+                    }
+                }
+            });
+            rx.into()
+        };
         *guard = Some(wechat_client);
-        Ok((self, join_handle))
+        Ok((self, notifier, join_handle))
     }
 
     fn context(&self) -> &'static ChannelContext {
         self.context
     }
 
-    async fn client(&self) -> crate::Result<Arc<Self::Client>> {
+    async fn client(&self) -> crate::Result<Self::Client> {
         self.wechat_client
             .read()
             .await
@@ -117,7 +145,7 @@ impl Channel for WechatChannel {
 
     async fn handle_agent_message(
         &self,
-        wechat: Arc<Self::Client>,
+        wechat: &Self::Client,
         _message_from: Arc<dyn Agent>,
         receiver: &mut Receiver<crate::Result<ChannelMessage>>,
     ) -> crate::Result<()> {
@@ -129,7 +157,7 @@ impl Channel for WechatChannel {
                 Ok(message) => {
                     match self
                         .handle_agent_message_actual(
-                            &wechat,
+                            wechat,
                             typing_ticket.as_ref(),
                             &message,
                             state,
@@ -159,5 +187,43 @@ impl Channel for WechatChannel {
 
     fn allow_session_ids(&self) -> crate::Result<Vec<&SessionId>> {
         Ok(vec![&self.wechat_config.session_id()])
+    }
+}
+
+impl WechatChannel {
+    fn create_robot_messages<Content: Into<MessageItems>>(
+        _: &WechatClient,
+        _: &dyn Agent,
+        session_id: &SessionId,
+        _: &ChannelContext,
+        content: Content,
+    ) -> crate::Result<WechatRobotMessage> {
+        Self::create_robot_messages_actual(session_id, content)
+    }
+
+    fn create_robot_messages_actual<Content: Into<MessageItems>>(
+        session_id: &SessionId,
+        content: Content,
+    ) -> crate::Result<WechatRobotMessage> {
+        let message = match &session_id {
+            SessionId::Master { .. } | SessionId::Anonymous { .. } => WechatRobotMessage {
+                content: content.into(),
+            },
+            SessionId::Group { .. } => {
+                unreachable!("send robot message to group is not supported by wechat")
+            }
+        };
+        Ok(message)
+    }
+}
+
+struct WechatRobotMessage {
+    content: MessageItems,
+}
+
+impl WechatRobotMessage {
+    async fn send(self, wechat: &WechatClient) -> crate::Result<()> {
+        let _ = wechat.send_message(self.content).await?;
+        Ok(())
     }
 }
