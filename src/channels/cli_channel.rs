@@ -1,5 +1,5 @@
 use crate::agent::{
-    Agent, AgentRequest, AgentResponse, AgentVisitor, DelegatedAgent, MainAgent, Notify,
+    AgentRequest, AgentResponse, AgentVisitor, DelegatedAgent, MainAgent, Notify,
 };
 use crate::channels::console_cmd::Console;
 use crate::channels::{
@@ -135,7 +135,6 @@ impl Channel for CliChannel {
     async fn handle_agent_message(
         &self,
         _: &Self::Client,
-        _message_from: Arc<dyn Agent>,
         receiver: &mut Receiver<crate::Result<ChannelMessage>>,
     ) -> crate::Result<()> {
         let mut state = AgentRespState::Init;

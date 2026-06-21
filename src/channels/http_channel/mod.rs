@@ -175,7 +175,6 @@ impl Channel for HttpChannel {
     async fn handle_agent_message(
         &self,
         http_client: &Self::Client,
-        _message_from: Arc<dyn Agent>,
         receiver: &mut Receiver<crate::Result<ChannelMessage>>,
     ) -> crate::Result<()> {
         let mut state = AgentRespState::Wait;

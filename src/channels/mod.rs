@@ -2,7 +2,6 @@ use crate::agent::{Agent, AgentId, AgentRegistry, AgentRequest, AgentResponse};
 use crate::config::{Config, Workspace};
 use async_trait::async_trait;
 use derive_more::{Deref, From};
-use std::sync::Arc;
 use strum::Display;
 use tokio::sync::mpsc::{Receiver, Sender};
 
@@ -62,9 +61,7 @@ where
         let agent = self.context().agent_registry.get(&req.agent_id).await?;
         let mut receiver = spawn_agent_request::apply(&*agent, req).await?;
         let join_handle = tokio::spawn(async move {
-            let _ = self
-                .handle_agent_message(&client, agent, &mut receiver)
-                .await;
+            let _ = self.handle_agent_message(&client, &mut receiver).await;
         });
         Ok(join_handle)
     }
@@ -72,7 +69,6 @@ where
     async fn handle_agent_message(
         &self,
         client: &Self::Client,
-        message_from: Arc<dyn Agent>,
         receiver: &mut Receiver<crate::Result<ChannelMessage>>,
     ) -> crate::Result<()>;
 

@@ -125,7 +125,6 @@ impl Channel for DingtalkChannel {
     async fn handle_agent_message(
         &self,
         dingtalk: &Self::Client,
-        _message_from: Arc<dyn Agent>,
         receiver: &mut Receiver<crate::Result<ChannelMessage>>,
     ) -> crate::Result<()> {
         let mut state = AgentRespState::Wait;

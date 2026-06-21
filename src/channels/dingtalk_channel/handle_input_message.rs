@@ -1,4 +1,4 @@
-use crate::agent::{Agent, AgentRequest, AgentVisitor, DelegatedAgent};
+use crate::agent::{AgentRequest, AgentVisitor, DelegatedAgent};
 use crate::channels::console_cmd::Console;
 use crate::channels::dingtalk_channel::DingtalkChannel;
 use crate::channels::{Channel, GroupUserId, SessionId, session_id};
@@ -248,11 +248,7 @@ impl dingtalk_stream::handlers::CallbackHandler for DingTalkCallbackHandler {
                     let channel = self.channel;
                     let _ = tokio::spawn(async move {
                         let _ = channel
-                            .handle_agent_message(
-                                &dingtalk_client,
-                                Arc::clone(&channel.agent) as Arc<dyn Agent>,
-                                &mut receiver,
-                            )
+                            .handle_agent_message(&dingtalk_client, &mut receiver)
                             .await;
                     });
                     return Ok(HandlerResp::Text("cmd submitted".to_string()));
